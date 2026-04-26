@@ -106,6 +106,7 @@ jobs:
           KBIZ_USERNAME=${KBIZ_USERNAME}
           KBIZ_PASSWORD=${KBIZ_PASSWORD}
           SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+          PAYROLL_PORT=3002
           EOF
           chmod 600 .env
 
