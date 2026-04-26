@@ -1,0 +1,131 @@
+name: Build, push, and deploy payroll
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Mirrors the new-hotel pattern:
+#   • Build images on GitHub-hosted runners (fast, parallel, GHA build cache)
+#   • Push to ghcr.io (image registry)
+#   • Deploy on the self-hosted runner installed on evergreen
+#     (`actions.runner.thehfhotel.evergreen.service`) — it pulls from ghcr
+#     and brings the stack up. No inbound SSH needed.
+
+env:
+  REGISTRY: ghcr.io
+
+concurrency:
+  group: deploy-evergreen-payroll
+  cancel-in-progress: false
+
+jobs:
+  build-payroll:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}:latest
+            ${{ env.REGISTRY }}/${{ github.repository }}:${{ github.sha }}
+          cache-from: type=gha,scope=payroll
+          cache-to: type=gha,mode=max,scope=payroll
+
+  build-kbiz-bot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: kbiz-bot/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}-kbiz-bot:latest
+            ${{ env.REGISTRY }}/${{ github.repository }}-kbiz-bot:${{ github.sha }}
+          cache-from: type=gha,scope=kbiz-bot
+          cache-to: type=gha,mode=max,scope=kbiz-bot
+
+  deploy:
+    needs: [build-payroll, build-kbiz-bot]
+    runs-on: [self-hosted, linux]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy
+        env:
+          KBIZ_USERNAME: ${{ secrets.KBIZ_USERNAME }}
+          KBIZ_PASSWORD: ${{ secrets.KBIZ_PASSWORD }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          set -e
+          DEPLOY_DIR=/home/nut/payroll-production
+
+          mkdir -p "$DEPLOY_DIR"
+          cp docker-compose.yml "$DEPLOY_DIR/"
+
+          cd "$DEPLOY_DIR"
+
+          # Heredoc-write of .env. Values may contain '=', '&', etc — heredoc
+          # substitutes the variable as-is without shell interpretation.
+          cat > .env <<EOF
+          KBIZ_USERNAME=${KBIZ_USERNAME}
+          KBIZ_PASSWORD=${KBIZ_PASSWORD}
+          SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+          EOF
+          chmod 600 .env
+
+          # Sanity (lengths only — never the values)
+          echo "--- .env ---"
+          while IFS= read -r line; do
+            key="${line%%=*}"; val="${line#*=}"
+            echo "  $key = (${#val} chars)"
+          done < .env
+          echo "---"
+
+          docker compose pull
+          docker compose up -d --remove-orphans
+          docker compose ps
+
+      - name: Tail logs
+        if: always()
+        run: |
+          cd /home/nut/payroll-production || exit 0
+          echo "--- payroll-form (last 30) ---"
+          docker compose logs --tail=30 payroll || true
+          echo "--- kbiz-bot (last 30) ---"
+          docker compose logs --tail=30 kbiz-bot || true
