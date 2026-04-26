@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { withSession, ensureLoggedIn, gotoAuthenticated } from "./lib/session";
+import { withSession, gotoAuthenticated } from "./lib/session";
+import { scrapeRegisteredAccounts } from "./lib/scrape-registered";
 import { waitForMobileConfirmation } from "./wait";
 
 const ADD_URL = "https://kbiz.kasikornbank.com/menu/setting/account-list/account-payroll";
@@ -19,6 +20,12 @@ async function main() {
 
   await withSession(async (_ctx, page) => {
     await gotoAuthenticated(page, ADD_URL);
+
+    // Refresh local cache while we're on the page anyway. This catches manual
+    // adds/removals done outside the bot since the last scrape.
+    console.log("→ Refresh registered list (we're already here)");
+    const beforeReg = await scrapeRegisteredAccounts(page);
+    console.log(`   ✓ ${beforeReg.count} registered accounts now cached`);
 
     console.log("→ Click 'Add Account' / 'เพิ่มบัญชี'");
     await page
@@ -143,7 +150,19 @@ async function main() {
 
     await page.screenshot({ path: "after-confirm.png", fullPage: true });
     console.log(`   final URL: ${page.url()}`);
-    console.log("\n✅ Add-payroll flow complete. Run 'npm run list' to refresh registered status.");
+
+    // Best-effort post-success refresh: navigate back to the list page so the
+    // newly-added account is cached without needing a separate `npm run list`.
+    try {
+      await gotoAuthenticated(page, ADD_URL);
+      const afterReg = await scrapeRegisteredAccounts(page);
+      console.log(`✓ Registered list refreshed: ${afterReg.count} accounts (was ${beforeReg.count}).`);
+    } catch (e) {
+      console.log("⚠️  Post-confirm refresh failed:", (e as Error).message);
+      console.log("   Run 'npm run list' manually to update the cache.");
+    }
+
+    console.log("\n✅ Add-payroll flow complete.");
     await page.waitForTimeout(2_000);
   });
 }
