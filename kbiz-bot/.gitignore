@@ -2,8 +2,12 @@ node_modules/
 bun.lockb
 .env
 storageState.json
+browser-data/
 playwright-report/
 test-results/
 *.png
 *.webm
+*.xlsx
+*.json
 trace.zip
+!package.json

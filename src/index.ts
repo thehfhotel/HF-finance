@@ -4,6 +4,7 @@ import { buildWorkbook, buildBeneficiaryWorkbook } from "./excel";
 import { MAIN_HTML } from "./views/main";
 import { ACCOUNTS_HTML } from "./views/accounts";
 import { addAccount, deleteAccount, listAccounts, updateAccount } from "./store";
+import { loadRegistered, registeredSet } from "./registered";
 
 const html = (body: string) =>
   new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
@@ -28,7 +29,12 @@ const app = new Elysia()
   .get("/static/flatpickr-th.js", () => staticFile("node_modules/flatpickr/dist/l10n/th.js", "application/javascript; charset=utf-8"))
   .get("/static/html2canvas.js", () => staticFile("node_modules/html2canvas/dist/html2canvas.min.js", "application/javascript; charset=utf-8"))
 
-  .get("/api/accounts", () => listAccounts())
+  .get("/api/accounts", async () => {
+    const accounts = await listAccounts();
+    const reg = await registeredSet();
+    return accounts.map((a) => ({ ...a, registered: reg.has(a.accountNumber) }));
+  })
+  .get("/api/registered", async () => (await loadRegistered()) ?? { fetchedAt: null, count: 0, accounts: [] })
   .post("/api/accounts", ({ body }) => addAccount(body), { body: accountBody })
   .put("/api/accounts/:id", ({ params, body }) => updateAccount(params.id, body), { body: accountBody })
   .delete("/api/accounts/:id", async ({ params, set }) => {
@@ -40,10 +46,20 @@ const app = new Elysia()
   .post(
     "/generate-beneficiary",
     async ({ body, set }) => {
-      const buf = await buildBeneficiaryWorkbook(body.accounts);
+      // KBIZ rejects uploads containing already-registered accounts.
+      // Filter them out here using the latest scrape from kbiz-bot.
+      const reg = await registeredSet();
+      const filtered = body.accounts.filter((a) => !reg.has(a.accountNumber));
+      const skipped = body.accounts.length - filtered.length;
+      if (filtered.length === 0) {
+        set.status = 400;
+        return `บัญชีที่เลือกทั้งหมด (${skipped}) ลงทะเบียนกับ KBIZ แล้ว`;
+      }
+      const buf = await buildBeneficiaryWorkbook(filtered);
       const stamp = new Date().toISOString().slice(0, 10);
       set.headers["content-type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
       set.headers["content-disposition"] = `attachment; filename="KBIZAddBeneficiary-${stamp}.xlsx"`;
+      if (skipped > 0) set.headers["x-skipped-registered"] = String(skipped);
       return buf;
     },
     {

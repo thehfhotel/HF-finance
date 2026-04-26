@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "login": "node --import tsx --env-file=.env src/login.ts",
-    "verify": "node --import tsx src/verify-session.ts",
+    "verify": "node --import tsx --env-file=.env src/verify-session.ts",
+    "list": "node --import tsx --env-file=.env src/list-payroll-accounts.ts",
+    "add-payroll": "node --import tsx --env-file=.env src/add-payroll.ts",
     "install-browser": "bunx playwright install chromium"
   },
   "dependencies": {
