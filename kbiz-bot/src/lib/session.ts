@@ -47,22 +47,38 @@ async function loginFlow(page: Page): Promise<void> {
  * /error, /login, or /authen — recover by re-running loginFlow once and
  * retrying the target. The /error page even tells the user "Go to login
  * page"; we just do that programmatically.
+ *
+ * KBIZ does an async session check after initial render, so we stabilize
+ * for a moment before judging the URL.
  */
 export async function gotoAuthenticated(page: Page, url: string): Promise<void> {
-  console.log("→ Navigating to", url);
-  await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
-
-  if (isUnauthenticatedUrl(page.url())) {
-    console.log("   bounced to", page.url(), "— recovering");
-    await loginFlow(page);
-    console.log("→ Retrying", url);
+  const tryOnce = async () => {
     await page.goto(url, { waitUntil: "domcontentloaded" });
     await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
-    if (isUnauthenticatedUrl(page.url())) {
-      throw new Error(`After re-login still bouncing — final URL: ${page.url()}`);
+    // KBIZ runs an async session check on every navigation — sometimes it
+    // takes 2-5 seconds before the SPA decides to bounce to /error. We
+    // poll the URL + the visible "session expired" text up to 6s, and
+    // declare success only if neither shows up.
+    for (let i = 0; i < 12; i++) {
+      await page.waitForTimeout(500);
+      if (isUnauthenticatedUrl(page.url())) return false;
+      const sessionDead = await page
+        .evaluate(() => /Sorry[\s\S]+session has expired|session expired or you are signed in/i.test((document.body as HTMLElement).innerText))
+        .catch(() => false);
+      if (sessionDead) return false;
     }
-  }
+    return !isUnauthenticatedUrl(page.url());
+  };
+
+  console.log("→ Navigating to", url);
+  if (await tryOnce()) return;
+
+  console.log("   bounced to", page.url(), "— recovering");
+  await loginFlow(page);
+  console.log("→ Retrying", url);
+  if (await tryOnce()) return;
+
+  throw new Error(`After re-login still bouncing — final URL: ${page.url()}`);
 }
 
 export async function ensureLoggedIn(page: Page): Promise<void> {
