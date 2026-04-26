@@ -4,3 +4,5 @@ data/
 sample-output.xlsx
 *.jpg
 .DS_Store
+.env
+storageState.json

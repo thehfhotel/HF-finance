@@ -1,0 +1,16 @@
+{
+  "name": "kbiz-bot",
+  "module": "src/login.ts",
+  "type": "module",
+  "scripts": {
+    "login": "node --import tsx --env-file=.env src/login.ts",
+    "verify": "node --import tsx src/verify-session.ts",
+    "install-browser": "bunx playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
+  }
+}

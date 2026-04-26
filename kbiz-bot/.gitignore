@@ -1,0 +1,9 @@
+node_modules/
+bun.lockb
+.env
+storageState.json
+playwright-report/
+test-results/
+*.png
+*.webm
+trace.zip
