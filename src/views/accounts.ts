@@ -43,6 +43,7 @@ export const ACCOUNTS_HTML = `<!doctype html>
   <nav>
     <a href="/">สร้างไฟล์</a>
     <a href="/accounts" class="active">จัดการบัญชี</a>
+    <a href="/approvals">คิวอนุมัติ</a>
   </nav>
 </header>
 
@@ -73,8 +74,8 @@ export const ACCOUNTS_HTML = `<!doctype html>
     <tbody id="accountsBody"></tbody>
   </table>
   <div class="actions">
-    <button type="button" id="downloadBeneficiary" class="primary">ดาวน์โหลดไฟล์ลงทะเบียนผู้รับเงิน (.xlsx)</button>
-    <span class="hint">ติ๊กเฉพาะบัญชีที่ <em>ยังไม่ได้ลงทะเบียน</em> — บัญชีที่ลงทะเบียนกับ KBIZ แล้วจะถูกข้ามอัตโนมัติ</span>
+    <button type="button" id="submitAddPayroll" class="primary">ส่งคำขออนุมัติเพิ่มบัญชี</button>
+    <span class="hint">ติ๊กเฉพาะบัญชีที่ <em>ยังไม่ได้ลงทะเบียน</em> — ผู้อนุมัติจะตรวจสอบที่ <a href="/approvals">คิวอนุมัติ</a> ก่อนส่งให้ KBIZ</span>
   </div>
   <div id="listMsg"></div>
 </fieldset>
@@ -213,7 +214,7 @@ document.getElementById("selectAll").addEventListener("change", (e) => {
   }
 });
 
-document.getElementById("downloadBeneficiary").addEventListener("click", async () => {
+document.getElementById("submitAddPayroll").addEventListener("click", async () => {
   setMsg(listMsg, "");
   const accounts = [];
   for (const tr of tbody.querySelectorAll("tr[data-id]")) {
@@ -228,24 +229,20 @@ document.getElementById("downloadBeneficiary").addEventListener("click", async (
     setMsg(listMsg, "กรุณาติ๊กบัญชีอย่างน้อย 1 รายการ", "err");
     return;
   }
-  const res = await fetch("/generate-beneficiary", {
+  const res = await fetch("/api/queue/add-payroll", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ accounts }),
   });
   if (!res.ok) {
-    setMsg(listMsg, "สร้างไฟล์ไม่สำเร็จ: " + (await res.text()), "err");
+    setMsg(listMsg, "ส่งคำขอไม่สำเร็จ: " + (await res.text()), "err");
     return;
   }
-  const blob = await res.blob();
-  const cd = res.headers.get("content-disposition") || "";
-  const m = cd.match(/filename="([^"]+)"/);
-  const filename = m ? m[1] : "KBIZAddBeneficiary.xlsx";
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
-  setMsg(listMsg, \`ดาวน์โหลด \${accounts.length} รายการแล้ว\`, "ok");
+  const req = await res.json();
+  listMsg.className = "ok";
+  listMsg.innerHTML =
+    "✓ ส่งคำขออนุมัติแล้ว · ID: <code>" + req.id + "</code> · " +
+    '<a href="/approvals">ตรวจสอบที่คิวอนุมัติ</a>';
 });
 
 refresh();

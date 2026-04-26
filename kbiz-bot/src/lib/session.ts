@@ -8,9 +8,10 @@ const DASHBOARD_URL = "https://kbiz.kasikornbank.com/menu/account/account-summar
 const isUnauthenticatedUrl = (url: string) => /\/error\b|\/login(\?|$)|\/authen\//.test(url);
 
 export async function withSession<T>(fn: (ctx: BrowserContext, page: Page) => Promise<T>): Promise<T> {
+  const headless = process.env.KBIZ_HEADLESS === "1";
   const ctx = await chromium.launchPersistentContext(USER_DATA_DIR, {
-    headless: false,
-    slowMo: 50,
+    headless,
+    slowMo: headless ? 0 : 50,
     viewport: { width: 1366, height: 800 },
   });
   ctx.on("page", (p) =>
