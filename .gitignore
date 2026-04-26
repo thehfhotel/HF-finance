@@ -1,0 +1,6 @@
+node_modules/
+bun.lockb
+data/
+sample-output.xlsx
+*.jpg
+.DS_Store
