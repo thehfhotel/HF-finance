@@ -49,6 +49,10 @@ session cookies — survive rebuilds).
 
 **Repository secrets** (already set):
 
+> Set with `gh secret set NAME --body "$VALUE"` (NOT `--body -`). The
+> dash form treats literal `-` as the value; if you wanted to pipe
+> via stdin, drop `--body` entirely: `printf '%s' "$VAL" | gh secret set NAME`.
+
 | name                | use                                         |
 | ------------------- | ------------------------------------------- |
 | `KBIZ_USERNAME`     | KBIZ login                                  |
