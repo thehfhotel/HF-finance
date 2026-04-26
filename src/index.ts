@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import { readFile } from "node:fs/promises";
+import { randomInt } from "node:crypto";
 import { buildWorkbook, buildBeneficiaryWorkbook } from "./excel";
 import { MAIN_HTML } from "./views/main";
 import { ACCOUNTS_HTML } from "./views/accounts";
@@ -21,6 +22,14 @@ const accountBody = t.Object({
   accountNumber: t.String({ pattern: "^[0-9\\-\\s]{6,30}$" }),
   accountName: t.String({ minLength: 1, maxLength: 100 }),
 });
+
+// In-memory OTP challenges keyed by request id. Lost on restart (rare and
+// safe — approver just requests a new OTP). Each entry: 6-digit code, TTL,
+// attempt counter.
+const OTP_TTL_MS = 5 * 60_000;
+const OTP_MAX_ATTEMPTS = 5;
+const otpChallenges = new Map<string, { otp: string; expiresAt: number; attempts: number }>();
+const newOtp = () => String(randomInt(100000, 1_000_000));
 
 const app = new Elysia()
   .get("/", () => html(MAIN_HTML))
@@ -168,18 +177,53 @@ const app = new Elysia()
     return buf;
   })
   .post(
-    "/api/queue/:id/approve",
+    "/api/queue/:id/request-otp",
     async ({ params, set }) => {
       const existing = await getRequest(params.id);
       if (!existing) { set.status = 404; return "not found"; }
+      if (existing.status !== "pending") { set.status = 409; return `cannot OTP-challenge (status: ${existing.status})`; }
+      const otp = newOtp();
+      const expiresAt = Date.now() + OTP_TTL_MS;
+      otpChallenges.set(params.id, { otp, expiresAt, attempts: 0 });
+      await notifySlack(
+        `:closed_lock_with_key: *OTP เพื่ออนุมัติ* \`${existing.id}\` (${existing.type})\n` +
+          `OTP: \`${otp}\`  (5 นาที)`
+      );
+      return { sent: true };
+    }
+  )
+  .post(
+    "/api/queue/:id/approve",
+    async ({ params, body, set }) => {
+      const existing = await getRequest(params.id);
+      if (!existing) { set.status = 404; return "not found"; }
       if (existing.status !== "pending") { set.status = 409; return `cannot approve (status: ${existing.status})`; }
+      const ch = otpChallenges.get(params.id);
+      if (!ch) { set.status = 400; return "ยังไม่ได้ขอ OTP — กดปุ่มอนุมัติใหม่อีกครั้ง"; }
+      if (Date.now() > ch.expiresAt) {
+        otpChallenges.delete(params.id);
+        set.status = 400;
+        return "OTP หมดอายุแล้ว กรุณาขอ OTP ใหม่";
+      }
+      ch.attempts++;
+      if (ch.attempts > OTP_MAX_ATTEMPTS) {
+        otpChallenges.delete(params.id);
+        set.status = 429;
+        return "ลอง OTP เกินจำนวนที่อนุญาต กรุณาขอ OTP ใหม่";
+      }
+      if (ch.otp !== body.otp.trim()) {
+        set.status = 400;
+        return `OTP ไม่ถูกต้อง (ลอง ${ch.attempts}/${OTP_MAX_ATTEMPTS})`;
+      }
+      otpChallenges.delete(params.id);
       const updated = await updateRequest(params.id, {
         status: "approved",
         approvedAt: new Date().toISOString(),
       });
       await notifySlack(`:white_check_mark: Approved \`${updated.id}\` (${updated.type}) — ready for KBIZ`);
       return updated;
-    }
+    },
+    { body: t.Object({ otp: t.String({ pattern: "^\\d{6}$" }) }) }
   )
   .post(
     "/api/queue/:id/reject",

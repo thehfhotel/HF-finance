@@ -46,6 +46,14 @@ export const APPROVALS_HTML = `<!doctype html>
   .ok { color: #047857; }
   details summary { cursor: pointer; color: #1d4ed8; font-size: 14px; user-select: none; }
   details[open] summary { margin-bottom: 8px; }
+  dialog { border: 1px solid #d1d5db; border-radius: 8px; padding: 0; max-width: 420px; width: 92%; }
+  dialog::backdrop { background: rgba(15,23,42,0.5); }
+  dialog .body { padding: 18px 22px; }
+  dialog h3 { margin: 0 0 8px; font-size: 18px; }
+  dialog p { margin: 0 0 14px; color: #4b5563; font-size: 14px; }
+  dialog input { font: 24px/1.2 monospace; padding: 10px 14px; width: 100%; box-sizing: border-box; letter-spacing: 4px; text-align: center; border: 1px solid #ccc; border-radius: 6px; }
+  dialog .actions { margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end; }
+  dialog .err { color: #b91c1c; margin-top: 8px; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -75,11 +83,59 @@ export const APPROVALS_HTML = `<!doctype html>
   <div id="list"></div>
 </fieldset>
 
+<dialog id="otpDialog">
+  <div class="body">
+    <h3>กรอก OTP</h3>
+    <p>ระบบส่ง OTP ไปที่ Slack แล้ว ดู OTP จาก Slack แล้วกรอกที่นี่ (อายุ 5 นาที)</p>
+    <input id="otpInput" type="text" inputmode="numeric" pattern="\\d{6}" maxlength="6" autocomplete="off">
+    <div class="err" id="otpErr"></div>
+    <div class="actions">
+      <button type="button" id="otpCancel">ยกเลิก</button>
+      <button type="button" id="otpSubmit" class="primary">ยืนยันอนุมัติ</button>
+    </div>
+  </div>
+</dialog>
+
 <script>
 const list = document.getElementById("list");
 const meta = document.getElementById("meta");
 let currentFilter = "all";
 let cache = [];
+
+const otpDialog = document.getElementById("otpDialog");
+const otpInput = document.getElementById("otpInput");
+const otpErr = document.getElementById("otpErr");
+const otpSubmit = document.getElementById("otpSubmit");
+const otpCancel = document.getElementById("otpCancel");
+let otpTargetId = null;
+
+otpCancel.addEventListener("click", () => otpDialog.close());
+otpDialog.addEventListener("close", () => { otpTargetId = null; otpInput.value = ""; otpErr.textContent = ""; });
+otpInput.addEventListener("input", () => { otpErr.textContent = ""; });
+otpSubmit.addEventListener("click", () => submitOtp());
+otpInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submitOtp(); });
+
+async function submitOtp() {
+  if (!otpTargetId) return;
+  const otp = otpInput.value.trim();
+  if (!/^\\d{6}$/.test(otp)) { otpErr.textContent = "OTP ต้องเป็นตัวเลข 6 หลัก"; return; }
+  otpSubmit.disabled = true;
+  try {
+    const res = await fetch(\`/api/queue/\${otpTargetId}/approve\`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ otp }),
+    });
+    if (!res.ok) {
+      otpErr.textContent = await res.text();
+      return;
+    }
+    otpDialog.close();
+    await refresh();
+  } finally {
+    otpSubmit.disabled = false;
+  }
+}
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -218,22 +274,27 @@ async function refresh() {
 }
 
 async function handleAction(action, id) {
-  let body = undefined;
-  if (action === "reject") {
-    const reason = prompt("เหตุผลที่ปฏิเสธ (ไม่ระบุก็ได้):");
-    if (reason === null) return; // user cancelled
-    body = JSON.stringify({ reason: reason || undefined });
-  }
-  const res = await fetch(\`/api/queue/\${id}/\${action}\`, {
-    method: "POST",
-    headers: body ? { "content-type": "application/json" } : {},
-    body,
-  });
-  if (!res.ok) {
-    alert("ไม่สำเร็จ: " + (await res.text()));
+  if (action === "approve") {
+    const res = await fetch(\`/api/queue/\${id}/request-otp\`, { method: "POST" });
+    if (!res.ok) { alert("ส่ง OTP ไปยัง Slack ไม่สำเร็จ: " + (await res.text())); return; }
+    otpTargetId = id;
+    otpErr.textContent = "";
+    otpInput.value = "";
+    otpDialog.showModal();
+    setTimeout(() => otpInput.focus(), 50);
     return;
   }
-  await refresh();
+  if (action === "reject") {
+    const reason = prompt("เหตุผลที่ปฏิเสธ (ไม่ระบุก็ได้):");
+    if (reason === null) return;
+    const res = await fetch(\`/api/queue/\${id}/reject\`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: reason || undefined }),
+    });
+    if (!res.ok) { alert("ไม่สำเร็จ: " + (await res.text())); return; }
+    await refresh();
+  }
 }
 
 document.getElementById("filter").addEventListener("click", (e) => {
