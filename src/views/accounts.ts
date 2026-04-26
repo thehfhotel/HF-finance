@@ -30,6 +30,11 @@ export const ACCOUNTS_HTML = `<!doctype html>
   .empty { color: #9ca3af; padding: 8px; text-align: center; }
   .actions { margin-top: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
   .hint { color: #6b7280; font-size: 13px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+  .badge-ok { background: #d1fae5; color: #047857; }
+  .badge-pending { background: #fef3c7; color: #92400e; }
+  tr.registered td { color: #6b7280; }
+  tr.registered td input.select { opacity: 0.4; }
 </style>
 </head>
 <body>
@@ -53,13 +58,15 @@ export const ACCOUNTS_HTML = `<!doctype html>
 
 <fieldset>
   <legend>บัญชีทั้งหมด</legend>
+  <div class="hint" id="syncMeta" style="margin-bottom:8px;"></div>
   <table>
     <thead>
       <tr>
         <th style="width:40px"><input type="checkbox" id="selectAll"></th>
         <th style="width:48px">#</th>
-        <th style="width:25%">เลขบัญชี</th>
+        <th style="width:23%">เลขบัญชี</th>
         <th>ชื่อบัญชี</th>
+        <th style="width:120px">สถานะ KBIZ</th>
         <th style="width:160px"></th>
       </tr>
     </thead>
@@ -67,7 +74,7 @@ export const ACCOUNTS_HTML = `<!doctype html>
   </table>
   <div class="actions">
     <button type="button" id="downloadBeneficiary" class="primary">ดาวน์โหลดไฟล์ลงทะเบียนผู้รับเงิน (.xlsx)</button>
-    <span class="hint">ติ๊กบัญชีที่ต้องการลงทะเบียนกับธนาคาร แล้วกดปุ่มเพื่อดาวน์โหลดไฟล์ จากนั้นนำไปอัปโหลดที่ KBIZ</span>
+    <span class="hint">ติ๊กเฉพาะบัญชีที่ <em>ยังไม่ได้ลงทะเบียน</em> — บัญชีที่ลงทะเบียนกับ KBIZ แล้วจะถูกข้ามอัตโนมัติ</span>
   </div>
   <div id="listMsg"></div>
 </fieldset>
@@ -99,11 +106,17 @@ function viewRow(a, idx) {
   tr.dataset.id = a.id;
   tr.dataset.accountNumber = a.accountNumber;
   tr.dataset.accountName = a.accountName;
+  if (a.registered) tr.classList.add("registered");
+  tr.dataset.registered = a.registered ? "1" : "0";
+  const statusBadge = a.registered
+    ? '<span class="badge badge-ok">ลงทะเบียนแล้ว</span>'
+    : '<span class="badge badge-pending">ยังไม่ลง</span>';
   tr.innerHTML = \`
-    <td><input type="checkbox" class="select"></td>
+    <td><input type="checkbox" class="select"\${a.registered ? "" : ""}></td>
     <td>\${idx + 1}</td>
     <td class="acct">\${escapeHtml(formatAccount(a.accountNumber))}</td>
     <td>\${escapeHtml(a.accountName)}</td>
+    <td>\${statusBadge}</td>
     <td class="row-actions">
       <button type="button" class="edit">แก้ไข</button>
       <button type="button" class="danger del">ลบ</button>
@@ -119,6 +132,7 @@ function editRow(tr, a) {
     <td>—</td>
     <td><input class="acct-in" type="text" value="\${escapeHtml(formatAccount(a.accountNumber))}"></td>
     <td><input class="name-in" type="text" value="\${escapeHtml(a.accountName)}"></td>
+    <td></td>
     <td class="row-actions">
       <button type="button" class="primary save">บันทึก</button>
       <button type="button" class="cancel">ยกเลิก</button>
@@ -150,12 +164,21 @@ async function delRow(a) {
 
 async function refresh() {
   setMsg(listMsg, "");
-  const res = await fetch("/api/accounts");
-  if (!res.ok) { setMsg(listMsg, "โหลดข้อมูลไม่สำเร็จ", "err"); return; }
-  const list = await res.json();
+  const [accountsRes, regRes] = await Promise.all([fetch("/api/accounts"), fetch("/api/registered")]);
+  if (!accountsRes.ok) { setMsg(listMsg, "โหลดข้อมูลไม่สำเร็จ", "err"); return; }
+  const list = await accountsRes.json();
+  const reg = regRes.ok ? await regRes.json() : { fetchedAt: null, count: 0 };
+  const meta = document.getElementById("syncMeta");
+  if (reg.fetchedAt) {
+    const d = new Date(reg.fetchedAt);
+    const stamp = \`\${String(d.getDate()).padStart(2,"0")}/\${String(d.getMonth()+1).padStart(2,"0")}/\${d.getFullYear()+543} \${String(d.getHours()).padStart(2,"0")}:\${String(d.getMinutes()).padStart(2,"0")}\`;
+    meta.textContent = \`อัปเดตสถานะ KBIZ ล่าสุด: \${stamp} · ลงทะเบียนแล้ว \${reg.count} บัญชี\`;
+  } else {
+    meta.textContent = "ยังไม่เคยซิงค์สถานะ KBIZ — รัน 'npm run list' ใน kbiz-bot เพื่อดึงรายการบัญชีที่ลงทะเบียนแล้ว";
+  }
   tbody.innerHTML = "";
   if (list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty">ยังไม่มีบัญชี</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">ยังไม่มีบัญชี</td></tr>';
     return;
   }
   list.forEach((a, i) => tbody.appendChild(viewRow(a, i)));
@@ -181,7 +204,13 @@ document.getElementById("addBtn").addEventListener("click", async () => {
 
 document.getElementById("selectAll").addEventListener("change", (e) => {
   const checked = e.target.checked;
-  tbody.querySelectorAll("input.select").forEach((cb) => { cb.checked = checked; });
+  // Select-all only ticks unregistered accounts (skipping the already-registered ones)
+  for (const tr of tbody.querySelectorAll("tr[data-id]")) {
+    const cb = tr.querySelector("input.select");
+    if (!cb) continue;
+    if (tr.dataset.registered === "1") cb.checked = false;
+    else cb.checked = checked;
+  }
 });
 
 document.getElementById("downloadBeneficiary").addEventListener("click", async () => {
