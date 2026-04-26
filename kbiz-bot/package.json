@@ -10,6 +10,7 @@
     "install-browser": "bunx playwright install chromium"
   },
   "dependencies": {
+    "fflate": "^0.8.2",
     "playwright": "^1.49.0"
   },
   "devDependencies": {
