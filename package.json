@@ -1,0 +1,14 @@
+{
+  "name": "payroll-form",
+  "module": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "elysia": "^1.1.25",
+    "fflate": "^0.8.2",
+    "flatpickr": "^4.6.13",
+    "html2canvas": "^1.4.1"
+  }
+}

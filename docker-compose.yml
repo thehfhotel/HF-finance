@@ -1,0 +1,9 @@
+services:
+  payroll:
+    build: .
+    container_name: payroll-form
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
