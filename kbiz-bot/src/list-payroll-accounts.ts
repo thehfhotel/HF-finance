@@ -1,17 +1,13 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { withSession, ensureLoggedIn } from "./lib/session";
+import { withSession, gotoAuthenticated } from "./lib/session";
 
 const LIST_URL = "https://kbiz.kasikornbank.com/menu/setting/account-list/account-payroll";
 // Write into the payroll-form's data/ dir (mounted as a volume by docker-compose)
 const OUT_PATH = resolve("..", "data", "kbiz-registered.json");
 
 await withSession(async (_ctx, page) => {
-  await ensureLoggedIn(page);
-
-  console.log("→ Opening", LIST_URL);
-  await page.goto(LIST_URL, { waitUntil: "domcontentloaded" });
-  await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
+  await gotoAuthenticated(page, LIST_URL);
   // Let Angular finish populating the table
   await page.waitForTimeout(1500);
 
