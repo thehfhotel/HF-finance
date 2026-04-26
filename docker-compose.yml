@@ -1,5 +1,6 @@
 services:
   payroll:
+    image: ghcr.io/thehfhotel/payroll:latest
     build: .
     container_name: payroll-form
     ports:
@@ -11,6 +12,7 @@ services:
     restart: unless-stopped
 
   kbiz-bot:
+    image: ghcr.io/thehfhotel/payroll-kbiz-bot:latest
     build:
       context: .
       dockerfile: kbiz-bot/Dockerfile
