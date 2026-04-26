@@ -8,6 +8,7 @@
     "list": "node --import tsx --env-file=.env src/list-payroll-accounts.ts",
     "add-payroll": "node --import tsx --env-file=.env src/add-payroll.ts",
     "transfer-payroll": "node --import tsx --env-file=.env src/transfer-payroll.ts",
+    "process-queue": "node --import tsx --env-file=.env src/process-queue.ts",
     "install-browser": "bunx playwright install chromium"
   },
   "dependencies": {

@@ -3,8 +3,11 @@ import { readFile } from "node:fs/promises";
 import { buildWorkbook, buildBeneficiaryWorkbook } from "./excel";
 import { MAIN_HTML } from "./views/main";
 import { ACCOUNTS_HTML } from "./views/accounts";
+import { APPROVALS_HTML } from "./views/approvals";
 import { addAccount, deleteAccount, listAccounts, updateAccount } from "./store";
 import { loadRegistered, registeredSet } from "./registered";
+import { getRequest, listRequests, submitRequest, updateRequest } from "./queue";
+import { notifySlack } from "./slack";
 
 const html = (body: string) =>
   new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
@@ -22,6 +25,7 @@ const accountBody = t.Object({
 const app = new Elysia()
   .get("/", () => html(MAIN_HTML))
   .get("/accounts", () => html(ACCOUNTS_HTML))
+  .get("/approvals", () => html(APPROVALS_HTML))
   .get("/health", () => "ok")
 
   .get("/static/flatpickr.css", () => staticFile("node_modules/flatpickr/dist/flatpickr.min.css", "text/css; charset=utf-8"))
@@ -75,6 +79,126 @@ const app = new Elysia()
     }
   )
 
+  .post(
+    "/api/queue/transfer",
+    async ({ body }) => {
+      const buf = await buildWorkbook(body);
+      const totalAmount = body.rows.reduce((s, r) => s + r.amount, 0);
+      const req = await submitRequest({
+        type: "transfer-payroll",
+        summary: {
+          type: "transfer-payroll",
+          effectiveDate: body.effectiveDate,
+          totalAmount: Math.round(totalAmount * 100) / 100,
+          rows: body.rows,
+        },
+        xlsxBuffer: buf,
+      });
+      const fmt = totalAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      await notifySlack(
+        `:moneybag: *Payroll transfer awaiting approval*\n` +
+          `• Effective: ${body.effectiveDate}\n` +
+          `• ${body.rows.length} recipient(s), total ฿${fmt}\n` +
+          `• Review: <http://localhost:3000/approvals|/approvals> (id: \`${req.id}\`)`
+      );
+      return req;
+    },
+    {
+      body: t.Object({
+        effectiveDate: t.String({ pattern: "^\\d{2}/\\d{2}/\\d{4}$" }),
+        rows: t.Array(
+          t.Object({
+            accountNumber: t.String({ minLength: 1, maxLength: 20 }),
+            accountName: t.String({ minLength: 1, maxLength: 100 }),
+            amount: t.Number({ exclusiveMinimum: 0 }),
+          }),
+          { minItems: 1, maxItems: 100 }
+        ),
+      }),
+    }
+  )
+
+  .post(
+    "/api/queue/add-payroll",
+    async ({ body, set }) => {
+      const reg = await registeredSet();
+      const filtered = body.accounts.filter((a) => !reg.has(a.accountNumber));
+      if (filtered.length === 0) {
+        set.status = 400;
+        return `บัญชีที่เลือกทั้งหมด (${body.accounts.length}) ลงทะเบียนกับ KBIZ แล้ว`;
+      }
+      const buf = await buildBeneficiaryWorkbook(filtered);
+      const req = await submitRequest({
+        type: "add-payroll",
+        summary: { type: "add-payroll", accounts: filtered },
+        xlsxBuffer: buf,
+      });
+      await notifySlack(
+        `:bust_in_silhouette: *Add Payroll Account awaiting approval*\n` +
+          `• ${filtered.length} new account(s)\n` +
+          `• Review: <http://localhost:3000/approvals|/approvals> (id: \`${req.id}\`)`
+      );
+      return req;
+    },
+    {
+      body: t.Object({
+        accounts: t.Array(
+          t.Object({
+            accountNumber: t.String({ minLength: 1, maxLength: 20 }),
+            accountName: t.String({ minLength: 1, maxLength: 100 }),
+          }),
+          { minItems: 1, maxItems: 100 }
+        ),
+      }),
+    }
+  )
+
+  .get("/api/queue", () => listRequests())
+  .get("/api/queue/:id", async ({ params, set }) => {
+    const req = await getRequest(params.id);
+    if (!req) { set.status = 404; return "not found"; }
+    return req;
+  })
+  .get("/api/queue/:id/xlsx", async ({ params, set }) => {
+    const req = await getRequest(params.id);
+    if (!req) { set.status = 404; return "not found"; }
+    const buf = await readFile(req.xlsxPath);
+    set.headers["content-type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    set.headers["content-disposition"] = `attachment; filename="${params.id}.xlsx"`;
+    return buf;
+  })
+  .post(
+    "/api/queue/:id/approve",
+    async ({ params, set }) => {
+      const existing = await getRequest(params.id);
+      if (!existing) { set.status = 404; return "not found"; }
+      if (existing.status !== "pending") { set.status = 409; return `cannot approve (status: ${existing.status})`; }
+      const updated = await updateRequest(params.id, {
+        status: "approved",
+        approvedAt: new Date().toISOString(),
+      });
+      await notifySlack(`:white_check_mark: Approved \`${updated.id}\` (${updated.type}) — ready for KBIZ`);
+      return updated;
+    }
+  )
+  .post(
+    "/api/queue/:id/reject",
+    async ({ params, body, set }) => {
+      const existing = await getRequest(params.id);
+      if (!existing) { set.status = 404; return "not found"; }
+      if (existing.status !== "pending") { set.status = 409; return `cannot reject (status: ${existing.status})`; }
+      const updated = await updateRequest(params.id, {
+        status: "rejected",
+        rejectedAt: new Date().toISOString(),
+        rejectionReason: body?.reason,
+      });
+      await notifySlack(`:x: Rejected \`${updated.id}\` (${updated.type})${body?.reason ? ` — ${body.reason}` : ""}`);
+      return updated;
+    },
+    { body: t.Optional(t.Object({ reason: t.Optional(t.String({ maxLength: 500 })) })) }
+  )
+
+  // Legacy direct-download endpoints (PoC, kept as fallback)
   .post(
     "/generate",
     async ({ body, set }) => {

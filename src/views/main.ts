@@ -62,6 +62,7 @@ export const MAIN_HTML = `<!doctype html>
   <nav>
     <a href="/" class="active">สร้างไฟล์</a>
     <a href="/accounts">จัดการบัญชี</a>
+    <a href="/approvals">คิวอนุมัติ</a>
   </nav>
 </header>
 
@@ -74,7 +75,7 @@ export const MAIN_HTML = `<!doctype html>
     </div>
     <div class="top-total">ยอดรวม: <span id="totalAmount">0.00</span> บาท &middot; <span id="rowCount">0</span> รายการ</div>
     <div class="top-actions">
-      <button type="button" id="submit" class="primary">ดาวน์โหลดไฟล์ xlsx</button>
+      <button type="button" id="submit" class="primary">ส่งคำขออนุมัติ</button>
       <button type="button" id="screenshot">บันทึกรายงาน (.jpg)</button>
     </div>
   </div>
@@ -438,23 +439,20 @@ document.getElementById("submit").addEventListener("click", async () => {
   if (rows.length === 0) { showError("กรุณาระบุจำนวนเงินอย่างน้อย 1 รายการ"); return; }
 
   const payload = { effectiveDate: formatGregorian(selectedDate), rows };
-  const res = await fetch("/generate", {
+  const res = await fetch("/api/queue/transfer", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    showError("สร้างไฟล์ไม่สำเร็จ: " + res.status + " " + (await res.text()));
+    showError("ส่งคำขอไม่สำเร็จ: " + res.status + " " + (await res.text()));
     return;
   }
-  const blob = await res.blob();
-  const cd = res.headers.get("content-disposition") || "";
-  const m = cd.match(/filename="([^"]+)"/);
-  const filename = m ? m[1] : "KBIZPayroll.xlsx";
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
+  const req = await res.json();
+  msgEl.className = "ok";
+  msgEl.innerHTML =
+    "✓ ส่งคำขออนุมัติแล้ว · ID: <code>" + req.id + "</code> · " +
+    '<a href="/approvals">ตรวจสอบที่คิวอนุมัติ</a>';
 });
 
 loadRoster();
