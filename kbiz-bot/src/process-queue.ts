@@ -50,22 +50,15 @@ async function patchRequest(id: string, patch: Partial<QueueRequest>): Promise<v
   await writeFile(path, JSON.stringify(req, null, 2), "utf8");
 }
 
-async function main() {
+async function processBatch(): Promise<number> {
   const approved = await listApproved();
-  if (approved.length === 0) {
-    console.log("No approved requests in queue.");
-    return;
-  }
-  console.log(`Processing ${approved.length} approved request(s) …`);
+  if (approved.length === 0) return 0;
+  console.log(`\n[${new Date().toISOString()}] Processing ${approved.length} approved request(s) …`);
 
-  // Single browser session, single Chromium launch — run all approved jobs in
-  // sequence. KBIZ kills concurrent sessions, so doing them serially is the
-  // only safe option anyway.
+  // Single Chromium session, sequential — KBIZ kills concurrent sessions.
   await withSession(async (_ctx, page) => {
     for (const req of approved) {
       console.log(`\n=== ${req.id}  (${req.type}) ===`);
-      // Resolve xlsx path: payroll-form stored it relative to its CWD (data/queue/...);
-      // when read from kbiz-bot/ we need to climb one level.
       const xlsxAbs = req.xlsxPath.startsWith("data/")
         ? resolve("..", req.xlsxPath)
         : resolve(req.xlsxPath);
@@ -108,8 +101,31 @@ async function main() {
       }
     }
   });
+  return approved.length;
+}
 
-  console.log("\nDone.");
+async function main() {
+  const watch = process.argv.includes("--watch");
+  const intervalMs = Number(process.env.QUEUE_POLL_MS ?? 30_000);
+
+  if (!watch) {
+    const n = await processBatch();
+    if (n === 0) console.log("No approved requests in queue.");
+    return;
+  }
+
+  console.log(`Watching ${resolve(QUEUE_DIR)} — polling every ${intervalMs}ms. Ctrl+C to stop.`);
+  // First pass immediately
+  await processBatch().catch((e) => console.error("batch error:", (e as Error).message));
+  // Then loop
+  while (true) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+    try {
+      await processBatch();
+    } catch (e) {
+      console.error("batch error:", (e as Error).message);
+    }
+  }
 }
 
 main().catch((e) => {
