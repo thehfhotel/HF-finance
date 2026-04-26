@@ -1,6 +1,15 @@
 node_modules
+**/node_modules
 .git
 .gitignore
 *.md
 out
 bun.lockb
+data
+kbiz-bot/browser-data
+kbiz-bot/storageState.json
+kbiz-bot/*.png
+kbiz-bot/*.xlsx
+kbiz-bot/*.json
+!kbiz-bot/package.json
+.env

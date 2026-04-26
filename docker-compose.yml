@@ -9,3 +9,20 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+
+  kbiz-bot:
+    build:
+      context: .
+      dockerfile: kbiz-bot/Dockerfile
+    container_name: kbiz-bot
+    volumes:
+      - ./data:/app/data
+      - kbiz-bot-profile:/app/kbiz-bot/browser-data
+    env_file:
+      - .env
+    depends_on:
+      - payroll
+    restart: unless-stopped
+
+volumes:
+  kbiz-bot-profile:
