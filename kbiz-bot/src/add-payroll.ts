@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { withSession, gotoAuthenticated } from "./lib/session";
 import { scrapeRegisteredAccounts } from "./lib/scrape-registered";
+import { readBeneficiaryAccountNumbers } from "./lib/read-xlsx";
 import { waitForMobileConfirmation } from "./wait";
 
 const ADD_URL = "https://kbiz.kasikornbank.com/menu/setting/account-list/account-payroll";
@@ -26,6 +27,29 @@ async function main() {
     console.log("→ Refresh registered list (we're already here)");
     const beforeReg = await scrapeRegisteredAccounts(page);
     console.log(`   ✓ ${beforeReg.count} registered accounts now cached`);
+
+    // Pre-flight collision check — read account numbers from the xlsx and
+    // compare against the just-scraped registered set. KBIZ rejects uploads
+    // containing already-registered accounts; abort early with a clear list.
+    const fileAccts = readBeneficiaryAccountNumbers(abs);
+    const regSet = new Set(beforeReg.accounts.map((a) => a.accountNumber));
+    const collisions = fileAccts.filter((n) => regSet.has(n));
+    console.log(`→ Pre-flight: ${fileAccts.length} accounts in xlsx, ${collisions.length} already registered`);
+    if (collisions.length > 0) {
+      const fileSet = new Set(fileAccts);
+      const regByNum = new Map(beforeReg.accounts.map((a) => [a.accountNumber, a.accountName]));
+      console.log("\n❌ The following accounts are already registered with KBIZ:");
+      for (const n of collisions) console.log(`   - ${n}  (KBIZ has: ${regByNum.get(n) ?? "?"})`);
+      const newOnes = [...fileSet].filter((n) => !regSet.has(n));
+      if (newOnes.length === 0) {
+        throw new Error("All accounts in the xlsx are already registered. Nothing to upload.");
+      }
+      console.log(
+        `\n   ${newOnes.length} truly new account(s): ${newOnes.join(", ")}` +
+          `\n   Regenerate the xlsx via /accounts (it auto-filters now), or remove the collisions.`
+      );
+      throw new Error(`${collisions.length} collision(s) — aborting before upload.`);
+    }
 
     console.log("→ Click 'Add Account' / 'เพิ่มบัญชี'");
     await page
@@ -54,18 +78,18 @@ async function main() {
       .click();
 
     // After Next, KBIZ shows ONE of:
-    //   review popup (good)         — Confirm button to commit
-    //   "Account cannot be added"   — name didn't match KBank records, or other validation
+    //   review screen (good)        — "Please confirm these Payroll Accounts" + phone-app prompt
+    //   "Account cannot be added"   — server-side rejection (e.g. duplicate)
     //   #popup-payroll-incorrect    — file-level error (bad xlsx format)
-    //   #popup-duplicate            — same account already in pending changes
-    const cannotAddPopup = page.locator(
-      'text=/Account cannot be added|ไม่สามารถเพิ่มบัญชี/i'
-    );
+    //   #popup-duplicate            — duplicate-pending popup
+    // The review screen has NO Confirm button — clicking Next has already
+    // sent the mobile-app notification; the user just taps Approve on phone.
+    const cannotAddPopup = page.locator('text=/Account cannot be added|ไม่สามารถเพิ่มบัญชี/i');
     const formatErrPopup = page.locator("#popup-payroll-incorrect");
     const duplicatePopup = page.locator("#popup-duplicate");
-    const reviewConfirm = page
-      .locator('a:has-text("Confirm"):visible, a:has-text("ยืนยัน"):visible, button:has-text("Confirm"):visible')
-      .first();
+    const reviewScreen = page.locator(
+      'text=/Please confirm these Payroll Accounts|กรุณายืนยันบัญชีรับเงินเดือน|A notification has been sent to the K BIZ application/i'
+    );
 
     type Outcome = "cannot-add" | "format-error" | "duplicate" | "review";
     let outcome: Outcome;
@@ -74,7 +98,7 @@ async function main() {
         cannotAddPopup.first().waitFor({ state: "visible", timeout: 30_000 }).then(() => "cannot-add" as const),
         formatErrPopup.waitFor({ state: "visible", timeout: 30_000 }).then(() => "format-error" as const),
         duplicatePopup.waitFor({ state: "visible", timeout: 30_000 }).then(() => "duplicate" as const),
-        reviewConfirm.waitFor({ state: "visible", timeout: 30_000 }).then(() => "review" as const),
+        reviewScreen.first().waitFor({ state: "visible", timeout: 30_000 }).then(() => "review" as const),
       ]);
     } catch (e) {
       await page.screenshot({ path: "stuck-after-next.png", fullPage: true });
@@ -119,33 +143,32 @@ async function main() {
     }
 
     if (observe) {
-      console.log("\n[--observe] stopping at review popup, browser stays open 2 min.");
+      console.log("\n[--observe] stopping at review screen — DO NOT approve on phone yet, browser stays open 2 min.");
       await page.waitForTimeout(2 * 60_000);
       return;
     }
 
-    console.log("→ Click Confirm in review popup");
-    await reviewConfirm.click();
-
-    // After clicking Confirm KBIZ shows the mobile-app approval prompt.
-    // Success state: URL/page transitions to a "successfully added" view,
-    // OR the list page reloads with the count increased. We accept several
-    // signals via Promise.race.
+    // Review screen is up and KBIZ has already pushed the notification to the
+    // mobile app. Wait for the user to tap Approve. We poll for the
+    // notification-pending text to actually disappear (waitFor "detached"
+    // resolves immediately when an element was never present, so it can't
+    // be used as a signal here).
+    const PROMPT_RE =
+      "A notification has been sent to the K BIZ application|กรุณาเปิดแอป K BIZ";
     await waitForMobileConfirmation({
       reason: "ยืนยันการเพิ่มบัญชีรับเงินเดือน (Add Payroll Account)",
       until: () =>
-        Promise.race([
-          // Common success URL patterns observed on KBIZ confirmation flows
-          page.waitForURL(/success|complete|done/i, { timeout: 4 * 60_000 }),
-          // Generic success text in any language
-          page
-            .locator('text=/Successfully|สำเร็จ|เรียบร้อย|completed/i')
-            .first()
-            .waitFor({ state: "visible", timeout: 4 * 60_000 }),
-          // Modal closes back to list page (file input is gone)
-          page.locator("#fileInput").waitFor({ state: "detached", timeout: 4 * 60_000 }),
-        ]),
-      timeoutMs: 4 * 60_000,
+        page.waitForFunction(
+          (regex: string) => {
+            const re = new RegExp(regex, "i");
+            const text = (document.body as HTMLElement).innerText || "";
+            // Truthy when the pending-approval prompt has cleared from the page
+            return !re.test(text);
+          },
+          PROMPT_RE,
+          { timeout: 5 * 60_000 }
+        ),
+      timeoutMs: 5 * 60_000, // KBIZ countdown is 5:30, allow ~5
     });
 
     await page.screenshot({ path: "after-confirm.png", fullPage: true });
