@@ -171,6 +171,41 @@ export const WORKSHEET_HTML = `<!doctype html>
   #historyPanel a { color: #1d4ed8; text-decoration: none; font-weight: 600; }
   #historyPanel a:hover { text-decoration: underline; }
 
+  /* Past-month banner — appears when the selected period is older than
+     the cutoff (4th of the following month). Two states: "locked"
+     (read-only by default) and "unlocked" (operator override active). */
+  .past-banner {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 10px 14px; margin-bottom: 12px; border-radius: 6px;
+    font-size: 14px;
+  }
+  .past-banner[hidden] { display: none; }
+  .past-banner.locked { background: #f3f4f6; border: 1px solid #d1d5db; color: #374151; }
+  .past-banner.unlocked { background: #fef3c7; border: 1px solid #f59e0b; color: #78350f; }
+  .past-banner .hint { color: #6b7280; font-size: 12px; }
+  .past-banner button {
+    margin-left: auto; padding: 6px 14px; border: 1px solid #1d4ed8;
+    background: #1d4ed8; color: #fff; border-radius: 4px; cursor: pointer; font: inherit;
+  }
+  .past-banner button:hover { background: #1e40af; }
+
+  /* When past-month is locked: inputs read-only, write-side controls hidden.
+     #periodSelect is excluded so the operator can still navigate periods. */
+  body.past-locked input,
+  body.past-locked textarea,
+  body.past-locked select:not(#periodSelect) {
+    pointer-events: none; background: #f9fafb !important; color: #374151;
+  }
+  body.past-locked #submit,
+  body.past-locked #lockToggle,
+  body.past-locked #addRow,
+  body.past-locked #addRowBox,
+  body.past-locked #restoreAll,
+  body.past-locked .delete-row,
+  body.past-locked .row-handle {
+    display: none !important;
+  }
+
   /* Snapshot (read-only) mode: shown when /worksheet?snapshot=:requestId. */
   body.snap input, body.snap textarea, body.snap select {
     pointer-events: none; background: #f9fafb !important; color: #374151;
@@ -205,6 +240,15 @@ export const WORKSHEET_HTML = `<!doctype html>
 <div class="snap-banner" id="snapBanner">
   <span>📜 กำลังดูประวัติคำขอ <code id="snapId"></code> · <span id="snapStatus"></span></span>
   <a href="/worksheet">← กลับสู่หน้าคำนวณ</a>
+</div>
+
+<div class="past-banner locked" id="pastBannerLocked" hidden>
+  <span>📅 <strong>เดือน<span id="pastMonthName"></span></strong> เป็นเดือนเก่า — <strong>ดูได้อย่างเดียว</strong></span>
+  <span class="hint">(ตัดยอดทุกวันที่ 4 ของเดือนถัดไป)</span>
+  <button type="button" id="unlockPast">🔓 ปลดล็อคเพื่อแก้ไข</button>
+</div>
+<div class="past-banner unlocked" id="pastBannerUnlocked" hidden>
+  <span>⚠️ <strong>กำลังแก้ไขเดือน<span id="pastMonthName2"></span></strong> (ย้อนหลัง) — บันทึกอัตโนมัติเปิดอยู่ การเปลี่ยนแปลงจะไม่กระทบคำขอที่ส่งไปแล้ว</span>
 </div>
 
 <fieldset>
@@ -744,8 +788,52 @@ function recalcGrand() {
   totalsRow.innerHTML = cells.join("");
 }
 
+// Past-month lock state — set per-period in applyPastLockState().
+// Defense in depth: scheduleSave() short-circuits if locked, even though
+// the inputs themselves are pointer-events:none in this state.
+let pastLocked = false;
+
+// "Past" = period older than the 4th of the following month at 00:00
+// local time. e.g. for period 2026-04, the cutoff is 2026-05-04 00:00.
+function isPastPeriod(period) {
+  const m = /^(\\d{4})-(\\d{2})$/.exec(period || "");
+  if (!m) return false;
+  const y = parseInt(m[1], 10);
+  const mo = parseInt(m[2], 10); // 1-12; Date constructor wants 0-11 so passing mo lands on the next month.
+  const cutoff = new Date(y, mo, 4, 0, 0, 0);
+  return new Date() >= cutoff;
+}
+
+function periodMonthLabelTH(period) {
+  const m = /^(\\d{4})-(\\d{2})$/.exec(period || "");
+  if (!m) return period;
+  const TH = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน",
+              "กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+  return TH[parseInt(m[2], 10) - 1] + " " + (parseInt(m[1], 10) + 543);
+}
+
+function applyPastLockState(period) {
+  // Snapshot mode handles its own readonly via body.snap; don't double-apply.
+  if (readonly) return;
+  const lockedBanner = document.getElementById("pastBannerLocked");
+  const unlockedBanner = document.getElementById("pastBannerUnlocked");
+  if (isPastPeriod(period)) {
+    pastLocked = true;
+    document.body.classList.add("past-locked");
+    document.getElementById("pastMonthName").textContent = periodMonthLabelTH(period);
+    lockedBanner.hidden = false;
+    unlockedBanner.hidden = true;
+  } else {
+    pastLocked = false;
+    document.body.classList.remove("past-locked");
+    lockedBanner.hidden = true;
+    unlockedBanner.hidden = true;
+  }
+}
+
 function scheduleSave() {
   if (readonly) return;
+  if (pastLocked) return;
   if (saveTimer) clearTimeout(saveTimer);
   saveStateEl.className = "save-state saving";
   saveStateEl.textContent = "กำลังบันทึก…";
@@ -789,9 +877,15 @@ async function loadPeriod(period) {
   const sheet = await res.json();
   currentPeriod = period;
   currentSheet = sheet;
-  // Backfill ส.ส./สะสม for any row whose salary is set but those fields are 0.
+  // Apply past-month lock state BEFORE the linked-rate backfill so a
+  // backfill on a past sheet doesn't accidentally trigger autosave.
+  applyPastLockState(period);
+  // Backfill ส.ส./สะสม only on the current/grace period — past periods
+  // stay as-was to preserve the historical record.
   let filledAny = false;
-  for (const r of sheet.rows) if (applyLinkedRateFillRow(r)) filledAny = true;
+  if (!pastLocked) {
+    for (const r of sheet.rows) if (applyLinkedRateFillRow(r)) filledAny = true;
+  }
   generalNotesEl.value = sheet.generalNotes || "";
   selectedDate = parseGregorian(sheet.effectiveDate);
   if (selectedDate) fp.setDate(selectedDate, true);
@@ -1249,6 +1343,18 @@ applyColumnVisibility();
 refreshAccountsIndex().then(() => {
   if (currentSheet) renderRows(currentSheet);
   updateRestoreUI();
+});
+
+// Wire unlock-past button. One-shot per period: clicking flips the body
+// class + banner; navigating to another period (or reloading) re-applies
+// the lock automatically via applyPastLockState() in loadPeriod().
+document.getElementById("unlockPast").addEventListener("click", () => {
+  pastLocked = false;
+  document.body.classList.remove("past-locked");
+  document.getElementById("pastBannerLocked").hidden = true;
+  document.getElementById("pastMonthName2").textContent =
+    document.getElementById("pastMonthName").textContent;
+  document.getElementById("pastBannerUnlocked").hidden = false;
 });
 
 if (readonly) {
