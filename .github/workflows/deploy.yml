@@ -5,12 +5,15 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Mirrors the new-hotel pattern:
-#   • Build images on GitHub-hosted runners (fast, parallel, GHA build cache)
-#   • Push to ghcr.io (image registry)
-#   • Deploy on the self-hosted runner installed on evergreen
-#     (`actions.runner.thehfhotel.evergreen.service`) — it pulls from ghcr
-#     and brings the stack up. No inbound SSH needed.
+# Mirrors the new-hotel Phase-1 pattern (docs/runbook-deploy-modernization.md
+# in that repo):
+#   • Build images on GH-hosted ubuntu-latest
+#   • Push to ghcr.io
+#   • Deploy step SSHes to evergreen as the unprivileged `deploy` user via
+#     the `asgard` Cloudflare tunnel; authorized_keys pins the SSH key to
+#     /srv/run-deploy-payroll.sh (forced-command), so the workflow can only
+#     trigger that one script.
+# No self-hosted runner involved — CI no longer shares a host with prod.
 
 env:
   REGISTRY: ghcr.io
@@ -20,23 +23,58 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      payroll: ${{ steps.filter.outputs.payroll }}
+      kbiz: ${{ steps.filter.outputs.kbiz }}
+      deploy: ${{ steps.filter.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v5.0.0
+
+      - id: filter
+        # Each filter is the COMPLETE list of paths whose change MUST trigger
+        # the corresponding job. Paths NOT covered by any filter (e.g. *.md,
+        # data/*) cause every job to skip — correct for doc-only commits.
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4.0.1
+        with:
+          filters: |
+            payroll:
+              - 'src/**'
+              - 'package.json'
+              - 'bun.lock'
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'KBIZTemplateAddPayrollAccount.xlsx'
+              - 'KBIZTemplateUploadPayroll.xlsx'
+            kbiz:
+              - 'kbiz-bot/**'
+            deploy:
+              - 'docker-compose.yml'
+              - 'scripts/deploy/**'
+              - '.github/workflows/deploy.yml'
+
   build-payroll:
+    needs: changes
+    if: needs.changes.outputs.payroll == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v5.0.0
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4.1.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7.1.0
         with:
           context: .
           file: Dockerfile
@@ -44,26 +82,29 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository }}:latest
             ${{ env.REGISTRY }}/${{ github.repository }}:${{ github.sha }}
+          # `scope: payroll` isolates GHA cache namespace from kbiz-bot.
           cache-from: type=gha,scope=payroll
           cache-to: type=gha,mode=max,scope=payroll
 
   build-kbiz-bot:
+    needs: changes
+    if: needs.changes.outputs.kbiz == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v5.0.0
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4.1.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7.1.0
         with:
           context: .
           file: kbiz-bot/Dockerfile
@@ -75,58 +116,79 @@ jobs:
           cache-to: type=gha,mode=max,scope=kbiz-bot
 
   deploy:
-    needs: [build-payroll, build-kbiz-bot]
-    runs-on: [self-hosted, linux]
+    needs: [changes, build-payroll, build-kbiz-bot]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    # Allow deploy when:
+    #   - at least one image rebuilt successfully, OR
+    #   - only deploy-scoped files changed (re-roll existing :latest images)
+    # Always require build jobs to be success-or-skipped (never failed).
+    if: |
+      always() &&
+      (needs.build-payroll.result == 'success' || needs.build-payroll.result == 'skipped') &&
+      (needs.build-kbiz-bot.result == 'success' || needs.build-kbiz-bot.result == 'skipped') &&
+      (needs.build-payroll.result == 'success' ||
+       needs.build-kbiz-bot.result == 'success' ||
+       (needs.changes.outputs.deploy == 'true' &&
+        needs.changes.outputs.payroll != 'true' &&
+        needs.changes.outputs.kbiz != 'true'))
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v5.0.0
 
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install cloudflared
+        # Reaches evergreen via the same `asgard` tunnel the operators use
+        # for daily SSH. No CF Access app gates evergreen, so no service token.
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+            -o /tmp/cloudflared
+          sudo install -m 755 /tmp/cloudflared /usr/local/bin/cloudflared
+          cloudflared --version
 
-      - name: Deploy
+      - name: Install SSH key + known_hosts
         env:
-          KBIZ_USERNAME: ${{ secrets.KBIZ_USERNAME }}
-          KBIZ_PASSWORD: ${{ secrets.KBIZ_PASSWORD }}
+          SSH_KEY:  ${{ secrets.EVERGREEN_DEPLOY_SSH_KEY }}
+          HOST_KEY: ${{ secrets.EVERGREEN_HOST_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY"  > ~/.ssh/deploy_key  && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy via SSH to evergreen
+        env:
+          # GITHUB_TOKEN's packages:read scope is enough for `docker pull` from
+          # this repo's GHCR images. Token expires when the run ends, so no
+          # long-lived credential lives on evergreen.
+          GHCR_USER:         ${{ github.actor }}
+          GHCR_TOKEN:        ${{ secrets.GITHUB_TOKEN }}
+          KBIZ_USERNAME:     ${{ secrets.KBIZ_USERNAME }}
+          KBIZ_PASSWORD:     ${{ secrets.KBIZ_PASSWORD }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          set -e
-          DEPLOY_DIR=/home/nut/payroll-production
+          set -euo pipefail
+          tar -czf /tmp/deploy.tar.gz docker-compose.yml
 
-          mkdir -p "$DEPLOY_DIR"
-          cp docker-compose.yml "$DEPLOY_DIR/"
-
-          cd "$DEPLOY_DIR"
-
-          # Heredoc-write of .env. Values may contain '=', '&', etc — heredoc
-          # substitutes the variable as-is without shell interpretation.
-          cat > .env <<EOF
-          KBIZ_USERNAME=${KBIZ_USERNAME}
-          KBIZ_PASSWORD=${KBIZ_PASSWORD}
-          SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
-          PAYROLL_PORT=3002
-          EOF
-          chmod 600 .env
-
-          # Sanity (lengths only — never the values)
-          echo "--- .env ---"
-          while IFS= read -r line; do
-            key="${line%%=*}"; val="${line#*=}"
-            echo "  $key = (${#val} chars)"
-          done < .env
-          echo "---"
-
-          docker compose pull
-          docker compose up -d --remove-orphans
-          docker compose ps
-
-      - name: Tail logs
-        if: always()
-        run: |
-          cd /home/nut/payroll-production || exit 0
-          echo "--- payroll-form (last 30) ---"
-          docker compose logs --tail=30 payroll || true
-          echo "--- kbiz-bot (last 30) ---"
-          docker compose logs --tail=30 kbiz-bot || true
+          jq -n \
+            --arg commit_sha         "$GITHUB_SHA" \
+            --arg deploy_payload_b64 "$(base64 -w0 < /tmp/deploy.tar.gz)" \
+            --arg ghcr_user          "$GHCR_USER" \
+            --arg ghcr_token         "$GHCR_TOKEN" \
+            --arg KBIZ_USERNAME      "$KBIZ_USERNAME" \
+            --arg KBIZ_PASSWORD      "$KBIZ_PASSWORD" \
+            --arg SLACK_WEBHOOK_URL  "${SLACK_WEBHOOK_URL:-}" \
+            '{
+              commit_sha: $commit_sha,
+              deploy_payload_b64: $deploy_payload_b64,
+              ghcr: { user: $ghcr_user, token: $ghcr_token },
+              env: {
+                KBIZ_USERNAME:     $KBIZ_USERNAME,
+                KBIZ_PASSWORD:     $KBIZ_PASSWORD,
+                SLACK_WEBHOOK_URL: $SLACK_WEBHOOK_URL,
+              }
+            }' \
+          | ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o ProxyCommand="cloudflared --edge-ip-version 4 access ssh --hostname %h" \
+              deploy@evergreen.thehfhotel.org
