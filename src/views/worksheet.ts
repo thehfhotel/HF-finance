@@ -327,6 +327,16 @@ export const WORKSHEET_HTML = `<!doctype html>
       margin-top: 2mm; font-size: 7.5pt; color: #404040; white-space: pre-wrap;
     }
     #reportRoot.mode-table .table-notes strong { font-weight: 600; color: #0a0a0a; }
+
+    /* Fit-to-one-page scale for table mode. JS measures the rendered
+       table after layout, computes the height ratio against A4 landscape
+       (194mm usable), and sets --print-scale. Width compensates so the
+       visual content still fills the page horizontally. */
+    body.print-table #reportRoot {
+      transform: scale(var(--print-scale, 1));
+      transform-origin: top left;
+      width: calc(277mm / var(--print-scale, 1));
+    }
   }
 
   /* Past-month banner — appears when the selected period is older than
@@ -1577,8 +1587,12 @@ function buildEmpCard(r, idx, periodLabel) {
 function buildReport(sheet) {
   const period = sheet.period || currentPeriod || "";
   const periodLabel = periodMonthLabelTH(period);
-  const totalAll = sheet.rows.reduce((s, r) => s + rowTakeHome(r), 0);
-  const recipientCount = sheet.rows.filter((r) => rowTakeHome(r) > 0).length;
+  // Skip rows with no take-home — they're worksheet entries for employees
+  // who aren't being paid this month. Including them just bloats the report
+  // with rows of em-dashes.
+  const eligibleRows = sheet.rows.filter((r) => rowTakeHome(r) > 0);
+  const totalAll = eligibleRows.reduce((s, r) => s + rowTakeHome(r), 0);
+  const recipientCount = eligibleRows.length;
   const snapId = readonly ? (new URLSearchParams(window.location.search).get("snapshot") || "") : "";
   const title = readonly ? "รายงานคำขอโอนเงินเดือน (snapshot)" : "ตารางคำนวณเงินเดือน";
 
@@ -1588,7 +1602,7 @@ function buildReport(sheet) {
   if (snapId) metaParts.push(\`<strong>คำขอ</strong><code>\${escapeHtml(snapId)}</code>\`);
   metaParts.push(\`<strong>พิมพ์เมื่อ</strong>\${new Date().toLocaleString("th-TH-u-ca-buddhist")}\`);
 
-  const cards = sheet.rows.map((r, i) => buildEmpCard(r, i, periodLabel)).join("");
+  const cards = eligibleRows.map((r, i) => buildEmpCard(r, i, periodLabel)).join("");
 
   const generalNotesHtml = (sheet.generalNotes && sheet.generalNotes.trim())
     ? \`<div class="summary-notes"><strong>หมายเหตุทั่วไป</strong><br>\${escapeHtml(sheet.generalNotes)}</div>\`
@@ -1640,8 +1654,9 @@ function tableCell(v) {
 function buildTableReport(sheet) {
   const period = sheet.period || currentPeriod || "";
   const periodLabel = periodMonthLabelTH(period);
-  const totalAll = sheet.rows.reduce((s, r) => s + rowTakeHome(r), 0);
-  const recipientCount = sheet.rows.filter((r) => rowTakeHome(r) > 0).length;
+  const eligibleRows = sheet.rows.filter((r) => rowTakeHome(r) > 0);
+  const totalAll = eligibleRows.reduce((s, r) => s + rowTakeHome(r), 0);
+  const recipientCount = eligibleRows.length;
   const snapId = readonly ? (new URLSearchParams(window.location.search).get("snapshot") || "") : "";
   const title = readonly ? "ตารางสรุปคำขอโอนเงินเดือน (snapshot)" : "ตารางสรุปเงินเดือน";
 
@@ -1656,7 +1671,7 @@ function buildTableReport(sheet) {
   for (const k of allKeys) sums[k] = 0;
   let sumDeduct = 0, sumAdd = 0, sumTake = 0;
 
-  const rows = sheet.rows.map((r, i) => {
+  const rows = eligibleRows.map((r, i) => {
     for (const k of allKeys) sums[k] += num(r[k]);
     const ded = REPORT_DEDUCT_ORDER.reduce((s, k) => s + num(r[k]), 0);
     const add = REPORT_ADD_ORDER.reduce((s, k) => s + num(r[k]), 0);
@@ -1749,6 +1764,37 @@ function setPrintMode(mode) {
   root.classList.add(\`mode-\${mode}\`);
 }
 
+// Measure the table-mode report after it's built and set --print-scale so
+// that the entire content fits A4 landscape (194mm tall after margins).
+// The CSS rule body.print-table #reportRoot { transform: scale(...) } then
+// uniformly scales the printed output. Width compensates so the visible
+// content still spans the page width.
+function fitTableToOnePage() {
+  const root = document.getElementById("reportRoot");
+  const PAGE_W_MM = 277; // 297mm A4 landscape - 10mm × 2 margins
+  const PAGE_H_MM = 194; // 210mm                - 8mm  × 2
+  const MM_PER_PX = 25.4 / 96;
+
+  // Reveal off-screen at the print width so layout matches what the
+  // browser will render on the page.
+  const prev = root.getAttribute("style") || "";
+  root.setAttribute(
+    "style",
+    \`display:block!important;position:fixed;left:0;top:0;width:\${PAGE_W_MM}mm;visibility:hidden;transform:none;\`
+  );
+  // Force a layout pass.
+  void root.offsetHeight;
+  const heightMM = root.scrollHeight * MM_PER_PX;
+  root.setAttribute("style", prev);
+  const scale = heightMM > PAGE_H_MM ? PAGE_H_MM / heightMM : 1;
+  // Floor at 0.45 so a 60-row report still has legible glyphs even if
+  // it means the contents bleed slightly past one page. In practice
+  // every realistic month should land >= 0.6.
+  const clamped = Math.max(0.45, scale);
+  root.style.setProperty("--print-scale", String(clamped));
+  console.log("[print fit-table]", { heightMM: heightMM.toFixed(1), pageHMM: PAGE_H_MM, scale: clamped.toFixed(3) });
+}
+
 document.getElementById("printBtn").addEventListener("click", () => {
   if (!currentSheet) return;
   setPrintMode("cards");
@@ -1760,6 +1806,7 @@ document.getElementById("printTableBtn").addEventListener("click", () => {
   if (!currentSheet) return;
   setPrintMode("table");
   document.getElementById("reportRoot").innerHTML = buildTableReport(currentSheet);
+  fitTableToOnePage();
   window.print();
 });
 
@@ -1789,6 +1836,7 @@ function maybeAutoPrint() {
     setPrintMode(mode);
     const root = document.getElementById("reportRoot");
     root.innerHTML = mode === "table" ? buildTableReport(currentSheet) : buildReport(currentSheet);
+    if (mode === "table") fitTableToOnePage();
     window.print();
   }, 250);
 }
