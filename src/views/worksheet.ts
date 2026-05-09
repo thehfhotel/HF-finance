@@ -171,6 +171,41 @@ export const WORKSHEET_HTML = `<!doctype html>
   #historyPanel a { color: #1d4ed8; text-decoration: none; font-weight: 600; }
   #historyPanel a:hover { text-decoration: underline; }
 
+  /* Print-only header / footer rendered by buildPrintHeader() at print time. */
+  .print-only { display: none; }
+  .print-only h2 { font-size: 18px; margin: 0 0 4px; font-weight: 600; }
+  .print-only .meta { font-size: 13px; color: #374151; margin-bottom: 14px; }
+  .print-only .meta strong { color: #111827; }
+
+  @media print {
+    @page { size: A4 landscape; margin: 12mm 8mm; }
+    body { max-width: none; margin: 0; padding: 0; color: #000; }
+
+    /* Hide all chrome; we build a clean report header in JS. */
+    header, .snap-banner, .past-banner, fieldset > legend, fieldset .top-row,
+    fieldset .hint, .scroll-btn, #colsMenu, #addRowBox, #addRow, #restoreAll,
+    #saveState, #lockToggle, #submit, #printBtn, #colsBox, dialog,
+    .save-state, #updated, #historyPanel, .row-handle, .delete-row {
+      display: none !important;
+    }
+    fieldset { border: 0; padding: 0; margin: 0; }
+
+    /* Show the report-only blocks. */
+    .print-only { display: block; }
+
+    /* Table: shrink fonts, allow it to flow naturally, repeat header. */
+    .table-zone { overflow: visible; }
+    .table-wrap { overflow: visible !important; border: 0 !important; }
+    table.sheet { font-size: 9px !important; width: auto; }
+    table.sheet th, table.sheet td { padding: 2px 4px !important; }
+    table.sheet input { border: 0 !important; padding: 0 !important; background: transparent !important; font: inherit !important; }
+    table.sheet thead { display: table-header-group; }
+    table.sheet tr { page-break-inside: avoid; }
+    table.sheet tfoot { display: table-row-group; }
+
+    .general-notes-zone, .general-notes { font-size: 11px; }
+  }
+
   /* Past-month banner — appears when the selected period is older than
      the cutoff (4th of the following month). Two states: "locked"
      (read-only by default) and "unlocked" (operator override active). */
@@ -251,6 +286,11 @@ export const WORKSHEET_HTML = `<!doctype html>
   <span>⚠️ <strong>กำลังแก้ไขเดือน<span id="pastMonthName2"></span></strong> (ย้อนหลัง) — บันทึกอัตโนมัติเปิดอยู่ การเปลี่ยนแปลงจะไม่กระทบคำขอที่ส่งไปแล้ว</span>
 </div>
 
+<div class="print-only" id="printHeader">
+  <h2 id="printTitle">ตารางคำนวณเงินเดือน</h2>
+  <div class="meta" id="printMeta"></div>
+</div>
+
 <fieldset>
   <legend>ข้อมูลทั่วไป &middot; สรุป</legend>
   <div class="top-row">
@@ -277,6 +317,7 @@ export const WORKSHEET_HTML = `<!doctype html>
         <div id="colsMenu" hidden></div>
       </div>
       <button type="button" id="lockToggle" title="สลับโหมดแก้ไขข้อมูลพื้นฐาน">🔓 ปลดล็อคข้อมูลพื้นฐาน</button>
+      <button type="button" id="printBtn" title="พิมพ์รายงาน">🖨 พิมพ์</button>
       <button type="button" id="submit" class="primary">ส่งให้อนุมัติ</button>
     </div>
   </div>
@@ -1350,6 +1391,40 @@ refreshAccountsIndex().then(() => {
   updateRestoreUI();
 });
 
+// Print: build a clean report header just-in-time and call window.print().
+// CSS hides the editable chrome and shows the .print-only block in print
+// preview / output. Auto-trigger when the URL has ?print=1 — used by the
+// "พิมพ์" buttons on /status to one-shot a printable report.
+function buildPrintHeader() {
+  const title = readonly ? "รายงานคำขอโอนเงินเดือน (snapshot)" : "ตารางคำนวณเงินเดือน";
+  document.getElementById("printTitle").textContent = title;
+  const parts = [];
+  if (currentPeriod) parts.push(\`<strong>เดือน</strong> \${escapeHtml(periodMonthLabelTH(currentPeriod))}\`);
+  if (currentSheet && currentSheet.effectiveDate) {
+    parts.push(\`<strong>วันที่เงินเข้าบัญชี</strong> \${escapeHtml(currentSheet.effectiveDate)}\`);
+  }
+  if (readonly) {
+    const id = new URLSearchParams(window.location.search).get("snapshot") || "";
+    if (id) parts.push(\`<strong>คำขอ</strong> \${escapeHtml(id)}\`);
+  }
+  const total = currentSheet && currentSheet.rows
+    ? currentSheet.rows.reduce((s, r) => s + rowTakeHome(r), 0)
+    : 0;
+  parts.push(\`<strong>ยอดรวม</strong> ฿\${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\`);
+  parts.push(\`<strong>พิมพ์เมื่อ</strong> \${new Date().toLocaleString("th-TH-u-ca-buddhist")}\`);
+  document.getElementById("printMeta").innerHTML = parts.join(" · ");
+}
+
+document.getElementById("printBtn").addEventListener("click", () => {
+  buildPrintHeader();
+  window.print();
+});
+
+// Auto-print on ?print=1 — call after the sheet finishes rendering. We
+// hook a one-shot below in the bootstrap section after loadPeriod /
+// loadSnapshot resolves.
+const autoPrint = new URLSearchParams(window.location.search).get("print") === "1";
+
 // Wire unlock-past button. One-shot per period: clicking flips the body
 // class + banner; navigating to another period (or reloading) re-applies
 // the lock automatically via applyPastLockState() in loadPeriod().
@@ -1362,10 +1437,16 @@ document.getElementById("unlockPast").addEventListener("click", () => {
   document.getElementById("pastBannerUnlocked").hidden = false;
 });
 
+function maybeAutoPrint() {
+  if (!autoPrint) return;
+  // Defer one tick so the layout settles after renderRows().
+  setTimeout(() => { buildPrintHeader(); window.print(); }, 250);
+}
+
 if (readonly) {
-  loadSnapshot(snapshotId);
+  loadSnapshot(snapshotId).then(maybeAutoPrint);
 } else {
-  loadPeriod(periodSelect.value).then(() => refreshHistory());
+  loadPeriod(periodSelect.value).then(() => { refreshHistory(); maybeAutoPrint(); });
 }
 </script>
 </body>

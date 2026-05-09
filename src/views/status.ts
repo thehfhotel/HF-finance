@@ -257,11 +257,15 @@ function renderHero(req) {
   if (req.completedAt) audit.push(["เสร็จ", req.completedAt]);
   const auditHtml = audit.map(([k, v]) => \`<dt>\${k}</dt><dd>\${fmtDate(v)}</dd>\`).join("");
 
-  // Detail links — only meaningful for transfer-payroll items (the
-  // worksheet snapshot view is structured around the worksheet schema).
+  // Detail / print / xlsx links — only meaningful for transfer-payroll
+  // items (the worksheet snapshot view is structured around the worksheet
+  // schema). The print link reuses the snapshot view with ?print=1 to
+  // auto-trigger window.print() on load.
   const actionsHtml = req.type === "transfer-payroll"
     ? \`<div class="hero-actions">
         <a href="/worksheet?snapshot=\${encodeURIComponent(req.id)}">ดูรายละเอียดเงินเดือน</a>
+        <span class="spacer">·</span>
+        <a href="/worksheet?snapshot=\${encodeURIComponent(req.id)}&print=1" target="_blank" rel="noopener">🖨 พิมพ์รายงาน</a>
         <span class="spacer">·</span>
         <a href="/api/queue/\${encodeURIComponent(req.id)}/xlsx">ดาวน์โหลด xlsx</a>
        </div>\`
@@ -290,7 +294,8 @@ function renderRow(req) {
     req.totalAmount != null ? \`฿\${fmtAmount(req.totalAmount)}\` : "",
   ].filter(Boolean).join(" · ");
   const detailLink = req.type === "transfer-payroll"
-    ? \`<a href="/worksheet?snapshot=\${encodeURIComponent(req.id)}">รายละเอียด</a>\`
+    ? \`<a href="/worksheet?snapshot=\${encodeURIComponent(req.id)}">รายละเอียด</a>
+       <a href="/worksheet?snapshot=\${encodeURIComponent(req.id)}&print=1" target="_blank" rel="noopener" title="พิมพ์รายงาน">🖨</a>\`
     : "";
   return \`<div class="row s-\${req.status}" title="\${escapeHtml(req.id)}">
     <span class="pill p-\${req.status}">\${STATUS_LABELS[req.status] || req.status}</span>
