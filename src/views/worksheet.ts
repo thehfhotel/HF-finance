@@ -1075,6 +1075,14 @@ const historyPanel = document.getElementById("historyPanel");
 const historyText = document.getElementById("historyText");
 const historyLink = document.getElementById("historyLink");
 
+// Mirror the labels used on /status and /approvals so status counts
+// in the history panel read in Thai instead of pending/rejected/etc.
+const HISTORY_STATUS_TH = {
+  pending: "รออนุมัติ", approved: "อนุมัติแล้ว",
+  rejected: "ปฏิเสธ", running: "กำลังประมวลผล",
+  done: "สำเร็จ", failed: "ไม่สำเร็จ",
+};
+
 async function refreshHistory() {
   if (readonly || !currentPeriod) { historyPanel.hidden = true; return; }
   try {
@@ -1084,7 +1092,9 @@ async function refreshHistory() {
     const matching = all.filter((r) => r.type === "transfer-payroll" && r.period === currentPeriod);
     if (matching.length === 0) { historyPanel.hidden = true; return; }
     const counts = matching.reduce((a, r) => { a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
-    const bits = Object.entries(counts).map(([k, v]) => \`\${k}: \${v}\`).join(" · ");
+    const bits = Object.entries(counts)
+      .map(([k, v]) => \`\${HISTORY_STATUS_TH[k] || k}: \${v}\`)
+      .join(" · ");
     historyText.textContent = \`คำขอเดือนนี้: \${matching.length} ราย (\${bits})\`;
     historyLink.href = \`/status?period=\${currentPeriod}\`;
     historyPanel.hidden = false;
@@ -1855,11 +1865,10 @@ async function saveAsImage(mode) {
     const canvas = await html2canvas(root, {
       backgroundColor: "#ffffff",
       scale: 2,
+      useCORS: true,
       windowWidth: root.offsetWidth,
       windowHeight: root.scrollHeight,
     });
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
-    if (!blob) throw new Error("blob creation failed");
 
     // Filename: payroll-{mode}-{period}-{YYYYMMDD-HHmm}.jpg
     const period = currentPeriod || "no-period";
@@ -1867,10 +1876,14 @@ async function saveAsImage(mode) {
     const stamp = \`\${now.getFullYear()}\${pad(now.getMonth()+1)}\${pad(now.getDate())}-\${pad(now.getHours())}\${pad(now.getMinutes())}\`;
     const filename = \`payroll-\${mode}-\${period}-\${stamp}.jpg\`;
 
-    const url = URL.createObjectURL(blob);
+    // toDataURL instead of toBlob — html2canvas occasionally taints the
+    // canvas (font/external resource quirks) and toBlob then returns null.
+    // dataURL works regardless of taint and the browser handles the
+    // download-attribute redirect efficiently.
     const a = document.createElement("a");
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
+    a.href = canvas.toDataURL("image/jpeg", 0.92);
+    a.download = filename;
+    a.click();
   } catch (e) {
     showError("บันทึกรูปไม่สำเร็จ: " + (e && e.message ? e.message : e));
   } finally {
