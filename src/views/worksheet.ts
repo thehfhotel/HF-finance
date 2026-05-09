@@ -190,54 +190,100 @@ export const WORKSHEET_HTML = `<!doctype html>
   #reportRoot .report-meta { font-size: 8.5pt; color: #404040; }
   #reportRoot .report-meta strong { color: #0a0a0a; font-weight: 500; margin-right: 1.5mm; }
 
-  /* ── Cards mode (A4 portrait, grayscale) ────────────────────────────── */
-  #reportRoot .emp-card {
-    border: 0.4pt solid #d4d4d4;
-    padding: 3mm 4mm; margin-bottom: 1.5mm;
+  /* ── Pay-slip mode (A4 portrait, bilingual TH/EN) ───────────────────── */
+  /* Mirrors the company's official สลิปเงินเดือน / Pay Slip Excel layout:
+     header band → employee info → two-column earnings/deductions table →
+     net-pay strip → signature lines. Each slip is page-break-inside:avoid
+     and has a tuned min-height so two slips fit per A4 portrait page. */
+  #reportRoot.mode-cards { font: 9pt/1.35 "Noto Sans Thai", sans-serif; color: #0a0a0a; }
+  #reportRoot .pay-slip {
+    border: 0.6pt solid #404040;
+    padding: 4mm 5mm 3mm;
+    margin-bottom: 4mm;
     page-break-inside: avoid; break-inside: avoid;
+    min-height: 128mm;
+    display: flex; flex-direction: column;
   }
-  #reportRoot .emp-head { display: flex; align-items: baseline; gap: 2mm; margin-bottom: 1.5mm; }
-  #reportRoot .emp-num { font-size: 9pt; color: #737373; font-weight: 400; min-width: 7mm; }
-  #reportRoot .emp-name { font-weight: 600; font-size: 11pt; color: #0a0a0a; }
-  #reportRoot .emp-period { margin-left: auto; font-size: 9pt; color: #737373; }
-  #reportRoot .section-label {
-    font-size: 8pt; font-weight: 600; color: #404040;
-    letter-spacing: 0.04em; margin-top: 1mm; margin-bottom: 0.3mm;
+  #reportRoot .pay-slip + .pay-slip { margin-top: 0; }
+  #reportRoot .slip-header {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 6mm; padding-bottom: 2mm; margin-bottom: 2.5mm;
+    border-bottom: 0.4pt solid #404040;
   }
-  #reportRoot .emp-line {
-    display: flex; justify-content: space-between;
-    padding: 0.3mm 0 0.3mm 4mm; font-size: 9pt; color: #404040;
+  #reportRoot .slip-company .name-th { font-size: 12pt; font-weight: 700; color: #0a0a0a; }
+  #reportRoot .slip-company .name-en { font-size: 9pt; font-weight: 600; color: #404040; letter-spacing: 0.03em; }
+  #reportRoot .slip-company .addr { font-size: 8pt; color: #525252; margin-top: 0.5mm; }
+  #reportRoot .slip-company .tax { font-size: 8pt; color: #525252; }
+  #reportRoot .slip-title { text-align: right; flex-shrink: 0; }
+  #reportRoot .slip-title .th { font-size: 13pt; font-weight: 700; color: #0a0a0a; letter-spacing: 0.04em; }
+  #reportRoot .slip-title .en { font-size: 9.5pt; font-weight: 600; color: #404040; letter-spacing: 0.06em; }
+
+  #reportRoot .slip-emp {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 0.8mm 6mm; margin-bottom: 2.5mm;
   }
-  #reportRoot .emp-line .amt { font-variant-numeric: tabular-nums; color: #0a0a0a; }
-  #reportRoot .emp-line.salary { padding-left: 0; font-weight: 500; color: #0a0a0a; }
-  #reportRoot .emp-takehome {
-    display: flex; justify-content: space-between; align-items: baseline;
-    margin-top: 1.5mm; padding-top: 1.5mm;
-    border-top: 1pt solid #404040;
-  }
-  #reportRoot .emp-takehome .label { font-size: 10pt; font-weight: 700; color: #404040; letter-spacing: 0.04em; }
-  #reportRoot .emp-takehome .amt { font-size: 13pt; font-weight: 700; color: #0a0a0a; font-variant-numeric: tabular-nums; }
-  #reportRoot .emp-meta {
-    margin-top: 1.2mm; font-size: 8pt; color: #737373;
+  #reportRoot .slip-emp .field { display: flex; gap: 2mm; font-size: 8.5pt; align-items: baseline; }
+  #reportRoot .slip-emp .lbl { color: #525252; min-width: 26mm; }
+  #reportRoot .slip-emp .lbl .en { color: #737373; font-size: 7.5pt; }
+  #reportRoot .slip-emp .val { color: #0a0a0a; font-weight: 500; flex: 1;
+    border-bottom: 0.25pt solid #d4d4d4; padding-bottom: 0.3mm;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  #reportRoot .emp-meta .acct { font-variant-numeric: tabular-nums; }
+  #reportRoot .slip-emp .val.acct { font-variant-numeric: tabular-nums; }
 
-  #reportRoot .report-summary { margin-top: 6mm; padding-top: 3mm; border-top: 1.5pt solid #404040; }
-  #reportRoot .summary-line {
+  #reportRoot .slip-table { width: 100%; border-collapse: collapse; margin-bottom: 2mm; }
+  #reportRoot .slip-table th, #reportRoot .slip-table td {
+    border: 0.3pt solid #a3a3a3; padding: 0.8mm 2mm;
+    font-size: 8.5pt; vertical-align: middle;
+  }
+  #reportRoot .slip-table thead th {
+    background: #f3f4f6; font-weight: 700; color: #0a0a0a; text-align: left;
+    font-size: 8.7pt;
+  }
+  #reportRoot .slip-table thead th .en { color: #525252; font-weight: 500; font-size: 7.5pt; margin-left: 1.5mm; }
+  #reportRoot .slip-table thead th.amt-col { width: 22mm; text-align: right; }
+  #reportRoot .slip-table td.lbl { color: #404040; }
+  #reportRoot .slip-table td.lbl .en { color: #737373; font-size: 7.5pt; margin-left: 1mm; }
+  #reportRoot .slip-table td.amt {
+    text-align: right; font-variant-numeric: tabular-nums; color: #0a0a0a;
+    width: 22mm;
+  }
+  #reportRoot .slip-table td.amt.zero { color: #cbd5e1; }
+  #reportRoot .slip-table tfoot td {
+    background: #f9fafb; font-weight: 700; color: #0a0a0a;
+    border-top: 0.6pt solid #404040;
+  }
+
+  #reportRoot .slip-net {
     display: flex; justify-content: space-between; align-items: baseline;
-    padding: 1mm 0; font-size: 10pt; color: #404040;
+    padding: 1.5mm 3mm; margin: 1mm 0 2.5mm;
+    background: #1d4ed8; color: #fff;
+    border-radius: 0.5mm;
   }
-  #reportRoot .summary-line .amt { font-variant-numeric: tabular-nums; color: #0a0a0a; font-weight: 500; }
-  #reportRoot .summary-line.grand { margin-top: 2mm; padding-top: 2mm; border-top: 0.5pt solid #d4d4d4; }
-  #reportRoot .summary-line.grand .label { font-size: 12pt; font-weight: 700; color: #404040; letter-spacing: 0.04em; }
-  #reportRoot .summary-line.grand .amt { font-size: 18pt; font-weight: 700; color: #0a0a0a; }
-  #reportRoot .summary-notes {
-    margin-top: 4mm; padding-top: 2.5mm;
-    border-top: 0.25pt solid #d4d4d4;
-    font-size: 9pt; color: #404040; white-space: pre-wrap;
+  #reportRoot .slip-net .label { font-size: 10pt; font-weight: 700; letter-spacing: 0.04em; }
+  #reportRoot .slip-net .label .en { font-weight: 500; opacity: 0.85; margin-left: 1.5mm; font-size: 8.5pt; }
+  #reportRoot .slip-net .amt { font-size: 14pt; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #reportRoot .slip-net .amt .baht { font-size: 9pt; font-weight: 500; opacity: 0.85; margin-left: 1mm; }
+
+  #reportRoot .slip-note {
+    font-size: 7.8pt; color: #525252; padding: 1mm 1mm 1.5mm;
+    border-bottom: 0.2pt dashed #d4d4d4; margin-bottom: 2mm;
+    white-space: pre-wrap; word-break: break-word;
   }
-  #reportRoot .summary-notes strong { font-weight: 600; color: #0a0a0a; }
+  #reportRoot .slip-note strong { color: #0a0a0a; font-weight: 600; }
+
+  #reportRoot .slip-sigs {
+    display: flex; gap: 8mm; margin-top: auto; padding-top: 4mm;
+    justify-content: space-around;
+  }
+  #reportRoot .slip-sigs .sig { flex: 1; max-width: 60mm; text-align: center; }
+  #reportRoot .slip-sigs .sig .line {
+    border-top: 0.3pt solid #404040;
+    padding-top: 1mm; margin-top: 6mm;
+    font-size: 8.5pt; color: #404040; font-weight: 600;
+  }
+  #reportRoot .slip-sigs .sig .line .en { color: #737373; font-weight: 500; font-size: 7.5pt; margin-left: 1.5mm; }
+  #reportRoot .slip-sigs .sig .name { font-size: 8pt; color: #525252; margin-top: 0.5mm; }
 
   /* ── Table mode (A4 landscape, fit-on-one-page summary) ─────────────── */
   /* Visual structure mirrors the editable worksheet — 3-row header with
@@ -420,8 +466,8 @@ export const WORKSHEET_HTML = `<!doctype html>
         <div id="colsMenu" hidden></div>
       </div>
       <button type="button" id="lockToggle" title="สลับโหมดแก้ไขข้อมูลพื้นฐาน">🔓 ปลดล็อคข้อมูลพื้นฐาน</button>
-      <button type="button" id="printBtn" title="พิมพ์รายงานแบบรายคน (A4 portrait)">🖨 รายคน</button>
-      <button type="button" id="saveCardsBtn" title="บันทึกรายงานรายคนเป็นรูป (.jpg)">🖼 รายคน</button>
+      <button type="button" id="printBtn" title="พิมพ์สลิปเงินเดือนรายคน (A4 portrait)">🖨 สลิปเงินเดือน</button>
+      <button type="button" id="saveCardsBtn" title="บันทึกสลิปเงินเดือนเป็นรูป (.jpg)">🖼 สลิปเงินเดือน</button>
       <button type="button" id="printTableBtn" title="พิมพ์ตารางสรุปทั้งหน้า (A4 landscape)">🖨 ตาราง</button>
       <button type="button" id="saveTableBtn" title="บันทึกตารางสรุปเป็นรูป (.jpg)">🖼 ตาราง</button>
       <button type="button" id="submit" class="primary">ส่งให้อนุมัติ</button>
@@ -1529,89 +1575,150 @@ const REPORT_FIELD_LABEL = {
   otherAddition: "รับอื่นๆ",
 };
 
-function buildEmpCard(r, idx, periodLabel) {
-  // Salary always renders. Deductions/additions only render when non-zero,
-  // each section preceded by its label. If a section has zero items, the
-  // label is omitted (skip-when-zero applies to the whole group too).
-  const deductLines = REPORT_DEDUCT_ORDER
-    .filter((k) => num(r[k]) > 0)
-    .map((k) =>
-      \`<div class="emp-line"><span class="label">\${escapeHtml(REPORT_FIELD_LABEL[k])}</span>\` +
-      \`<span class="amt">\${fmt(num(r[k]))}</span></div>\`
-    ).join("");
-  const addLines = REPORT_ADD_ORDER
-    .filter((k) => num(r[k]) > 0)
-    .map((k) =>
-      \`<div class="emp-line"><span class="label">\${escapeHtml(REPORT_FIELD_LABEL[k])}</span>\` +
-      \`<span class="amt">\${fmt(num(r[k]))}</span></div>\`
-    ).join("");
+// Bilingual TH/EN labels for the formal Pay Slip layout. Order mirrors
+// the company's Excel template (สลิปเงินเดือน / Pay Slip).
+const SLIP_EARNINGS = [
+  { key: "salary",         th: "เงินเดือน/ค่าจ้าง",   en: "Salary / Wage" },
+  { key: "ot",             th: "ค่าล่วงเวลา/โอที",   en: "Overtime" },
+  { key: "commission",     th: "ค่านายหน้า",         en: "Commission" },
+  { key: "breakfast",      th: "ค่าเบี้ยเลี้ยง",      en: "Allowance" },
+  { key: "otherAddition",  th: "เงินได้อื่นๆ",       en: "Others" },
+];
+const SLIP_DEDUCTIONS = [
+  { key: "socialSecurity", th: "ประกันสังคม",         en: "Social Security" },
+  { key: "savings",        th: "เงินสะสมทรัพย์",      en: "Provident Fund" },
+  { key: "leave",          th: "ขาด/ลา/มาสาย",       en: "Absence / Leave" },
+  { key: "advance",        th: "เบิกล่วงหน้า",        en: "Advance" },
+  { key: "loan",           th: "เงินยืม",             en: "Loan" },
+  { key: "interest",       th: "ดอกเบี้ย",            en: "Interest" },
+  { key: "roomCost",       th: "ค่าห้องพัก",          en: "Room Cost" },
+  { key: "otherDeduction", th: "รายการหักอื่นๆ",      en: "Other Deductions" },
+];
 
-  // Meta line at bottom: bank · account · position · (nickname) · note.
-  const metaParts = [];
-  metaParts.push(\`<span class="acct">\${escapeHtml(displayAccount(r))}</span>\`);
-  if (r.position) metaParts.push(escapeHtml(r.position));
-  if (r.nickname) metaParts.push(\`(\${escapeHtml(r.nickname)})\`);
-  if (r.note && r.note.trim()) metaParts.push(\`หมายเหตุ: \${escapeHtml(r.note.trim())}\`);
+function slipCells(item, value) {
+  const n = num(value);
+  const isZero = n <= 0;
+  const cls = isZero ? "amt zero" : "amt";
+  return \`<td class="lbl">\${escapeHtml(item.th)}<span class="en">\${escapeHtml(item.en)}</span></td>\` +
+    \`<td class="\${cls}">\${isZero ? "—" : fmt(n)}</td>\`;
+}
+function emptyCells() {
+  return '<td class="lbl">&nbsp;</td><td class="amt zero">—</td>';
+}
 
-  return \`<div class="emp-card">
-    <div class="emp-head">
-      <span class="emp-num">#\${String(idx + 1).padStart(2, "0")}</span>
-      <span class="emp-name">\${escapeHtml(r.accountName || "—")}</span>
-      <span class="emp-period">\${escapeHtml(periodLabel)}</span>
+function buildPaySlip(r, idx, periodLabel, effectiveDate) {
+  // Pair earnings ↔ deductions into a single 4-column table. When the
+  // arrays are uneven, the shorter side gets blank cells.
+  const rowCount = Math.max(SLIP_EARNINGS.length, SLIP_DEDUCTIONS.length);
+  const tableRows = [];
+  for (let i = 0; i < rowCount; i++) {
+    const e = SLIP_EARNINGS[i];
+    const d = SLIP_DEDUCTIONS[i];
+    tableRows.push(\`<tr>\${e ? slipCells(e, r[e.key]) : emptyCells()}\${d ? slipCells(d, r[d.key]) : emptyCells()}</tr>\`);
+  }
+
+  const totalEarn = SLIP_EARNINGS.reduce((s, it) => s + num(r[it.key]), 0);
+  const totalDed = SLIP_DEDUCTIONS.reduce((s, it) => s + num(r[it.key]), 0);
+  const net = Math.round((totalEarn - totalDed) * 100) / 100;
+
+  const account = displayAccount(r) || "—";
+  const noteHtml = (r.note && r.note.trim())
+    ? \`<div class="slip-note"><strong>หมายเหตุ / Remarks:</strong> \${escapeHtml(r.note.trim())}</div>\`
+    : "";
+
+  const empName = r.accountName || "—";
+  const position = r.position
+    ? r.position + (r.nickname ? \` (\${r.nickname})\` : "")
+    : (r.nickname || "—");
+
+  return \`<div class="pay-slip">
+    <div class="slip-header">
+      <div class="slip-company">
+        <div class="name-th">บริษัท สายชล เฮอริเทจ จำกัด</div>
+        <div class="name-en">SAICHON HERITAGE CO., LTD.</div>
+        <div class="addr">33 ถ.ชนเกษม ต.ตลาด อ.เมือง จ.สุราษฎร์ธานี</div>
+        <div class="tax">เลขผู้เสียภาษี 0845557003413</div>
+      </div>
+      <div class="slip-title">
+        <div class="th">สลิปเงินเดือน</div>
+        <div class="en">PAY SLIP</div>
+      </div>
     </div>
-    <div class="emp-line salary"><span class="label">เงินเดือน</span><span class="amt">\${fmt(num(r.salary))}</span></div>
-    \${deductLines ? \`<div class="section-label">หักเงิน</div>\${deductLines}\` : ""}
-    \${addLines ? \`<div class="section-label">เพิ่ม</div>\${addLines}\` : ""}
-    <div class="emp-takehome">
-      <span class="label">รับสุทธิ</span>
-      <span class="amt">\${fmt(rowTakeHome(r))}</span>
+
+    <div class="slip-emp">
+      <div class="field">
+        <span class="lbl">ชื่อพนักงาน <span class="en">/ Emp. Name</span></span>
+        <span class="val">\${escapeHtml(empName)}</span>
+      </div>
+      <div class="field">
+        <span class="lbl">รอบเงินเดือน <span class="en">/ Payroll Period</span></span>
+        <span class="val">\${escapeHtml(periodLabel || "—")}</span>
+      </div>
+      <div class="field">
+        <span class="lbl">ตำแหน่ง <span class="en">/ Position</span></span>
+        <span class="val">\${escapeHtml(position)}</span>
+      </div>
+      <div class="field">
+        <span class="lbl">วันที่ชำระ <span class="en">/ Payment Date</span></span>
+        <span class="val">\${escapeHtml(effectiveDate || "—")}</span>
+      </div>
+      <div class="field" style="grid-column: 1 / -1">
+        <span class="lbl">เลขที่บัญชี <span class="en">/ Bank Account</span></span>
+        <span class="val acct">\${escapeHtml(account)}</span>
+      </div>
     </div>
-    <div class="emp-meta">\${metaParts.join(" · ")}</div>
+
+    <table class="slip-table">
+      <thead>
+        <tr>
+          <th>รายการเงินได้<span class="en">Earnings</span></th>
+          <th class="amt-col">จำนวน</th>
+          <th>รายการหัก<span class="en">Deduction</span></th>
+          <th class="amt-col">จำนวน</th>
+        </tr>
+      </thead>
+      <tbody>
+        \${tableRows.join("")}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td class="lbl">รวมเงินได้<span class="en">Total Earnings</span></td>
+          <td class="amt">\${fmt(totalEarn)}</td>
+          <td class="lbl">รวมรายการหัก<span class="en">Total Deductions</span></td>
+          <td class="amt">\${fmt(totalDed)}</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <div class="slip-net">
+      <div class="label">เงินได้สุทธิ <span class="en">/ Net Pay</span></div>
+      <div class="amt">\${fmt(net)}<span class="baht">บาท / THB</span></div>
+    </div>
+
+    \${noteHtml}
+
+    <div class="slip-sigs">
+      <div class="sig">
+        <div class="line">ผู้รับเงิน <span class="en">/ Recipient</span></div>
+        <div class="name">( \${escapeHtml(empName)} )</div>
+      </div>
+      <div class="sig">
+        <div class="line">ผู้จ่ายเงิน <span class="en">/ Payer</span></div>
+        <div class="name">(.....................................)</div>
+      </div>
+    </div>
   </div>\`;
 }
 
 function buildReport(sheet) {
   const period = sheet.period || currentPeriod || "";
   const periodLabel = periodMonthLabelTH(period);
-  // Keep every row including those with no take-home — the report doubles
-  // as a roster view, so an employee not paid this cycle should still
-  // appear (with all-zero figures) for accountability.
-  const allRows = sheet.rows;
-  const totalAll = allRows.reduce((s, r) => s + rowTakeHome(r), 0);
-  const recipientCount = allRows.filter((r) => rowTakeHome(r) > 0).length;
-  const snapId = readonly ? (new URLSearchParams(window.location.search).get("snapshot") || "") : "";
-  const title = readonly ? "รายงานคำขอโอนเงินเดือน (snapshot)" : "ตารางคำนวณเงินเดือน";
-
-  const metaParts = [];
-  if (periodLabel) metaParts.push(\`<strong>เดือน</strong>\${escapeHtml(periodLabel)}\`);
-  if (sheet.effectiveDate) metaParts.push(\`<strong>วันที่เงินเข้าบัญชี</strong>\${escapeHtml(sheet.effectiveDate)}\`);
-  if (snapId) metaParts.push(\`<strong>คำขอ</strong><code>\${escapeHtml(snapId)}</code>\`);
-  metaParts.push(\`<strong>พิมพ์เมื่อ</strong>\${new Date().toLocaleString("th-TH-u-ca-buddhist")}\`);
-
-  const cards = allRows.map((r, i) => buildEmpCard(r, i, periodLabel)).join("");
-
-  const generalNotesHtml = (sheet.generalNotes && sheet.generalNotes.trim())
-    ? \`<div class="summary-notes"><strong>หมายเหตุทั่วไป</strong><br>\${escapeHtml(sheet.generalNotes)}</div>\`
-    : "";
-
-  return \`
-    <div class="report-header">
-      <h1>\${title}</h1>
-      <div class="report-meta">\${metaParts.join(" · ")}</div>
-    </div>
-    \${cards}
-    <div class="report-summary">
-      <div class="summary-line">
-        <span class="label">จำนวนผู้รับโอน</span>
-        <span class="amt">\${recipientCount} คน</span>
-      </div>
-      <div class="summary-line grand">
-        <span class="label">รวมยอดโอนทั้งสิ้น</span>
-        <span class="amt">\${fmt(totalAll)}</span>
-      </div>
-      \${generalNotesHtml}
-    </div>
-  \`;
+  // One slip per row, including zero-pay rows (slip doubles as proof of
+  // employment for the period). Skip rows with no name/account number —
+  // those are placeholder entries that haven't been filled in yet.
+  const rows = sheet.rows.filter((r) => (r.accountName && r.accountName.trim()) || num(r.salary) > 0);
+  const slips = rows.map((r, i) => buildPaySlip(r, i, periodLabel, sheet.effectiveDate || "")).join("");
+  return slips || \`<div style="padding:20mm;text-align:center;color:#737373;font-size:10pt">ยังไม่มีข้อมูลพนักงานสำหรับเดือน\${escapeHtml(periodLabel)}</div>\`;
 }
 
 // Cell helper for the table report. cls is the column-group class
