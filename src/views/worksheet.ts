@@ -277,7 +277,7 @@ export const WORKSHEET_HTML = `<!doctype html>
         <div id="colsMenu" hidden></div>
       </div>
       <button type="button" id="lockToggle" title="สลับโหมดแก้ไขข้อมูลพื้นฐาน">🔓 ปลดล็อคข้อมูลพื้นฐาน</button>
-      <button type="button" id="submit" class="primary">ส่งไปคิวโอน</button>
+      <button type="button" id="submit" class="primary">ส่งให้อนุมัติ</button>
     </div>
   </div>
   <div class="hint" style="font-size:13px; color:#6b7280; margin-top:6px;">บันทึกอัตโนมัติทุกครั้งที่แก้ไข &middot; รหัสธนาคาร 004 (กสิกรไทย)</div>
@@ -959,9 +959,14 @@ async function loadSnapshot(id) {
     return;
   }
   const req = await res.json();
+  const STATUS_TH = {
+    pending: "รออนุมัติ", approved: "อนุมัติแล้ว",
+    rejected: "ปฏิเสธ", running: "กำลังประมวลผล",
+    done: "สำเร็จ", failed: "ไม่สำเร็จ",
+  };
   document.getElementById("snapId").textContent = id;
   document.getElementById("snapStatus").innerHTML =
-    "สถานะ: <strong>" + escapeHtml(req.status) + "</strong>" +
+    "สถานะ: <strong>" + escapeHtml(STATUS_TH[req.status] || req.status) + "</strong>" +
     (req.summary && req.summary.effectiveDate ? " · เงินเข้า " + escapeHtml(req.summary.effectiveDate) : "");
 
   if (!req.summary || req.type !== "transfer-payroll") {

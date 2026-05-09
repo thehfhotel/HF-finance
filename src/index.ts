@@ -70,7 +70,24 @@ function renderHTML(template: string, currentPath: string, isAdmin: boolean): Re
   const body = template
     .replace("<!--ADMIN_NAV-->", adminNavHtml(currentPath, isAdmin))
     .replace("<!--ADMIN_MODAL-->", ADMIN_MODAL_HTML);
-  return new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
+  return new Response(body, {
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      // The HTML embeds inline JS that posts to /api/queue/transfer with
+      // a `period` field added in fc94153. Browsers cache HTML aggressively
+      // by default; "no-cache" forces revalidation each load so an old tab
+      // can't ship a submission missing the snapshot field.
+      "cache-control": "no-cache, must-revalidate",
+    },
+  });
+}
+
+// Derive a YYYY-MM period from a "DD/MM/YYYY" effectiveDate string. Server
+// fallback for queue submissions that came from stale clients which don't
+// send body.period — without this, summary.sheet would silently be missing.
+function periodFromEffective(eff: string | undefined): string | undefined {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(eff || "");
+  return m ? `${m[3]}-${m[2]}` : undefined;
 }
 
 function adminGuard(headers: Record<string, string | undefined>, set: { status?: number }): true | Response {
@@ -271,11 +288,12 @@ const app = new Elysia()
       // Snapshot the full worksheet (deductions/additions/notes) into the
       // queue item. The worksheet has just been autosaved by the client
       // before submit — loadSheet() returns the current on-disk state.
-      // Falls back to undefined for malformed periods so older clients that
-      // don't send period still work.
-      const sheet = body.period && isValidPeriod(body.period)
-        ? await loadSheet(body.period)
-        : undefined;
+      // If the client didn't send `period` (stale tab), derive it from the
+      // effective date so the snapshot is still recorded.
+      const period = body.period && isValidPeriod(body.period)
+        ? body.period
+        : periodFromEffective(body.effectiveDate);
+      const sheet = period ? await loadSheet(period) : undefined;
       const req = await submitRequest({
         type: "transfer-payroll",
         summary: {
@@ -283,7 +301,7 @@ const app = new Elysia()
           effectiveDate: body.effectiveDate,
           totalAmount: Math.round(totalAmount * 100) / 100,
           rows: body.rows,
-          period: body.period,
+          period,
           sheet,
         },
         xlsxBuffer: buf,
