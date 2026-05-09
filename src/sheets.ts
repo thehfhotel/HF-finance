@@ -47,15 +47,51 @@ export function isValidPeriod(p: string): boolean {
   return PERIOD_RE.test(p);
 }
 
+// Defaults pulled from the most recent payroll snapshot
+// (ตารางเงินเดือนบจกสายชล เดือน เมษายน-69.xlsx). Applied to rows that
+// have no nickname / position / salary set — keeps existing user edits.
+// Refresh by re-importing the latest monthly sheet and updating values.
+const EMPLOYEE_DEFAULTS: Record<string, { nickname: string; position: string; salary: number }> = {
+  "นางสาวสลิลทิพย์ เพชรรักษ์":   { nickname: "วิว",    position: "Reception",       salary: 14000 },
+  "นายณัฐวุฒิ จงจิตร":           { nickname: "เบนท์",  position: "Reception",       salary: 12200 },
+  "นางสาวกฤษณา บุญนาค":          { nickname: "ไกด์",   position: "Reception",       salary: 11200 },
+  "นายเชิดพงษ์ หมั่นถนอม":       { nickname: "ดรีม",   position: "Reception",       salary: 10600 },
+  "นางพรทิพย์ แตงกลด":           { nickname: "ทิพย์",  position: "แม่บ้าน",         salary: 11930 },
+  "นางวราภรณ์ วังนรา":           { nickname: "จิ้ม",   position: "แม่บ้าน",         salary: 11930 },
+  "นางสาวอุไรวรรรณ รอดสั้น":     { nickname: "หมวย",   position: "แม่บ้าน",         salary: 11930 },
+  "นางสาวณัฏฐณิชา รุ่งสุวรรณ":   { nickname: "พราว",   position: "แม่บ้าน",         salary: 11430 },
+  "นางสายใจ คงราช":              { nickname: "อ้อย",   position: "ธุรการทั่วไป",    salary: 12500 },
+  "นางสาวปัทมาพร รักษาชล":       { nickname: "เตย",    position: "Reception",       salary: 10000 },
+  "นางสาวพัชรา จันทร์ธุป":       { nickname: "ดาว",    position: "แม่บ้าน",         salary: 10000 },
+  "นางสาวเจนจิรา คุ้มกัน":       { nickname: "นิว",    position: "Reception",       salary: 10000 },
+  "นางสาวเกศรา จันทร์ประสิทธ์":  { nickname: "ครีม",   position: "Reception",       salary: 10000 },
+  "นายธีรชา อาจหาญ":             { nickname: "อาร์ม",  position: "Reception",       salary: 10000 },
+  "นางสาวธัญวรัตน์ ทองหยู":      { nickname: "แอน",    position: "Reception",       salary: 9500 },
+  "นางสาวรวีวรรณ พัฒนะ":         { nickname: "เฟิร์น", position: "Reception",       salary: 9500 },
+  "นายสุชาติ รักษายศ":           { nickname: "",       position: "รปภ.",            salary: 12000 },
+  "นายสุรินทร์ เกษกวี":          { nickname: "",       position: "รปภ.",            salary: 3000 },
+};
+
+function normalizeName(name: string): string {
+  return String(name || "").trim().replace(/\s+/g, " ");
+}
+
+function defaultsFor(accountName: string): { nickname: string; position: string; salary: number } | null {
+  const k = normalizeName(accountName);
+  return EMPLOYEE_DEFAULTS[k] ?? null;
+}
+
 function emptyRow(a: { id: string; accountNumber: string; accountName: string }): SheetRow {
+  const d = defaultsFor(a.accountName);
   return {
     accountId: a.id,
     accountNumber: a.accountNumber,
     accountName: a.accountName,
     bank: "KBANK",
-    nickname: "",
-    position: "",
-    salary: 0, socialSecurity: 0, savings: 0, advance: 0, loan: 0,
+    nickname: d?.nickname ?? "",
+    position: d?.position ?? "",
+    salary: d?.salary ?? 0,
+    socialSecurity: 0, savings: 0, advance: 0, loan: 0,
     interest: 0, roomCost: 0, leave: 0, otherDeduction: 0,
     commission: 0, breakfast: 0, ot: 0, otherAddition: 0,
     note: "",
@@ -64,7 +100,9 @@ function emptyRow(a: { id: string; accountNumber: string; accountName: string })
 
 // Backfill new fields on rows persisted before they existed. For old rows
 // where the bank prefix was embedded in accountNumber (e.g. "KTB-957-..."),
-// split it out into the bank field.
+// split it out into the bank field. Also seed nickname/position/salary
+// from EMPLOYEE_DEFAULTS the first time we see a row with all three blank
+// — avoids clobbering rows the operator has already edited.
 function normalize(row: any): SheetRow {
   if (typeof row.nickname !== "string") row.nickname = "";
   if (typeof row.position !== "string") row.position = "";
@@ -75,6 +113,14 @@ function normalize(row: any): SheetRow {
       row.accountNumber = m[2].replace(/\s+/g, "");
     } else {
       row.bank = "KBANK";
+    }
+  }
+  if (!row.nickname && !row.position && !(Number(row.salary) > 0)) {
+    const d = defaultsFor(row.accountName);
+    if (d) {
+      row.nickname = d.nickname;
+      row.position = d.position;
+      row.salary = d.salary;
     }
   }
   return row as SheetRow;

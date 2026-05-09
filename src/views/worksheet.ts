@@ -254,6 +254,22 @@ export const WORKSHEET_HTML = `<!doctype html>
     border-top: 0.6pt solid #404040;
   }
 
+  #reportRoot .slip-savings {
+    display: flex; align-items: baseline; gap: 2mm;
+    padding: 1.2mm 3mm; margin: 1mm 0;
+    background: #fef9c3; border: 0.3pt solid #eab308;
+    border-radius: 0.5mm;
+    font-size: 9pt;
+  }
+  #reportRoot .slip-savings .label { color: #422006; font-weight: 600; }
+  #reportRoot .slip-savings .label .en { color: #78350f; font-weight: 500; font-size: 7.8pt; margin-left: 1mm; }
+  #reportRoot .slip-savings .amt {
+    margin-left: auto; color: #422006; font-weight: 700;
+    font-size: 11pt; font-variant-numeric: tabular-nums;
+  }
+  #reportRoot .slip-savings .amt .baht { font-size: 8pt; font-weight: 500; opacity: 0.75; margin-left: 1mm; }
+  #reportRoot .slip-savings .asof { color: #78350f; font-size: 7.5pt; font-style: italic; }
+
   #reportRoot .slip-net {
     display: flex; justify-content: space-between; align-items: baseline;
     padding: 1.5mm 3mm; margin: 1mm 0 2.5mm;
@@ -1595,6 +1611,45 @@ const SLIP_DEDUCTIONS = [
   { key: "otherDeduction", th: "รายการหักอื่นๆ",      en: "Other Deductions" },
 ];
 
+// Lifetime cumulative savings balance per employee, imported from
+// เงินสะสมพนักงานสายชล.xlsx as of late April 2569 (2026). Keyed by
+// nickname; multiple variants share the same value because the source
+// file spells some names inconsistently (เบ้นท์/เบนท์, ไกด์/ไกส์,
+// จิ้ม/จิ๋ม, etc.). Refresh by re-importing the xlsx and updating
+// the values + SAVINGS_AS_OF below.
+const SAVINGS_AS_OF = "30 เมษายน 2569";
+const SAVINGS_BALANCE = {
+  "วิว": 32900,
+  "เบ้นท์": 28700, "เบนท์": 28700, "เบ้น": 28700, "เบนซ์": 28700,
+  "ไกด์": 21350, "ไกส์": 21350,
+  "ดรีม": 11998.05,
+  "เตย": 4194.17,
+  "นิ่ม": 2583.34,
+  "โจ้": 1725.84,
+  "นิว": 3400,
+  "จิ้ม": 30196, "จิ๋ม": 30196,
+  "ทิพย์": 30196,
+  "หมวย": 29691,
+  "พราว": 18301.5,
+  "ดาว": 4662.5,
+  "อ้อย": 6925, "พี่อ้อย": 6925,
+  "ครีม": 2282,
+  "อาร์ม": 2267,
+  "แอน": 728.32,
+  "เฟิร์น": 538.33, "เฟิร์ม": 538.33,
+};
+function lookupSavings(nickname) {
+  const k = String(nickname || "").trim();
+  if (!k) return null;
+  if (SAVINGS_BALANCE[k] != null) return SAVINGS_BALANCE[k];
+  // Fallback: case/space-insensitive match against the keys.
+  const norm = k.toLowerCase().replace(/\\s+/g, "");
+  for (const key in SAVINGS_BALANCE) {
+    if (key.toLowerCase().replace(/\\s+/g, "") === norm) return SAVINGS_BALANCE[key];
+  }
+  return null;
+}
+
 function slipCells(item, value) {
   const n = num(value);
   const isZero = n <= 0;
@@ -1620,6 +1675,15 @@ function buildPaySlip(r, idx, periodLabel, effectiveDate) {
   const totalEarn = SLIP_EARNINGS.reduce((s, it) => s + num(r[it.key]), 0);
   const totalDed = SLIP_DEDUCTIONS.reduce((s, it) => s + num(r[it.key]), 0);
   const net = Math.round((totalEarn - totalDed) * 100) / 100;
+
+  const savingsBalance = lookupSavings(r.nickname);
+  const savingsHtml = savingsBalance != null
+    ? \`<div class="slip-savings">
+         <span class="label">เงินสะสมคงเหลือ <span class="en">/ Total Savings Balance</span></span>
+         <span class="amt">\${fmt(savingsBalance)}<span class="baht">บาท / THB</span></span>
+         <span class="asof">ณ \${escapeHtml(SAVINGS_AS_OF)}</span>
+       </div>\`
+    : "";
 
   const account = displayAccount(r) || "—";
   const noteHtml = (r.note && r.note.trim())
@@ -1689,6 +1753,8 @@ function buildPaySlip(r, idx, periodLabel, effectiveDate) {
         </tr>
       </tfoot>
     </table>
+
+    \${savingsHtml}
 
     <div class="slip-net">
       <div class="label">เงินได้สุทธิ <span class="en">/ Net Pay</span></div>
