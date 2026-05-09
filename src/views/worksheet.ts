@@ -171,39 +171,100 @@ export const WORKSHEET_HTML = `<!doctype html>
   #historyPanel a { color: #1d4ed8; text-decoration: none; font-weight: 600; }
   #historyPanel a:hover { text-decoration: underline; }
 
-  /* Print-only header / footer rendered by buildPrintHeader() at print time. */
-  .print-only { display: none; }
-  .print-only h2 { font-size: 18px; margin: 0 0 4px; font-weight: 600; }
-  .print-only .meta { font-size: 13px; color: #374151; margin-bottom: 14px; }
-  .print-only .meta strong { color: #111827; }
-
+  /* Report (PDF) view. Built on demand into #reportRoot, hidden on screen,
+     swapped for the editable view in @media print. Per-employee cards in
+     A4 portrait — see buildReport() in JS for the structure. */
+  #reportRoot { display: none; }
   @media print {
-    @page { size: A4 landscape; margin: 12mm 8mm; }
-    body { max-width: none; margin: 0; padding: 0; color: #000; }
+    @page { size: A4 portrait; margin: 14mm 14mm 16mm 14mm; }
+    @page { @bottom-right { content: counter(page) " / " counter(pages); font: 8pt "Noto Sans Thai", sans-serif; color: #6b7280; } }
+    body { max-width: none; margin: 0; padding: 0; color: #111827; background: #fff; }
+    body > * { display: none !important; }
+    body > #reportRoot { display: block !important; }
 
-    /* Hide all chrome; we build a clean report header in JS. */
-    header, .snap-banner, .past-banner, fieldset > legend, fieldset .top-row,
-    fieldset .hint, .scroll-btn, #colsMenu, #addRowBox, #addRow, #restoreAll,
-    #saveState, #lockToggle, #submit, #printBtn, #colsBox, dialog,
-    .save-state, #updated, #historyPanel, .row-handle, .delete-row {
-      display: none !important;
+    #reportRoot { font: 10pt/1.45 "Noto Sans Thai", sans-serif; }
+    #reportRoot .report-header {
+      margin-bottom: 6mm; padding-bottom: 3mm;
+      border-bottom: 0.5pt solid #1d4ed8;
     }
-    fieldset { border: 0; padding: 0; margin: 0; }
+    #reportRoot .report-header h1 { font-size: 16pt; font-weight: 600; margin: 0 0 1.5mm; }
+    #reportRoot .report-meta { font-size: 9pt; color: #4b5563; }
+    #reportRoot .report-meta strong { color: #111827; font-weight: 500; margin-right: 2mm; }
 
-    /* Show the report-only blocks. */
-    .print-only { display: block; }
+    #reportRoot .emp-card {
+      border: 0.4pt solid #d1d5db; border-radius: 1.5mm;
+      padding: 4mm 5mm; margin-bottom: 4mm;
+      page-break-inside: avoid; break-inside: avoid;
+    }
+    #reportRoot .emp-head {
+      display: flex; align-items: baseline; gap: 3mm;
+      margin-bottom: 2.5mm; padding-bottom: 1.5mm;
+      border-bottom: 0.25pt solid #e5e7eb;
+    }
+    #reportRoot .emp-num {
+      font-weight: 600; color: #6b7280; font-size: 10pt; min-width: 6mm;
+    }
+    #reportRoot .emp-name { font-weight: 600; font-size: 12pt; }
+    #reportRoot .emp-nick { color: #6b7280; font-size: 10pt; margin-left: 2mm; }
+    #reportRoot .emp-pos { color: #6b7280; font-size: 10pt; margin-left: 3mm; }
+    #reportRoot .emp-account {
+      margin-left: auto; font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 9.5pt; color: #374151; font-variant-numeric: tabular-nums;
+    }
 
-    /* Table: shrink fonts, allow it to flow naturally, repeat header. */
-    .table-zone { overflow: visible; }
-    .table-wrap { overflow: visible !important; border: 0 !important; }
-    table.sheet { font-size: 9px !important; width: auto; }
-    table.sheet th, table.sheet td { padding: 2px 4px !important; }
-    table.sheet input { border: 0 !important; padding: 0 !important; background: transparent !important; font: inherit !important; }
-    table.sheet thead { display: table-header-group; }
-    table.sheet tr { page-break-inside: avoid; }
-    table.sheet tfoot { display: table-row-group; }
+    #reportRoot .emp-line {
+      display: flex; justify-content: space-between;
+      padding: 0.6mm 0; font-size: 10pt;
+    }
+    #reportRoot .emp-line .amt { font-variant-numeric: tabular-nums; }
+    #reportRoot .emp-line.salary {
+      border-bottom: 0.4pt solid #d1d5db;
+      padding-bottom: 1.5mm; margin-bottom: 0.8mm;
+      font-weight: 600;
+    }
+    #reportRoot .emp-line.deduct .amt { color: #b91c1c; }
+    #reportRoot .emp-line.add .amt { color: #15803d; }
+    #reportRoot .emp-line .label { color: #374151; }
 
-    .general-notes-zone, .general-notes { font-size: 11px; }
+    #reportRoot .emp-note {
+      font-size: 9pt; color: #4b5563;
+      margin-top: 2mm; padding: 1.5mm 2.5mm;
+      background: #f9fafb; border-left: 0.6pt solid #d1d5db;
+    }
+    #reportRoot .emp-takehome {
+      display: flex; justify-content: space-between; align-items: baseline;
+      margin-top: 2.5mm; padding: 2.2mm 3mm;
+      background: #eff6ff; border: 0.4pt solid #1d4ed8; border-radius: 1mm;
+    }
+    #reportRoot .emp-takehome .label { font-size: 11pt; font-weight: 600; color: #1e3a8a; }
+    #reportRoot .emp-takehome .amt {
+      font-size: 14pt; font-weight: 700; color: #1d4ed8;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #reportRoot .report-summary {
+      margin-top: 8mm; padding: 6mm; page-break-before: auto;
+      background: #f9fafb; border: 0.5pt solid #d1d5db; border-radius: 2mm;
+    }
+    #reportRoot .summary-line {
+      display: flex; justify-content: space-between; align-items: baseline;
+      padding: 1.5mm 0; font-size: 12pt; font-weight: 500;
+    }
+    #reportRoot .summary-line .amt { font-variant-numeric: tabular-nums; }
+    #reportRoot .summary-line.grand {
+      margin-top: 3mm; padding-top: 4mm;
+      border-top: 0.5pt solid #1d4ed8;
+    }
+    #reportRoot .summary-line.grand .label { font-size: 14pt; font-weight: 600; }
+    #reportRoot .summary-line.grand .amt {
+      font-size: 22pt; font-weight: 700; color: #1d4ed8;
+    }
+    #reportRoot .summary-notes {
+      margin-top: 5mm; padding-top: 3mm;
+      border-top: 0.25pt solid #e5e7eb;
+      font-size: 10pt; color: #374151; white-space: pre-wrap;
+    }
+    #reportRoot .summary-notes strong { font-weight: 600; color: #111827; }
   }
 
   /* Past-month banner — appears when the selected period is older than
@@ -286,10 +347,7 @@ export const WORKSHEET_HTML = `<!doctype html>
   <span>⚠️ <strong>กำลังแก้ไขเดือน<span id="pastMonthName2"></span></strong> (ย้อนหลัง) — บันทึกอัตโนมัติเปิดอยู่ การเปลี่ยนแปลงจะไม่กระทบคำขอที่ส่งไปแล้ว</span>
 </div>
 
-<div class="print-only" id="printHeader">
-  <h2 id="printTitle">ตารางคำนวณเงินเดือน</h2>
-  <div class="meta" id="printMeta"></div>
-</div>
+<div id="reportRoot"></div>
 
 <fieldset>
   <legend>ข้อมูลทั่วไป &middot; สรุป</legend>
@@ -1391,32 +1449,113 @@ refreshAccountsIndex().then(() => {
   updateRestoreUI();
 });
 
-// Print: build a clean report header just-in-time and call window.print().
-// CSS hides the editable chrome and shows the .print-only block in print
-// preview / output. Auto-trigger when the URL has ?print=1 — used by the
-// "พิมพ์" buttons on /status to one-shot a printable report.
-function buildPrintHeader() {
+// Print: build a per-employee A4 portrait report on demand. CSS hides
+// the editable view and shows #reportRoot only in print media. Auto-
+// triggered by ?print=1 (used from /status's 🖨 links).
+
+const REPORT_DEDUCT_ORDER = ["socialSecurity","savings","advance","loan","interest","roomCost","leave","otherDeduction"];
+const REPORT_ADD_ORDER = ["commission","breakfast","ot","otherAddition"];
+const REPORT_FIELD_LABEL = {
+  socialSecurity: "ประกันสังคม 3%",
+  savings: "เงินสะสม 5%",
+  advance: "เบิกล่วงหน้า",
+  loan: "เงินยืม",
+  interest: "ดอกเบี้ย 1.50%",
+  roomCost: "ค่าห้องพัก",
+  leave: "ลากิจ / ลาชม / ลาป่วย",
+  otherDeduction: "อื่นๆ",
+  commission: "คอมมิชชั่น",
+  breakfast: "ทำอาหารเช้า 7%",
+  ot: "ค่าโอที",
+  otherAddition: "รับอื่นๆ",
+};
+
+function buildEmpCard(r, idx) {
+  const lines = [];
+  lines.push(
+    \`<div class="emp-line salary"><span class="label">เงินเดือน</span>\` +
+    \`<span class="amt">\${fmt(num(r.salary))}</span></div>\`
+  );
+  for (const k of REPORT_DEDUCT_ORDER) {
+    const v = num(r[k]);
+    if (v <= 0) continue;
+    lines.push(
+      \`<div class="emp-line deduct"><span class="label">หัก \${REPORT_FIELD_LABEL[k]}</span>\` +
+      \`<span class="amt">−\${fmt(v)}</span></div>\`
+    );
+  }
+  for (const k of REPORT_ADD_ORDER) {
+    const v = num(r[k]);
+    if (v <= 0) continue;
+    lines.push(
+      \`<div class="emp-line add"><span class="label">+ \${REPORT_FIELD_LABEL[k]}</span>\` +
+      \`<span class="amt">+\${fmt(v)}</span></div>\`
+    );
+  }
+  const noteHtml = (r.note && r.note.trim())
+    ? \`<div class="emp-note">หมายเหตุ: \${escapeHtml(r.note)}</div>\`
+    : "";
+  const account = displayAccount(r);
+  return \`<div class="emp-card">
+    <div class="emp-head">
+      <span class="emp-num">\${String(idx + 1).padStart(2, "0")}</span>
+      <span class="emp-name">\${escapeHtml(r.accountName || "—")}</span>
+      \${r.nickname ? \`<span class="emp-nick">(\${escapeHtml(r.nickname)})</span>\` : ""}
+      \${r.position ? \`<span class="emp-pos">\${escapeHtml(r.position)}</span>\` : ""}
+      <span class="emp-account">\${escapeHtml(account)}</span>
+    </div>
+    \${lines.join("")}
+    \${noteHtml}
+    <div class="emp-takehome">
+      <span class="label">รวมรับสุทธิ</span>
+      <span class="amt">฿\${fmt(rowTakeHome(r))}</span>
+    </div>
+  </div>\`;
+}
+
+function buildReport(sheet) {
+  const period = sheet.period || currentPeriod || "";
+  const periodLabel = periodMonthLabelTH(period);
+  const totalAll = sheet.rows.reduce((s, r) => s + rowTakeHome(r), 0);
+  const recipientCount = sheet.rows.filter((r) => rowTakeHome(r) > 0).length;
+  const snapId = readonly ? (new URLSearchParams(window.location.search).get("snapshot") || "") : "";
   const title = readonly ? "รายงานคำขอโอนเงินเดือน (snapshot)" : "ตารางคำนวณเงินเดือน";
-  document.getElementById("printTitle").textContent = title;
-  const parts = [];
-  if (currentPeriod) parts.push(\`<strong>เดือน</strong> \${escapeHtml(periodMonthLabelTH(currentPeriod))}\`);
-  if (currentSheet && currentSheet.effectiveDate) {
-    parts.push(\`<strong>วันที่เงินเข้าบัญชี</strong> \${escapeHtml(currentSheet.effectiveDate)}\`);
-  }
-  if (readonly) {
-    const id = new URLSearchParams(window.location.search).get("snapshot") || "";
-    if (id) parts.push(\`<strong>คำขอ</strong> \${escapeHtml(id)}\`);
-  }
-  const total = currentSheet && currentSheet.rows
-    ? currentSheet.rows.reduce((s, r) => s + rowTakeHome(r), 0)
-    : 0;
-  parts.push(\`<strong>ยอดรวม</strong> ฿\${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\`);
-  parts.push(\`<strong>พิมพ์เมื่อ</strong> \${new Date().toLocaleString("th-TH-u-ca-buddhist")}\`);
-  document.getElementById("printMeta").innerHTML = parts.join(" · ");
+
+  const metaParts = [];
+  if (periodLabel) metaParts.push(\`<strong>เดือน</strong>\${escapeHtml(periodLabel)}\`);
+  if (sheet.effectiveDate) metaParts.push(\`<strong>วันที่เงินเข้าบัญชี</strong>\${escapeHtml(sheet.effectiveDate)}\`);
+  if (snapId) metaParts.push(\`<strong>คำขอ</strong><code>\${escapeHtml(snapId)}</code>\`);
+  metaParts.push(\`<strong>พิมพ์เมื่อ</strong>\${new Date().toLocaleString("th-TH-u-ca-buddhist")}\`);
+
+  const cards = sheet.rows.map((r, i) => buildEmpCard(r, i)).join("");
+
+  const generalNotesHtml = (sheet.generalNotes && sheet.generalNotes.trim())
+    ? \`<div class="summary-notes"><strong>หมายเหตุทั่วไป</strong><br>\${escapeHtml(sheet.generalNotes)}</div>\`
+    : "";
+
+  return \`
+    <div class="report-header">
+      <h1>\${title}</h1>
+      <div class="report-meta">\${metaParts.join(" · ")}</div>
+    </div>
+    \${cards}
+    <div class="report-summary">
+      <div class="summary-line">
+        <span class="label">จำนวนผู้รับโอน</span>
+        <span class="amt">\${recipientCount} คน</span>
+      </div>
+      <div class="summary-line grand">
+        <span class="label">รวมยอดโอนทั้งสิ้น</span>
+        <span class="amt">฿\${fmt(totalAll)}</span>
+      </div>
+      \${generalNotesHtml}
+    </div>
+  \`;
 }
 
 document.getElementById("printBtn").addEventListener("click", () => {
-  buildPrintHeader();
+  if (!currentSheet) return;
+  document.getElementById("reportRoot").innerHTML = buildReport(currentSheet);
   window.print();
 });
 
@@ -1438,9 +1577,12 @@ document.getElementById("unlockPast").addEventListener("click", () => {
 });
 
 function maybeAutoPrint() {
-  if (!autoPrint) return;
+  if (!autoPrint || !currentSheet) return;
   // Defer one tick so the layout settles after renderRows().
-  setTimeout(() => { buildPrintHeader(); window.print(); }, 250);
+  setTimeout(() => {
+    document.getElementById("reportRoot").innerHTML = buildReport(currentSheet);
+    window.print();
+  }, 250);
 }
 
 if (readonly) {
