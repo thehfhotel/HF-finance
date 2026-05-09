@@ -1,3 +1,5 @@
+import { ZOOM_HTML } from "./zoom";
+
 export const ACCOUNTS_HTML = `<!doctype html>
 <html lang="th">
 <head>
@@ -42,9 +44,11 @@ export const ACCOUNTS_HTML = `<!doctype html>
   <h1>จัดการบัญชี</h1>
   <nav>
     <a href="/">สร้างไฟล์</a>
+    <a href="/worksheet">คำนวณเงินเดือน</a>
     <a href="/accounts" class="active">จัดการบัญชี</a>
     <a href="/approvals">คิวอนุมัติ</a>
   </nav>
+  ${ZOOM_HTML}
 </header>
 
 <fieldset>
