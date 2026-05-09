@@ -172,14 +172,20 @@ export const WORKSHEET_HTML = `<!doctype html>
   #historyPanel a:hover { text-decoration: underline; }
 
   /* Report (PDF) view. Built on demand into #reportRoot, hidden on screen,
-     swapped for the editable view in @media print. Per-employee compact
-     cards in A4 portrait, grayscale only — see buildReport() in JS.
-     Density target ~5 cards/page for typical employees, with
-     break-inside:avoid pushing heavy ones to next page. */
+     swapped for the editable view in @media print. Two modes:
+       - cards    → per-employee compact cards, A4 portrait (default)
+       - table    → single-page summary table, A4 landscape
+     The mode is selected by the body class set at print time. */
   #reportRoot { display: none; }
   @media print {
-    @page { size: A4 portrait; margin: 14mm 14mm 16mm 14mm; }
-    @page { @bottom-right { content: counter(page) " / " counter(pages); font: 8pt "Noto Sans Thai", sans-serif; color: #737373; } }
+    /* Named pages: body class chooses which size/margin applies. */
+    @page portrait-page { size: A4 portrait; margin: 14mm 14mm 16mm 14mm; @bottom-right { content: counter(page) " / " counter(pages); font: 8pt "Noto Sans Thai", sans-serif; color: #737373; } }
+    @page landscape-page { size: A4 landscape; margin: 8mm 10mm; }
+    body.print-cards { page: portrait-page; }
+    body.print-table { page: landscape-page; }
+    /* Default fallback: someone hits Ctrl+P from a normal screen view —
+       still get something printable rather than the wide editable table. */
+    body { page: portrait-page; }
     body { max-width: none; margin: 0; padding: 0; color: #0a0a0a; background: #fff; }
     body > * { display: none !important; }
     body > #reportRoot { display: block !important; }
@@ -269,6 +275,58 @@ export const WORKSHEET_HTML = `<!doctype html>
       font-size: 9pt; color: #404040; white-space: pre-wrap;
     }
     #reportRoot .summary-notes strong { font-weight: 600; color: #0a0a0a; }
+
+    /* ── Table mode (A4 landscape, fit-on-one-page summary) ───────────── */
+    #reportRoot.mode-table { font: 7.5pt/1.25 "Noto Sans Thai", sans-serif; }
+    #reportRoot.mode-table .report-header {
+      margin-bottom: 2mm; padding-bottom: 1.5mm;
+      border-bottom: 0.5pt solid #404040;
+    }
+    #reportRoot.mode-table .report-header h1 {
+      font-size: 11pt; margin: 0 0 0.5mm; font-weight: 600;
+    }
+    #reportRoot.mode-table .report-meta { font-size: 7pt; color: #404040; }
+    #reportRoot.mode-table .report-meta strong { color: #0a0a0a; font-weight: 500; margin-right: 1mm; }
+
+    #reportRoot.mode-table table {
+      width: 100%; border-collapse: collapse; table-layout: fixed;
+      font-variant-numeric: tabular-nums;
+    }
+    #reportRoot.mode-table th,
+    #reportRoot.mode-table td {
+      border: 0.25pt solid #d4d4d4;
+      padding: 0.7mm 1mm; text-align: right;
+      vertical-align: middle;
+    }
+    #reportRoot.mode-table th {
+      background: #f5f5f5; font-weight: 600; color: #404040;
+      font-size: 6.5pt; line-height: 1.15;
+    }
+    #reportRoot.mode-table td.text { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #reportRoot.mode-table td.idx { text-align: center; color: #737373; font-size: 6.5pt; }
+    #reportRoot.mode-table td.acct {
+      text-align: left; font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 6.8pt; color: #404040;
+    }
+    #reportRoot.mode-table td.calc { font-weight: 600; }
+    #reportRoot.mode-table td.takehome { font-weight: 700; color: #0a0a0a; background: #f5f5f5; }
+    #reportRoot.mode-table td.zero { color: #d4d4d4; }
+    #reportRoot.mode-table tfoot td {
+      font-weight: 700; background: #fafafa;
+      border-top: 0.6pt solid #404040;
+    }
+    #reportRoot.mode-table .table-summary {
+      margin-top: 3mm; padding-top: 2mm; border-top: 0.5pt solid #d4d4d4;
+      display: flex; gap: 8mm; font-size: 8pt; color: #404040;
+    }
+    #reportRoot.mode-table .table-summary strong { color: #0a0a0a; font-weight: 600; margin-right: 1mm; }
+    #reportRoot.mode-table .table-summary .grand {
+      margin-left: auto; font-size: 12pt; font-weight: 700; color: #0a0a0a;
+    }
+    #reportRoot.mode-table .table-notes {
+      margin-top: 2mm; font-size: 7.5pt; color: #404040; white-space: pre-wrap;
+    }
+    #reportRoot.mode-table .table-notes strong { font-weight: 600; color: #0a0a0a; }
   }
 
   /* Past-month banner — appears when the selected period is older than
@@ -379,7 +437,8 @@ export const WORKSHEET_HTML = `<!doctype html>
         <div id="colsMenu" hidden></div>
       </div>
       <button type="button" id="lockToggle" title="สลับโหมดแก้ไขข้อมูลพื้นฐาน">🔓 ปลดล็อคข้อมูลพื้นฐาน</button>
-      <button type="button" id="printBtn" title="พิมพ์รายงาน">🖨 พิมพ์</button>
+      <button type="button" id="printBtn" title="พิมพ์รายงานแบบรายตัว (A4 portrait)">🖨 รายตัว</button>
+      <button type="button" id="printTableBtn" title="พิมพ์ตารางสรุปทั้งหน้า (A4 landscape)">🖨 ตาราง</button>
       <button type="button" id="submit" class="primary">ส่งให้อนุมัติ</button>
     </div>
   </div>
@@ -1555,9 +1614,152 @@ function buildReport(sheet) {
   \`;
 }
 
+// Short labels for table-mode headers — vertical/horizontal space is tight
+// in landscape A4. Maps to the same field keys as REPORT_FIELD_LABEL.
+const TABLE_HEADERS = {
+  socialSecurity: "ปกส.<br>3%",
+  savings: "สะสม<br>5%",
+  advance: "เบิก",
+  loan: "ยืม",
+  interest: "ดบ.<br>1.5%",
+  roomCost: "ห้อง",
+  leave: "ลา",
+  otherDeduction: "อื่นๆ",
+  commission: "คอมฯ",
+  breakfast: "อาหาร<br>7%",
+  ot: "OT",
+  otherAddition: "อื่นๆ",
+};
+
+function tableCell(v) {
+  const n = num(v);
+  if (n <= 0) return \`<td class="zero">—</td>\`;
+  return \`<td>\${fmt(n)}</td>\`;
+}
+
+function buildTableReport(sheet) {
+  const period = sheet.period || currentPeriod || "";
+  const periodLabel = periodMonthLabelTH(period);
+  const totalAll = sheet.rows.reduce((s, r) => s + rowTakeHome(r), 0);
+  const recipientCount = sheet.rows.filter((r) => rowTakeHome(r) > 0).length;
+  const snapId = readonly ? (new URLSearchParams(window.location.search).get("snapshot") || "") : "";
+  const title = readonly ? "ตารางสรุปคำขอโอนเงินเดือน (snapshot)" : "ตารางสรุปเงินเดือน";
+
+  const metaParts = [];
+  if (periodLabel) metaParts.push(\`<strong>เดือน</strong>\${escapeHtml(periodLabel)}\`);
+  if (sheet.effectiveDate) metaParts.push(\`<strong>วันที่เงินเข้าบัญชี</strong>\${escapeHtml(sheet.effectiveDate)}\`);
+  if (snapId) metaParts.push(\`<strong>คำขอ</strong><code>\${escapeHtml(snapId)}</code>\`);
+  metaParts.push(\`<strong>พิมพ์เมื่อ</strong>\${new Date().toLocaleString("th-TH-u-ca-buddhist")}\`);
+
+  const sums = {};
+  const allKeys = ["salary", ...REPORT_DEDUCT_ORDER, ...REPORT_ADD_ORDER];
+  for (const k of allKeys) sums[k] = 0;
+  let sumDeduct = 0, sumAdd = 0, sumTake = 0;
+
+  const rows = sheet.rows.map((r, i) => {
+    for (const k of allKeys) sums[k] += num(r[k]);
+    const ded = REPORT_DEDUCT_ORDER.reduce((s, k) => s + num(r[k]), 0);
+    const add = REPORT_ADD_ORDER.reduce((s, k) => s + num(r[k]), 0);
+    const take = rowTakeHome(r);
+    sumDeduct += ded; sumAdd += add; sumTake += take;
+    return \`<tr>
+      <td class="idx">\${i + 1}</td>
+      <td class="text">\${escapeHtml(r.accountName || "—")}</td>
+      <td class="acct">\${escapeHtml(displayAccount(r))}</td>
+      <td class="text">\${escapeHtml(r.position || "")}</td>
+      \${tableCell(r.salary)}
+      \${REPORT_DEDUCT_ORDER.map((k) => tableCell(r[k])).join("")}
+      <td class="calc">\${ded > 0 ? fmt(ded) : '<span class="zero">—</span>'}</td>
+      \${REPORT_ADD_ORDER.map((k) => tableCell(r[k])).join("")}
+      <td class="calc">\${add > 0 ? fmt(add) : '<span class="zero">—</span>'}</td>
+      <td class="takehome">\${fmt(take)}</td>
+      <td class="text" title="\${escapeHtml(r.note || "")}">\${escapeHtml(r.note || "")}</td>
+    </tr>\`;
+  }).join("");
+
+  // colgroup with explicit widths so 21 columns squeeze evenly across A4
+  // landscape. Adjust here if a deployment regularly truncates a column.
+  const colgroup = \`<colgroup>
+    <col style="width:3.2%">
+    <col style="width:11%">
+    <col style="width:7.5%">
+    <col style="width:6%">
+    <col style="width:5.5%">
+    \${REPORT_DEDUCT_ORDER.map(() => '<col style="width:4.4%">').join("")}
+    <col style="width:5%">
+    \${REPORT_ADD_ORDER.map(() => '<col style="width:4.4%">').join("")}
+    <col style="width:5%">
+    <col style="width:6.2%">
+    <col style="width:7%">
+  </colgroup>\`;
+
+  const generalNotesHtml = (sheet.generalNotes && sheet.generalNotes.trim())
+    ? \`<div class="table-notes"><strong>หมายเหตุทั่วไป:</strong> \${escapeHtml(sheet.generalNotes)}</div>\`
+    : "";
+
+  return \`
+    <div class="report-header">
+      <h1>\${title}</h1>
+      <div class="report-meta">\${metaParts.join(" · ")}</div>
+    </div>
+    <table>
+      \${colgroup}
+      <thead>
+        <tr>
+          <th>ลำดับ</th>
+          <th>ชื่อ-สกุล</th>
+          <th>บัญชี</th>
+          <th>ตำแหน่ง</th>
+          <th>เงินเดือน</th>
+          \${REPORT_DEDUCT_ORDER.map((k) => \`<th>\${TABLE_HEADERS[k]}</th>\`).join("")}
+          <th>รวมหัก</th>
+          \${REPORT_ADD_ORDER.map((k) => \`<th>\${TABLE_HEADERS[k]}</th>\`).join("")}
+          <th>รวมเพิ่ม</th>
+          <th>รับสุทธิ</th>
+          <th>หมายเหตุ</th>
+        </tr>
+      </thead>
+      <tbody>\${rows}</tbody>
+      <tfoot>
+        <tr>
+          <td colspan="4" class="text" style="text-align:right">รวม</td>
+          <td>\${fmt(sums.salary)}</td>
+          \${REPORT_DEDUCT_ORDER.map((k) => \`<td>\${sums[k] > 0 ? fmt(sums[k]) : '<span class="zero">—</span>'}</td>\`).join("")}
+          <td>\${fmt(sumDeduct)}</td>
+          \${REPORT_ADD_ORDER.map((k) => \`<td>\${sums[k] > 0 ? fmt(sums[k]) : '<span class="zero">—</span>'}</td>\`).join("")}
+          <td>\${fmt(sumAdd)}</td>
+          <td class="takehome">\${fmt(sumTake)}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+    <div class="table-summary">
+      <span><strong>จำนวนผู้รับโอน</strong>\${recipientCount} คน</span>
+      <span class="grand">รวมยอดโอน \${fmt(totalAll)}</span>
+    </div>
+    \${generalNotesHtml}
+  \`;
+}
+
+function setPrintMode(mode) {
+  document.body.classList.remove("print-cards", "print-table");
+  document.body.classList.add(\`print-\${mode}\`);
+  const root = document.getElementById("reportRoot");
+  root.classList.remove("mode-cards", "mode-table");
+  root.classList.add(\`mode-\${mode}\`);
+}
+
 document.getElementById("printBtn").addEventListener("click", () => {
   if (!currentSheet) return;
+  setPrintMode("cards");
   document.getElementById("reportRoot").innerHTML = buildReport(currentSheet);
+  window.print();
+});
+
+document.getElementById("printTableBtn").addEventListener("click", () => {
+  if (!currentSheet) return;
+  setPrintMode("table");
+  document.getElementById("reportRoot").innerHTML = buildTableReport(currentSheet);
   window.print();
 });
 
@@ -1581,8 +1783,12 @@ document.getElementById("unlockPast").addEventListener("click", () => {
 function maybeAutoPrint() {
   if (!autoPrint || !currentSheet) return;
   // Defer one tick so the layout settles after renderRows().
+  // Mode is picked from ?print=cards|table; defaults to cards.
+  const mode = new URLSearchParams(window.location.search).get("print") === "table" ? "table" : "cards";
   setTimeout(() => {
-    document.getElementById("reportRoot").innerHTML = buildReport(currentSheet);
+    setPrintMode(mode);
+    const root = document.getElementById("reportRoot");
+    root.innerHTML = mode === "table" ? buildTableReport(currentSheet) : buildReport(currentSheet);
     window.print();
   }, 250);
 }
