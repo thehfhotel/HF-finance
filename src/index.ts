@@ -5,10 +5,12 @@ import { buildWorkbook, buildBeneficiaryWorkbook } from "./excel";
 import { MAIN_HTML } from "./views/main";
 import { ACCOUNTS_HTML } from "./views/accounts";
 import { APPROVALS_HTML } from "./views/approvals";
+import { WORKSHEET_HTML } from "./views/worksheet";
 import { addAccount, deleteAccount, listAccounts, updateAccount } from "./store";
 import { loadRegistered, registeredSet } from "./registered";
 import { getRequest, listRequests, submitRequest, updateRequest } from "./queue";
 import { notifySlack } from "./slack";
+import { isValidPeriod, loadSheet, saveSheet } from "./sheets";
 
 const html = (body: string) =>
   new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
@@ -33,6 +35,7 @@ const newOtp = () => String(randomInt(100000, 1_000_000));
 
 const app = new Elysia()
   .get("/", () => html(MAIN_HTML))
+  .get("/worksheet", () => html(WORKSHEET_HTML))
   .get("/accounts", () => html(ACCOUNTS_HTML))
   .get("/approvals", () => html(APPROVALS_HTML))
   .get("/health", () => "ok")
@@ -55,6 +58,50 @@ const app = new Elysia()
     set.status = 204;
     return "";
   })
+
+  .get("/api/sheets/:period", async ({ params, set }) => {
+    if (!isValidPeriod(params.period)) { set.status = 400; return "invalid period (expected YYYY-MM)"; }
+    return loadSheet(params.period);
+  })
+  .put(
+    "/api/sheets/:period",
+    async ({ params, body, set }) => {
+      if (!isValidPeriod(params.period)) { set.status = 400; return "invalid period (expected YYYY-MM)"; }
+      return saveSheet(params.period, body);
+    },
+    {
+      body: t.Object({
+        effectiveDate: t.String({ maxLength: 10 }),
+        generalNotes: t.String({ maxLength: 5000 }),
+        dismissed: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 40 }), { maxItems: 500 })),
+        rows: t.Array(
+          t.Object({
+            accountId: t.String({ minLength: 1, maxLength: 40 }),
+            accountNumber: t.String({ maxLength: 30 }),
+            accountName: t.String({ maxLength: 100 }),
+            bank: t.String({ maxLength: 20 }),
+            nickname: t.String({ maxLength: 50 }),
+            position: t.String({ maxLength: 50 }),
+            salary: t.Number({ minimum: 0 }),
+            socialSecurity: t.Number({ minimum: 0 }),
+            savings: t.Number({ minimum: 0 }),
+            advance: t.Number({ minimum: 0 }),
+            loan: t.Number({ minimum: 0 }),
+            interest: t.Number({ minimum: 0 }),
+            roomCost: t.Number({ minimum: 0 }),
+            leave: t.Number({ minimum: 0 }),
+            otherDeduction: t.Number({ minimum: 0 }),
+            commission: t.Number({ minimum: 0 }),
+            breakfast: t.Number({ minimum: 0 }),
+            ot: t.Number({ minimum: 0 }),
+            otherAddition: t.Number({ minimum: 0 }),
+            note: t.String({ maxLength: 500 }),
+          }),
+          { maxItems: 200 }
+        ),
+      }),
+    }
+  )
 
   .post(
     "/generate-beneficiary",

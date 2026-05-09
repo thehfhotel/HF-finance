@@ -1,0 +1,140 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { listAccounts } from "./store";
+
+const SHEETS_DIR = process.env.SHEETS_DIR ?? "data/sheets";
+
+export type SheetRow = {
+  accountId: string;
+  accountNumber: string;
+  accountName: string;
+  bank: string;
+  nickname: string;
+  position: string;
+  // Inputs (deductions)
+  salary: number;
+  socialSecurity: number;
+  savings: number;
+  advance: number;
+  loan: number;
+  interest: number;
+  roomCost: number;
+  leave: number;
+  otherDeduction: number;
+  // Inputs (additions)
+  commission: number;
+  breakfast: number;
+  ot: number;
+  otherAddition: number;
+  // Per-row note
+  note: string;
+};
+
+export type Sheet = {
+  period: string;          // YYYY-MM
+  effectiveDate: string;   // dd/mm/yyyy Gregorian, blank until set
+  rows: SheetRow[];
+  generalNotes: string;
+  // accountIds the user explicitly removed from this sheet — prevents
+  // loadSheet's reconciliation loop from re-adding them on next load.
+  dismissed: string[];
+  updatedAt: string;
+};
+
+const PERIOD_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+export function isValidPeriod(p: string): boolean {
+  return PERIOD_RE.test(p);
+}
+
+function emptyRow(a: { id: string; accountNumber: string; accountName: string }): SheetRow {
+  return {
+    accountId: a.id,
+    accountNumber: a.accountNumber,
+    accountName: a.accountName,
+    bank: "KBANK",
+    nickname: "",
+    position: "",
+    salary: 0, socialSecurity: 0, savings: 0, advance: 0, loan: 0,
+    interest: 0, roomCost: 0, leave: 0, otherDeduction: 0,
+    commission: 0, breakfast: 0, ot: 0, otherAddition: 0,
+    note: "",
+  };
+}
+
+// Backfill new fields on rows persisted before they existed. For old rows
+// where the bank prefix was embedded in accountNumber (e.g. "KTB-957-..."),
+// split it out into the bank field.
+function normalize(row: any): SheetRow {
+  if (typeof row.nickname !== "string") row.nickname = "";
+  if (typeof row.position !== "string") row.position = "";
+  if (typeof row.bank !== "string") {
+    const m = String(row.accountNumber || "").match(/^([A-Za-z]+)\s*-\s*(.+)$/);
+    if (m) {
+      row.bank = m[1].toUpperCase();
+      row.accountNumber = m[2].replace(/\s+/g, "");
+    } else {
+      row.bank = "KBANK";
+    }
+  }
+  return row as SheetRow;
+}
+
+function path(period: string): string {
+  return join(SHEETS_DIR, `${period}.json`);
+}
+
+async function readSheet(period: string): Promise<Sheet | null> {
+  try {
+    const buf = await readFile(path(period), "utf8");
+    return JSON.parse(buf) as Sheet;
+  } catch {
+    return null;
+  }
+}
+
+export async function loadSheet(period: string): Promise<Sheet> {
+  const accounts = await listAccounts();
+  const existing = await readSheet(period);
+  // Reconcile: keep existing rows in their original order, then append any
+  // roster accounts that don't yet have a row (e.g. account added mid-month).
+  // Removed accounts retain their historical row.
+  const sheet: Sheet = existing ?? {
+    period,
+    effectiveDate: "",
+    rows: [],
+    generalNotes: "",
+    dismissed: [],
+    updatedAt: new Date().toISOString(),
+  };
+  if (!Array.isArray(sheet.dismissed)) sheet.dismissed = [];
+  sheet.rows = sheet.rows.map(normalize);
+  const have = new Set(sheet.rows.map((r) => r.accountId));
+  const dismissed = new Set(sheet.dismissed);
+  for (const a of accounts) {
+    if (!have.has(a.id) && !dismissed.has(a.id)) sheet.rows.push(emptyRow(a));
+  }
+  return sheet;
+}
+
+export async function saveSheet(period: string, input: Omit<Sheet, "period" | "updatedAt">): Promise<Sheet> {
+  await mkdir(SHEETS_DIR, { recursive: true });
+  const sheet: Sheet = {
+    period,
+    effectiveDate: input.effectiveDate,
+    rows: input.rows,
+    generalNotes: input.generalNotes,
+    dismissed: Array.isArray(input.dismissed) ? input.dismissed : [],
+    updatedAt: new Date().toISOString(),
+  };
+  await writeFile(path(period), JSON.stringify(sheet, null, 2), "utf8");
+  return sheet;
+}
+
+export function takeHome(r: SheetRow): number {
+  const deductions =
+    r.socialSecurity + r.savings + r.advance + r.loan +
+    r.interest + r.roomCost + r.leave + r.otherDeduction;
+  const additions = r.commission + r.breakfast + r.ot + r.otherAddition;
+  return Math.round((r.salary - deductions + additions) * 100) / 100;
+}
