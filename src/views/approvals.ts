@@ -1,5 +1,10 @@
 import { ZOOM_HTML } from "./zoom";
 
+// Admin queue management. Pending requests get full action cards (approve /
+// reject / download / drill into snapshot); everything else collapses to
+// single-line history rows. Visual language mirrors /status — same pills,
+// border-left status colors, typography.
+
 export const APPROVALS_HTML = `<!doctype html>
 <html lang="th">
 <head>
@@ -8,54 +13,124 @@ export const APPROVALS_HTML = `<!doctype html>
 <title>คิวอนุมัติ - KBIZ Payroll</title>
 <style>
   :root { font: 16px/1.5 "Noto Sans Thai", system-ui, sans-serif; }
-  body { max-width: 1500px; margin: 20px auto; padding: 0 20px; color: #1a1a1a; }
-  header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
-  h1 { font-size: 22px; margin: 0; flex: 1; }
+  body { max-width: 880px; margin: 24px auto; padding: 0 20px; color: #1a1a1a; }
+  header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+  h1 { font-size: 22px; margin: 0; flex: 1; font-weight: 600; }
   nav a { color: #1d4ed8; text-decoration: none; margin-left: 14px; font-size: 15px; }
   nav a.active { font-weight: 600; }
-  fieldset { border: 1px solid #d1d5db; padding: 16px 18px; margin: 0 0 16px; border-radius: 6px; }
-  legend { padding: 4px 12px; color: #111827; background: #fff; font-size: 16px; font-weight: 700; border-radius: 4px; }
-  button { cursor: pointer; border: 1px solid #888; background: #fff; border-radius: 4px; font: inherit; padding: 6px 12px; white-space: nowrap; }
-  button.primary { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
-  button.danger { color: #b91c1c; border-color: #ddd; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
-  th { background: #f3f4f6; font-weight: 600; font-size: 14px; border-bottom: 1px solid #ddd; }
-  td.acct { font-variant-numeric: tabular-nums; color: #374151; }
-  td.num { text-align: right; font-variant-numeric: tabular-nums; }
-  .empty { color: #9ca3af; padding: 16px; text-align: center; }
-  .badge { display: inline-block; padding: 3px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
-  .badge-pending { background: #fef3c7; color: #92400e; }
-  .badge-approved { background: #dbeafe; color: #1d4ed8; }
-  .badge-rejected { background: #fee2e2; color: #b91c1c; }
-  .badge-running { background: #ede9fe; color: #6d28d9; }
-  .badge-done { background: #d1fae5; color: #047857; }
-  .badge-failed { background: #fee2e2; color: #b91c1c; }
-  .req-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; background: #fff; }
-  .req-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
-  .req-id { font-family: monospace; font-size: 12px; color: #6b7280; }
-  .req-type { font-weight: 600; }
-  .req-meta { color: #6b7280; font-size: 13px; margin-bottom: 8px; }
-  .req-actions { margin-left: auto; display: flex; gap: 8px; }
-  .req-summary table { margin-top: 6px; }
-  .filter { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
-  .filter button { padding: 4px 10px; }
-  .filter button.active { background: #111827; color: #fff; border-color: #111827; }
-  .audit { font-size: 12px; color: #6b7280; margin-top: 8px; }
-  .result { background: #f9fafb; border-left: 4px solid #047857; padding: 8px 12px; margin-top: 8px; font-size: 14px; }
-  .result.fail { border-left-color: #b91c1c; background: #fef2f2; }
-  .err { color: #b91c1c; }
-  .ok { color: #047857; }
-  details summary { cursor: pointer; color: #1d4ed8; font-size: 14px; user-select: none; }
-  details[open] summary { margin-bottom: 8px; }
-  dialog { border: 1px solid #d1d5db; border-radius: 8px; padding: 0; max-width: 420px; width: 92%; }
-  dialog::backdrop { background: rgba(15,23,42,0.5); }
-  dialog .body { padding: 18px 22px; }
+  h2 { font-size: 14px; font-weight: 500; color: #6b7280; margin: 32px 0 10px; letter-spacing: 0.02em; }
+
+  .updated { font-size: 12px; color: #9ca3af; margin-bottom: 12px; transition: color 0.4s; }
+  .updated.pulse { color: #047857; }
+
+  /* Pending card — hero-style, since admin needs to act on it. */
+  .pcard {
+    border: 1px solid #e5e7eb; border-radius: 10px; padding: 22px 26px;
+    background: #fff; border-left: 4px solid #f59e0b;
+    margin-bottom: 14px;
+  }
+  .pcard.s-approved { border-left-color: #1d4ed8; }
+  .pcard.s-running { border-left-color: #6d28d9; }
+  .pcard-row1 { display: flex; align-items: baseline; gap: 12px; }
+  .pcard-row1 .ago { color: #6b7280; font-size: 14px; }
+  .pcard-headline { font-size: 18px; font-weight: 600; margin-top: 8px; }
+  .pcard-figures { margin-top: 4px; color: #4b5563; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .pcard-figures .amount { color: #0f172a; font-weight: 600; font-size: 18px; }
+  .pcard-state {
+    margin-top: 14px; padding: 8px 12px; border-radius: 6px;
+    font-size: 13px; color: #4b5563; background: #f9fafb;
+  }
+  .pcard-actions {
+    margin-top: 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  }
+  .pcard-actions a { color: #1d4ed8; text-decoration: none; font-size: 13px; }
+  .pcard-actions a:hover { text-decoration: underline; }
+  .pcard-actions a.spacer { color: #d1d5db; }
+  .pcard-actions button {
+    font: inherit; padding: 7px 14px; border-radius: 6px; border: 1px solid #d1d5db;
+    background: #fff; cursor: pointer;
+  }
+  .pcard-actions button.primary { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+  .pcard-actions button.primary:hover { background: #1e40af; }
+  .pcard-actions button.danger { color: #b91c1c; border-color: #fca5a5; }
+  .pcard-actions button.danger:hover { background: #fef2f2; }
+  .pcard-recipients { margin-top: 16px; }
+  .pcard-recipients summary {
+    cursor: pointer; user-select: none; color: #1d4ed8; font-size: 13px;
+  }
+  .pcard-recipients[open] summary { margin-bottom: 10px; }
+  .pcard-recipients table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .pcard-recipients th, .pcard-recipients td {
+    padding: 6px 10px; text-align: left; border-bottom: 1px solid #f1f5f9;
+  }
+  .pcard-recipients th { background: #f9fafb; font-weight: 500; color: #6b7280; }
+  .pcard-recipients td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pcard-recipients td.acct { font-variant-numeric: tabular-nums; color: #374151; }
+  .pcard-recipients tfoot td {
+    font-weight: 600; border-top: 2px solid #d1d5db; border-bottom: none;
+    color: #1d4ed8;
+  }
+  .pcard-audit { margin-top: 12px; font-size: 12px; color: #9ca3af; }
+  .pcard-audit code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; color: #6b7280; }
+
+  /* Pills */
+  .pill { display: inline-block; padding: 4px 12px; border-radius: 10px; font-size: 13px; font-weight: 600; }
+  .pill.p-pending { background: #fef3c7; color: #92400e; }
+  .pill.p-approved { background: #dbeafe; color: #1d4ed8; }
+  .pill.p-running { background: #ede9fe; color: #6d28d9; }
+  .pill.p-done { background: #d1fae5; color: #047857; }
+  .pill.p-failed { background: #fee2e2; color: #b91c1c; }
+  .pill.p-rejected { background: #fee2e2; color: #b91c1c; }
+
+  /* History rows — single line, muted. Mirrors /status. */
+  .row {
+    display: grid;
+    grid-template-columns: 90px 70px 1fr auto auto auto;
+    gap: 14px; align-items: center;
+    padding: 10px 14px; font-size: 14px;
+    border: 1px solid #f0f0f0; border-radius: 6px; background: #fff;
+    margin-bottom: 6px;
+  }
+  .row.s-failed, .row.s-rejected { border-left: 3px solid #fca5a5; }
+  .row .pill { padding: 2px 8px; font-size: 11px; font-weight: 600; }
+  .row .when { color: #6b7280; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .row .label { color: #1f2937; }
+  .row .figures { color: #6b7280; font-variant-numeric: tabular-nums; font-size: 13px; }
+  .row .ref { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: #6b7280; }
+  .row .links { display: flex; gap: 10px; }
+  .row .links a { color: #1d4ed8; text-decoration: none; font-size: 12px; }
+  .row .links a:hover { text-decoration: underline; }
+
+  .empty { color: #9ca3af; padding: 28px; text-align: center; border: 1px dashed #e5e7eb; border-radius: 8px; }
+
+  .filters {
+    display: flex; gap: 10px; align-items: center; margin: 8px 0 16px;
+    font-size: 13px; color: #6b7280;
+  }
+  .filters select {
+    font: inherit; padding: 4px 8px; border: 1px solid #d1d5db;
+    border-radius: 4px; background: #fff; color: #374151;
+  }
+
+  /* OTP dialog */
+  dialog {
+    border: 0; border-radius: 8px; padding: 22px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15); min-width: 340px;
+  }
+  dialog::backdrop { background: rgba(0,0,0,0.4); }
   dialog h3 { margin: 0 0 8px; font-size: 18px; }
   dialog p { margin: 0 0 14px; color: #4b5563; font-size: 14px; }
-  dialog input { font: 24px/1.2 monospace; padding: 10px 14px; width: 100%; box-sizing: border-box; letter-spacing: 4px; text-align: center; border: 1px solid #ccc; border-radius: 6px; }
+  dialog input {
+    font: 24px/1.2 monospace; padding: 10px 14px; width: 100%; box-sizing: border-box;
+    letter-spacing: 4px; text-align: center; border: 1px solid #ccc; border-radius: 6px;
+  }
   dialog .actions { margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end; }
-  dialog .err { color: #b91c1c; margin-top: 8px; font-size: 13px; }
+  dialog .actions button {
+    font: inherit; padding: 8px 14px; border: 1px solid #d1d5db; background: #fff;
+    border-radius: 4px; cursor: pointer;
+  }
+  dialog .actions button.primary { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+  dialog .err { color: #b91c1c; margin-top: 8px; font-size: 13px; min-height: 18px; }
 </style>
 </head>
 <body>
@@ -71,78 +146,283 @@ export const APPROVALS_HTML = `<!doctype html>
 </header>
 <!--ADMIN_MODAL-->
 
-<fieldset>
-  <legend>คำขอทั้งหมด</legend>
-  <div class="filter" id="filter">
-    <span>สถานะ:</span>
-    <button data-filter="all" class="active">ทั้งหมด</button>
-    <button data-filter="pending">รออนุมัติ</button>
-    <button data-filter="approved">อนุมัติแล้ว</button>
-    <button data-filter="running">กำลังประมวลผล</button>
-    <button data-filter="done">สำเร็จ</button>
-    <button data-filter="failed">ไม่สำเร็จ</button>
-    <button data-filter="rejected">ปฏิเสธ</button>
-    <span style="margin-left:14px;">เดือน:</span>
-    <select id="periodFilter" style="padding:4px 8px;border:1px solid #ccc;border-radius:4px;font:inherit;">
-      <option value="all">ทุกเดือน</option>
-    </select>
-    <span style="margin-left:auto;color:#6b7280;font-size:13px;" id="meta"></span>
-    <button type="button" id="refresh">รีเฟรช</button>
-  </div>
-  <div id="list"></div>
-</fieldset>
+<div class="updated" id="updated">&nbsp;</div>
+
+<div id="filtersHost"></div>
+
+<div id="pendingHost"></div>
+
+<div id="historyHost"></div>
 
 <dialog id="otpDialog">
-  <div class="body">
-    <h3>กรอก OTP</h3>
-    <p>ระบบส่ง OTP ไปที่ Slack แล้ว ดู OTP จาก Slack แล้วกรอกที่นี่ (อายุ 5 นาที)</p>
-    <input id="otpInput" type="text" inputmode="numeric" pattern="\\d{6}" maxlength="6" autocomplete="off">
-    <div class="err" id="otpErr"></div>
-    <div class="actions">
-      <button type="button" id="otpCancel">ยกเลิก</button>
-      <button type="button" id="otpSubmit" class="primary">ยืนยันอนุมัติ</button>
-    </div>
+  <h3>กรอก OTP</h3>
+  <p>ระบบส่ง OTP ไปที่ Slack แล้ว ดู OTP แล้วกรอกที่นี่ (อายุ 5 นาที)</p>
+  <input id="otpInput" type="text" inputmode="numeric" pattern="\\d{6}" maxlength="6" autocomplete="off">
+  <div class="err" id="otpErr"></div>
+  <div class="actions">
+    <button type="button" id="otpCancel">ยกเลิก</button>
+    <button type="button" id="otpSubmit" class="primary">ยืนยันอนุมัติ</button>
   </div>
 </dialog>
 
 <script>
-const list = document.getElementById("list");
-const meta = document.getElementById("meta");
-const periodFilter = document.getElementById("periodFilter");
-let currentFilter = "all";
-let currentPeriod = new URLSearchParams(window.location.search).get("period") || "all";
-let cache = [];
-
-const TH_MONTHS = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน",
-                   "กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
-
-function periodLabel(p) {
-  if (!p || !/^\\d{4}-\\d{2}$/.test(p)) return p || "—";
-  const [y, m] = p.split("-").map(Number);
-  return \`\${TH_MONTHS[m-1]} \${y + 543}\`;
-}
-
-// Convert effectiveDate "DD/MM/YYYY" (Gregorian) → "YYYY-MM" period key.
-// Used as a fallback for queue items predating the period field.
-function periodFromEffective(eff) {
-  if (!eff) return null;
-  const m = /^(\\d{2})\\/(\\d{2})\\/(\\d{4})$/.exec(eff);
-  return m ? \`\${m[3]}-\${m[2]}\` : null;
-}
-
-function reqPeriod(req) {
-  if (req.summary && req.summary.period) return req.summary.period;
-  if (req.summary && req.summary.effectiveDate) return periodFromEffective(req.summary.effectiveDate);
-  return null;
-}
-
+const pendingHost = document.getElementById("pendingHost");
+const historyHost = document.getElementById("historyHost");
+const filtersHost = document.getElementById("filtersHost");
+const updatedEl = document.getElementById("updated");
 const otpDialog = document.getElementById("otpDialog");
 const otpInput = document.getElementById("otpInput");
 const otpErr = document.getElementById("otpErr");
 const otpSubmit = document.getElementById("otpSubmit");
 const otpCancel = document.getElementById("otpCancel");
+
+let cache = [];
+let currentPeriod = new URLSearchParams(window.location.search).get("period") || "all";
+let lastFetchedAt = 0;
 let otpTargetId = null;
 
+const STATUS_LABELS = {
+  pending: "รออนุมัติ", approved: "อนุมัติแล้ว",
+  rejected: "ปฏิเสธ", running: "กำลังประมวลผล",
+  done: "สำเร็จ", failed: "ไม่สำเร็จ",
+};
+const STATE_HINTS = {
+  pending: "รอ admin อนุมัติ — กดปุ่มอนุมัติเพื่อขอ OTP",
+  approved: "อนุมัติแล้ว · รอ kbiz-bot รับงาน",
+  running: "kbiz-bot กำลังดำเนินการในระบบ KBIZ…",
+};
+const TH_MONTHS = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน",
+                   "กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function fmtAmount(n) {
+  return Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function formatAccount(n) {
+  const s = String(n).replace(/[^0-9]/g, "");
+  if (s.length === 10) return s.slice(0,3)+"-"+s.slice(3,4)+"-"+s.slice(4,9)+"-"+s.slice(9);
+  return s;
+}
+function periodLabel(p) {
+  if (!p || !/^\\d{4}-\\d{2}$/.test(p)) return p || "—";
+  const [y, m] = p.split("-").map(Number);
+  return \`\${TH_MONTHS[m-1]} \${y + 543}\`;
+}
+function periodFromEffective(eff) {
+  if (!eff) return null;
+  const m = /^(\\d{2})\\/(\\d{2})\\/(\\d{4})$/.exec(eff);
+  return m ? \`\${m[3]}-\${m[2]}\` : null;
+}
+function reqPeriod(req) {
+  if (req.summary && req.summary.period) return req.summary.period;
+  if (req.summary && req.summary.effectiveDate) return periodFromEffective(req.summary.effectiveDate);
+  return null;
+}
+function relativeTime(iso) {
+  if (!iso) return "";
+  const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (sec < 60) return "เมื่อสักครู่";
+  if (sec < 3600) return \`เมื่อ \${Math.floor(sec/60)} นาทีที่แล้ว\`;
+  if (sec < 86400) return \`เมื่อ \${Math.floor(sec/3600)} ชั่วโมงที่แล้ว\`;
+  if (sec < 86400 * 7) return \`เมื่อ \${Math.floor(sec/86400)} วันที่แล้ว\`;
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return \`\${pad(d.getDate())}/\${pad(d.getMonth()+1)}/\${d.getFullYear()+543}\`;
+}
+function fmtDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return \`\${pad(d.getDate())}/\${pad(d.getMonth()+1)}/\${d.getFullYear()+543} \${pad(d.getHours())}:\${pad(d.getMinutes())}\`;
+}
+function shortWhen(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return \`\${pad(d.getDate())}/\${pad(d.getMonth()+1)} \${pad(d.getHours())}:\${pad(d.getMinutes())}\`;
+}
+function effectiveTime(req) {
+  return req.completedAt || req.startedAt || req.approvedAt || req.rejectedAt || req.createdAt;
+}
+function headlineFor(req) {
+  if (req.type === "transfer-payroll") {
+    return \`โอนเงินเดือน \${periodLabel(reqPeriod(req)) || "—"}\`;
+  }
+  if (req.type === "add-payroll") {
+    return "เพิ่มผู้รับเงินใหม่ (KBIZ)";
+  }
+  return req.type;
+}
+function figuresFor(req) {
+  const bits = [];
+  if (req.type === "transfer-payroll") {
+    bits.push(\`\${req.summary.rows.length} คน\`);
+    bits.push(\`<span class="amount">฿\${fmtAmount(req.summary.totalAmount)}</span>\`);
+    if (req.summary.effectiveDate) bits.push(\`เงินเข้า \${escapeHtml(req.summary.effectiveDate)}\`);
+  } else if (req.type === "add-payroll") {
+    bits.push(\`\${req.summary.accounts.length} บัญชี\`);
+  }
+  return bits.join(" · ");
+}
+
+function renderRecipients(req) {
+  if (req.type === "transfer-payroll") {
+    const rows = req.summary.rows.map((r, i) => \`
+      <tr><td>\${i+1}</td><td>\${escapeHtml(r.accountName)}</td>
+      <td class="acct">\${escapeHtml(formatAccount(r.accountNumber))}</td>
+      <td class="num">\${fmtAmount(r.amount)}</td></tr>\`).join("");
+    return \`<table>
+      <thead><tr><th style="width:42px">#</th><th>ชื่อบัญชี</th><th>เลขบัญชี</th><th class="num">จำนวนเงิน</th></tr></thead>
+      <tbody>\${rows}</tbody>
+      <tfoot><tr><td colspan="3" style="text-align:right">รวม</td><td class="num">\${fmtAmount(req.summary.totalAmount)}</td></tr></tfoot>
+    </table>\`;
+  }
+  if (req.type === "add-payroll") {
+    const rows = req.summary.accounts.map((a, i) => \`
+      <tr><td>\${i+1}</td><td>\${escapeHtml(a.accountName)}</td>
+      <td class="acct">\${escapeHtml(formatAccount(a.accountNumber))}</td></tr>\`).join("");
+    return \`<table>
+      <thead><tr><th style="width:42px">#</th><th>ชื่อบัญชี</th><th>เลขบัญชี</th></tr></thead>
+      <tbody>\${rows}</tbody>
+    </table>\`;
+  }
+  return "";
+}
+
+function renderPendingCard(req) {
+  const status = req.status;
+  const stateHtml = STATE_HINTS[status] ? \`<div class="pcard-state">\${STATE_HINTS[status]}</div>\` : "";
+  const actionsHtml = status === "pending"
+    ? \`<button class="primary" data-action="approve" data-id="\${req.id}">อนุมัติ</button>
+       <button class="danger" data-action="reject" data-id="\${req.id}">ปฏิเสธ</button>\`
+    : "";
+  const snapshotHtml = req.type === "transfer-payroll" && req.summary && req.summary.sheet
+    ? \`<a href="/worksheet?snapshot=\${encodeURIComponent(req.id)}">ดูรายละเอียดเงินเดือน</a>\`
+    : "";
+  const recipientCount = req.type === "transfer-payroll" ? req.summary.rows.length : (req.type === "add-payroll" ? req.summary.accounts.length : 0);
+
+  return \`<div class="pcard s-\${status}">
+    <div class="pcard-row1">
+      <span class="pill p-\${status}">\${STATUS_LABELS[status] || status}</span>
+      <span class="ago">\${relativeTime(effectiveTime(req))}</span>
+    </div>
+    <div class="pcard-headline">\${escapeHtml(headlineFor(req))}</div>
+    <div class="pcard-figures">\${figuresFor(req)}</div>
+    \${stateHtml}
+    <div class="pcard-actions">
+      \${actionsHtml}
+      \${snapshotHtml}
+      \${snapshotHtml ? '<span class="spacer">·</span>' : ''}
+      <a href="/api/queue/\${req.id}/xlsx">ดาวน์โหลด xlsx</a>
+    </div>
+    <details class="pcard-recipients">
+      <summary>ดูรายการผู้รับเงิน (\${recipientCount} ราย)</summary>
+      \${renderRecipients(req)}
+    </details>
+    <div class="pcard-audit">สร้าง \${fmtDate(req.createdAt)} · <code>\${escapeHtml(req.id)}</code></div>
+  </div>\`;
+}
+
+function renderHistoryRow(req) {
+  const ref = req.result && req.result.referenceNo ? escapeHtml(req.result.referenceNo) : "";
+  const figures = req.type === "transfer-payroll"
+    ? \`\${req.summary.rows.length} คน · ฿\${fmtAmount(req.summary.totalAmount)}\`
+    : (req.type === "add-payroll" ? \`\${req.summary.accounts.length} บัญชี\` : "");
+  const snapLink = req.type === "transfer-payroll" && req.summary && req.summary.sheet
+    ? \`<a href="/worksheet?snapshot=\${encodeURIComponent(req.id)}">รายละเอียด</a>\`
+    : "";
+  return \`<div class="row s-\${req.status}" title="\${escapeHtml(req.id)}">
+    <span class="pill p-\${req.status}">\${STATUS_LABELS[req.status] || req.status}</span>
+    <span class="when">\${shortWhen(effectiveTime(req))}</span>
+    <span class="label">\${escapeHtml(headlineFor(req))}</span>
+    <span class="figures">\${figures}</span>
+    <span class="ref">\${ref}</span>
+    <span class="links">\${snapLink}<a href="/api/queue/\${req.id}/xlsx">xlsx</a></span>
+  </div>\`;
+}
+
+function renderFilters(periods) {
+  if (periods.length <= 1) { filtersHost.innerHTML = ""; return; }
+  const opts = ['<option value="all">ทุกเดือน</option>']
+    .concat(periods.map((p) => \`<option value="\${escapeHtml(p)}"\${p === currentPeriod ? " selected" : ""}>\${escapeHtml(periodLabel(p))}</option>\`));
+  filtersHost.innerHTML = \`<div class="filters">
+    <span>กรองตามเดือน:</span>
+    <select id="periodFilter">\${opts.join("")}</select>
+  </div>\`;
+  document.getElementById("periodFilter").addEventListener("change", (e) => {
+    currentPeriod = e.target.value;
+    paint();
+  });
+}
+
+function paint() {
+  let items = cache;
+  if (currentPeriod !== "all") items = items.filter((r) => reqPeriod(r) === currentPeriod);
+  const pending = items.filter((r) => r.status === "pending");
+  const rest = items.filter((r) => r.status !== "pending");
+
+  if (pending.length === 0) {
+    pendingHost.innerHTML = "";
+  } else {
+    pendingHost.innerHTML = pending.map(renderPendingCard).join("");
+    pendingHost.querySelectorAll("button[data-action]").forEach((btn) => {
+      btn.addEventListener("click", () => handleAction(btn.dataset.action, btn.dataset.id));
+    });
+  }
+
+  if (rest.length === 0) {
+    historyHost.innerHTML = pending.length === 0
+      ? '<div class="empty">ยังไม่มีคำขอ</div>'
+      : "";
+  } else {
+    const heading = pending.length > 0 ? "ก่อนหน้านี้" : "คำขอทั้งหมด";
+    historyHost.innerHTML = \`<h2>\${heading} (\${rest.length})</h2>\` + rest.map(renderHistoryRow).join("");
+  }
+}
+
+function repaintRelativeTimes() {
+  const cards = document.querySelectorAll(".pcard");
+  if (cards.length === 0) return;
+  const items = currentPeriod === "all" ? cache : cache.filter((r) => reqPeriod(r) === currentPeriod);
+  const pending = items.filter((r) => r.status === "pending");
+  cards.forEach((card, i) => {
+    if (!pending[i]) return;
+    const ago = card.querySelector(".pcard-row1 .ago");
+    if (ago) ago.textContent = relativeTime(effectiveTime(pending[i]));
+  });
+}
+function flashUpdated() {
+  lastFetchedAt = Date.now();
+  updatedEl.textContent = "อัปเดตเมื่อสักครู่";
+  updatedEl.classList.add("pulse");
+  setTimeout(() => updatedEl.classList.remove("pulse"), 600);
+}
+function tickUpdatedLabel() {
+  if (lastFetchedAt === 0) return;
+  const sec = Math.floor((Date.now() - lastFetchedAt) / 1000);
+  if (sec < 5) updatedEl.textContent = "อัปเดตเมื่อสักครู่";
+  else if (sec < 60) updatedEl.textContent = \`อัปเดตเมื่อ \${sec} วินาทีที่แล้ว\`;
+  else updatedEl.textContent = \`อัปเดตเมื่อ \${Math.floor(sec/60)} นาทีที่แล้ว\`;
+}
+
+async function refresh() {
+  const res = await fetch("/api/queue");
+  if (!res.ok) {
+    pendingHost.innerHTML = '<div class="empty err">โหลดข้อมูลไม่สำเร็จ</div>';
+    historyHost.innerHTML = "";
+    return;
+  }
+  cache = await res.json();
+  const seen = new Set();
+  for (const r of cache) { const p = reqPeriod(r); if (p) seen.add(p); }
+  renderFilters(Array.from(seen).sort().reverse());
+  paint();
+  flashUpdated();
+}
+
+// OTP approve modal
 otpCancel.addEventListener("click", () => otpDialog.close());
 otpDialog.addEventListener("close", () => { otpTargetId = null; otpInput.value = ""; otpErr.textContent = ""; });
 otpInput.addEventListener("input", () => { otpErr.textContent = ""; });
@@ -160,184 +440,13 @@ async function submitOtp() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ otp }),
     });
-    if (!res.ok) {
-      otpErr.textContent = await res.text();
-      return;
-    }
+    if (!res.ok) { otpErr.textContent = await res.text(); return; }
     otpDialog.close();
     await refresh();
   } finally {
     otpSubmit.disabled = false;
   }
 }
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-}
-
-function formatAccount(n) {
-  const s = String(n).replace(/[^0-9]/g, "");
-  if (s.length === 10) return s.slice(0,3)+"-"+s.slice(3,4)+"-"+s.slice(4,9)+"-"+s.slice(9);
-  return s;
-}
-
-function fmtAmount(n) {
-  return Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function fmtDate(iso) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  const pad = (n) => String(n).padStart(2, "0");
-  return \`\${pad(d.getDate())}/\${pad(d.getMonth()+1)}/\${d.getFullYear()+543} \${pad(d.getHours())}:\${pad(d.getMinutes())}\`;
-}
-
-function statusBadge(status) {
-  const labels = {
-    pending: "รออนุมัติ", approved: "อนุมัติแล้ว",
-    rejected: "ปฏิเสธ", running: "กำลังประมวลผล",
-    done: "สำเร็จ", failed: "ไม่สำเร็จ",
-  };
-  return \`<span class="badge badge-\${status}">\${labels[status] || status}</span>\`;
-}
-
-function summarize(req) {
-  if (req.type === "transfer-payroll") {
-    const s = req.summary;
-    return \`โอนเงินเดือน · \${s.rows.length} ราย · ฿\${fmtAmount(s.totalAmount)} · เงินเข้า \${s.effectiveDate}\`;
-  }
-  if (req.type === "add-payroll") {
-    return \`เพิ่มผู้รับเงิน · \${req.summary.accounts.length} บัญชี\`;
-  }
-  return req.type;
-}
-
-function renderRows(req) {
-  if (req.type === "transfer-payroll") {
-    const rows = req.summary.rows.map((r, i) => \`
-      <tr>
-        <td>\${i+1}</td>
-        <td>\${escapeHtml(r.accountName)}</td>
-        <td class="acct">\${escapeHtml(formatAccount(r.accountNumber))}</td>
-        <td class="num">\${fmtAmount(r.amount)}</td>
-      </tr>\`).join("");
-    return \`<table>
-      <thead><tr><th style="width:48px">#</th><th>ชื่อบัญชี</th><th>เลขบัญชี</th><th class="num">จำนวนเงิน</th></tr></thead>
-      <tbody>\${rows}</tbody>
-      <tfoot><tr><td colspan="3" style="text-align:right;font-weight:700;border-top:2px solid #1d4ed8;">รวม</td><td class="num" style="font-weight:700;border-top:2px solid #1d4ed8;color:#1d4ed8;">\${fmtAmount(req.summary.totalAmount)}</td></tr></tfoot>
-    </table>\`;
-  }
-  if (req.type === "add-payroll") {
-    const rows = req.summary.accounts.map((a, i) => \`
-      <tr>
-        <td>\${i+1}</td>
-        <td>\${escapeHtml(a.accountName)}</td>
-        <td class="acct">\${escapeHtml(formatAccount(a.accountNumber))}</td>
-      </tr>\`).join("");
-    return \`<table>
-      <thead><tr><th style="width:48px">#</th><th>ชื่อบัญชี</th><th>เลขบัญชี</th></tr></thead>
-      <tbody>\${rows}</tbody>
-    </table>\`;
-  }
-  return "";
-}
-
-function renderResult(req) {
-  if (!req.result) return "";
-  const cls = req.result.success ? "result" : "result fail";
-  const head = req.result.success ? "✓ KBIZ ดำเนินการสำเร็จ" : "✗ KBIZ ไม่สำเร็จ";
-  const lines = [];
-  if (req.result.referenceNo) lines.push("Reference: <code>"+escapeHtml(req.result.referenceNo)+"</code>");
-  if (req.result.finalUrl) lines.push("URL: <code>"+escapeHtml(req.result.finalUrl)+"</code>");
-  if (req.result.error) lines.push('<span class="err">'+escapeHtml(req.result.error)+'</span>');
-  return \`<div class="\${cls}"><strong>\${head}</strong><br>\${lines.join("<br>")}</div>\`;
-}
-
-function renderAudit(req) {
-  const lines = [\`สร้างเมื่อ \${fmtDate(req.createdAt)}\`];
-  if (req.approvedAt) lines.push(\`อนุมัติเมื่อ \${fmtDate(req.approvedAt)}\`);
-  if (req.rejectedAt) lines.push(\`ปฏิเสธเมื่อ \${fmtDate(req.rejectedAt)}\${req.rejectionReason?" — "+escapeHtml(req.rejectionReason):""}\`);
-  if (req.startedAt) lines.push(\`เริ่มประมวลผล \${fmtDate(req.startedAt)}\`);
-  if (req.completedAt) lines.push(\`เสร็จเมื่อ \${fmtDate(req.completedAt)}\`);
-  return '<div class="audit">' + lines.join(" · ") + "</div>";
-}
-
-function renderCard(req) {
-  const actions = req.status === "pending"
-    ? \`<button class="primary" data-action="approve" data-id="\${req.id}">อนุมัติ</button>
-       <button class="danger" data-action="reject" data-id="\${req.id}">ปฏิเสธ</button>\`
-    : "";
-  // Snapshot view link only when the queue item carries an embedded sheet
-  // (transfer-payroll items submitted post-feature). Older items have no
-  // worksheet snapshot so the link would dead-end.
-  const snapLink = req.type === "transfer-payroll" && req.summary && req.summary.sheet
-    ? \`<a href="/worksheet?snapshot=\${encodeURIComponent(req.id)}" style="font-size:13px;">ดูรายละเอียดเงินเดือน</a>\`
-    : "";
-  return \`<div class="req-card">
-    <div class="req-head">
-      <span class="req-type">\${summarize(req)}</span>
-      \${statusBadge(req.status)}
-      <span class="req-id">\${req.id}</span>
-      <span class="req-actions">
-        \${snapLink}
-        <a href="/api/queue/\${req.id}/xlsx" style="font-size:13px;">ดาวน์โหลด xlsx</a>
-        \${actions}
-      </span>
-    </div>
-    \${renderResult(req)}
-    \${renderAudit(req)}
-    <details><summary>ดูรายการผู้รับเงิน (\${req.type === "transfer-payroll" ? req.summary.rows.length : req.summary.accounts.length} รายการ)</summary>
-      <div class="req-summary">\${renderRows(req)}</div>
-    </details>
-  </div>\`;
-}
-
-function applyFilter() {
-  let filtered = cache;
-  if (currentFilter !== "all") filtered = filtered.filter((r) => r.status === currentFilter);
-  if (currentPeriod !== "all") filtered = filtered.filter((r) => reqPeriod(r) === currentPeriod);
-  if (filtered.length === 0) {
-    list.innerHTML = '<div class="empty">ไม่มีคำขอในกลุ่มนี้</div>';
-  } else {
-    list.innerHTML = filtered.map(renderCard).join("");
-    list.querySelectorAll("button[data-action]").forEach((btn) => {
-      btn.addEventListener("click", () => handleAction(btn.dataset.action, btn.dataset.id));
-    });
-  }
-  const counts = cache.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {});
-  const bits = Object.entries(counts).map(([k, v]) => \`\${k}: \${v}\`).join(" · ");
-  meta.textContent = cache.length === 0 ? "" : \`\${cache.length} รายการทั้งหมด · \${bits}\`;
-}
-
-function rebuildPeriodOptions() {
-  const seen = new Set();
-  for (const r of cache) { const p = reqPeriod(r); if (p) seen.add(p); }
-  const sorted = Array.from(seen).sort().reverse();
-  const cur = periodFilter.value;
-  while (periodFilter.options.length > 1) periodFilter.remove(1);
-  for (const p of sorted) {
-    const opt = document.createElement("option");
-    opt.value = p;
-    opt.textContent = periodLabel(p);
-    periodFilter.appendChild(opt);
-  }
-  if (sorted.includes(currentPeriod)) periodFilter.value = currentPeriod;
-  else if (sorted.includes(cur)) { periodFilter.value = cur; currentPeriod = cur; }
-  else { periodFilter.value = "all"; currentPeriod = "all"; }
-}
-
-async function refresh() {
-  const res = await fetch("/api/queue");
-  if (!res.ok) { list.innerHTML = '<div class="empty err">โหลดข้อมูลไม่สำเร็จ</div>'; return; }
-  cache = await res.json();
-  rebuildPeriodOptions();
-  applyFilter();
-}
-
-periodFilter.addEventListener("change", () => {
-  currentPeriod = periodFilter.value;
-  applyFilter();
-});
 
 async function handleAction(action, id) {
   if (action === "approve") {
@@ -363,19 +472,9 @@ async function handleAction(action, id) {
   }
 }
 
-document.getElementById("filter").addEventListener("click", (e) => {
-  const btn = e.target.closest("button[data-filter]");
-  if (!btn) return;
-  document.querySelectorAll("#filter button[data-filter]").forEach((b) => b.classList.remove("active"));
-  btn.classList.add("active");
-  currentFilter = btn.dataset.filter;
-  applyFilter();
-});
-document.getElementById("refresh").addEventListener("click", refresh);
-
-// Auto-refresh every 5s so result updates from kbiz-bot show without manual reload
 refresh();
 setInterval(refresh, 5000);
+setInterval(() => { tickUpdatedLabel(); repaintRelativeTimes(); }, 1000);
 </script>
 </body>
 </html>`;

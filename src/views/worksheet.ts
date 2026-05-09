@@ -216,7 +216,7 @@ export const WORKSHEET_HTML = `<!doctype html>
     </div>
     <div id="historyPanel" hidden>
       <span id="historyText"></span>
-      <a id="historyLink" href="">ดูทั้งหมด →</a>
+      <a id="historyLink" href="">→ ดูสถานะคำขอเดือนนี้</a>
     </div>
     <div>
       <label for="effectiveDate">วันที่เงินเข้าบัญชี</label>
