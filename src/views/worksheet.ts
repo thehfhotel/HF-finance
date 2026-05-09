@@ -277,7 +277,10 @@ export const WORKSHEET_HTML = `<!doctype html>
     #reportRoot .summary-notes strong { font-weight: 600; color: #0a0a0a; }
 
     /* ── Table mode (A4 landscape, fit-on-one-page summary) ───────────── */
-    #reportRoot.mode-table { font: 7.5pt/1.25 "Noto Sans Thai", sans-serif; }
+    /* Visual structure mirrors the editable worksheet — 3-row header with
+       grouped columns and the same color-coded backgrounds (peach for
+       deductions, mint for additions, light-blue for computed totals). */
+    #reportRoot.mode-table { font: 7.5pt/1.2 "Noto Sans Thai", sans-serif; }
     #reportRoot.mode-table .report-header {
       margin-bottom: 2mm; padding-bottom: 1.5mm;
       border-bottom: 0.5pt solid #404040;
@@ -295,29 +298,43 @@ export const WORKSHEET_HTML = `<!doctype html>
     #reportRoot.mode-table th,
     #reportRoot.mode-table td {
       border: 0.25pt solid #d4d4d4;
-      padding: 0.7mm 1mm; text-align: right;
+      padding: 0.6mm 1mm; text-align: right;
       vertical-align: middle;
     }
-    #reportRoot.mode-table th {
-      background: #f5f5f5; font-weight: 600; color: #404040;
-      font-size: 6.5pt; line-height: 1.15;
+    #reportRoot.mode-table thead th {
+      background: #f3f4f6; font-weight: 600; color: #1f2937;
+      font-size: 6.4pt; line-height: 1.1; text-align: center;
     }
+    #reportRoot.mode-table thead th .hint {
+      display: block; color: #9ca3af; font-weight: 400; font-size: 5.8pt;
+    }
+
+    /* Column-group backgrounds — match the worksheet palette. */
+    #reportRoot.mode-table th.deduct, #reportRoot.mode-table td.deduct { background: #fff7ed; }
+    #reportRoot.mode-table th.add,    #reportRoot.mode-table td.add    { background: #ecfdf5; }
+    #reportRoot.mode-table th.calc,   #reportRoot.mode-table td.calc   { background: #eff6ff; font-weight: 600; }
+
+    /* Frozen-left columns (idx, name, account, nickname, position, salary)
+       — same gray header treatment as the worksheet, white body cells. */
+    #reportRoot.mode-table thead th.frozen { background: #f3f4f6; }
+    #reportRoot.mode-table tbody td.frozen { background: #ffffff; }
+    #reportRoot.mode-table tfoot td.frozen { background: #f9fafb; }
+
+    /* Cell modifiers. */
     #reportRoot.mode-table td.text { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #reportRoot.mode-table td.idx { text-align: center; color: #737373; font-size: 6.5pt; }
     #reportRoot.mode-table td.acct {
       text-align: left; font-family: ui-monospace, SFMono-Regular, monospace;
-      font-size: 6.8pt; color: #404040;
+      font-size: 6.6pt; color: #404040;
     }
-    #reportRoot.mode-table td.calc { font-weight: 600; }
-    #reportRoot.mode-table td.takehome { font-weight: 700; color: #0a0a0a; background: #f5f5f5; }
-    #reportRoot.mode-table td.zero { color: #d4d4d4; }
+    #reportRoot.mode-table td.zero { color: #cbd5e1; }
     #reportRoot.mode-table tfoot td {
-      font-weight: 700; background: #fafafa;
-      border-top: 0.6pt solid #404040;
+      font-weight: 700; border-top: 0.6pt solid #404040;
     }
+
     #reportRoot.mode-table .table-summary {
       margin-top: 3mm; padding-top: 2mm; border-top: 0.5pt solid #d4d4d4;
-      display: flex; gap: 8mm; font-size: 8pt; color: #404040;
+      display: flex; gap: 8mm; font-size: 8pt; color: #404040; align-items: baseline;
     }
     #reportRoot.mode-table .table-summary strong { color: #0a0a0a; font-weight: 600; margin-right: 1mm; }
     #reportRoot.mode-table .table-summary .grand {
@@ -1628,27 +1645,13 @@ function buildReport(sheet) {
   \`;
 }
 
-// Short labels for table-mode headers — vertical/horizontal space is tight
-// in landscape A4. Maps to the same field keys as REPORT_FIELD_LABEL.
-const TABLE_HEADERS = {
-  socialSecurity: "ปกส.<br>3%",
-  savings: "สะสม<br>5%",
-  advance: "เบิก",
-  loan: "ยืม",
-  interest: "ดบ.<br>1.5%",
-  roomCost: "ห้อง",
-  leave: "ลา",
-  otherDeduction: "อื่นๆ",
-  commission: "คอมฯ",
-  breakfast: "อาหาร<br>7%",
-  ot: "OT",
-  otherAddition: "อื่นๆ",
-};
-
-function tableCell(v) {
+// Cell helper for the table report. cls is the column-group class
+// (deduct / add / calc / frozen / "") which sets the background tint.
+function tableCell(v, cls) {
   const n = num(v);
-  if (n <= 0) return \`<td class="zero">—</td>\`;
-  return \`<td>\${fmt(n)}</td>\`;
+  const klass = cls ? cls + " " : "";
+  if (n <= 0) return \`<td class="\${klass}zero">—</td>\`;
+  return \`<td class="\${klass.trim()}">\${fmt(n)}</td>\`;
 }
 
 function buildTableReport(sheet) {
@@ -1673,6 +1676,14 @@ function buildTableReport(sheet) {
   for (const k of allKeys) sums[k] = 0;
   let sumDeduct = 0, sumAdd = 0, sumTake = 0;
 
+  // Per-row cells follow the worksheet's data layout exactly:
+  // [idx][name][account][nickname][position][salary]                       ← frozen-left
+  // [socialSecurity][savings][advance][loan][interest][roomCost][leave]    ← deduct
+  // [otherDeduction]                                                        ← deduct (under "หักคอมมิชชั่น" header)
+  // [sumDeduct]                                                             ← calc
+  // [commission][breakfast][ot][otherAddition]                              ← add
+  // [takeHome]                                                              ← calc
+  // [note]
   const rows = allRows.map((r, i) => {
     for (const k of allKeys) sums[k] += num(r[k]);
     const ded = REPORT_DEDUCT_ORDER.reduce((s, k) => s + num(r[k]), 0);
@@ -1680,40 +1691,39 @@ function buildTableReport(sheet) {
     const take = rowTakeHome(r);
     sumDeduct += ded; sumAdd += add; sumTake += take;
     return \`<tr>
-      <td class="idx">\${i + 1}</td>
-      <td class="text">\${escapeHtml(r.accountName || "—")}</td>
-      <td class="acct">\${escapeHtml(displayAccount(r))}</td>
-      <td class="text">\${escapeHtml(r.position || "")}</td>
-      \${tableCell(r.salary)}
-      \${REPORT_DEDUCT_ORDER.map((k) => tableCell(r[k])).join("")}
-      <td class="calc">\${ded > 0 ? fmt(ded) : '<span class="zero">—</span>'}</td>
-      \${REPORT_ADD_ORDER.map((k) => tableCell(r[k])).join("")}
-      <td class="calc">\${add > 0 ? fmt(add) : '<span class="zero">—</span>'}</td>
-      <td class="takehome">\${fmt(take)}</td>
+      <td class="idx frozen">\${i + 1}</td>
+      <td class="text frozen">\${escapeHtml(r.accountName || "")}</td>
+      <td class="acct frozen">\${escapeHtml(displayAccount(r))}</td>
+      <td class="text frozen">\${escapeHtml(r.nickname || "")}</td>
+      <td class="text frozen">\${escapeHtml(r.position || "")}</td>
+      \${tableCell(r.salary, "frozen")}
+      \${REPORT_DEDUCT_ORDER.map((k) => tableCell(r[k], "deduct")).join("")}
+      \${ded > 0 ? \`<td class="calc">\${fmt(ded)}</td>\` : '<td class="calc zero">—</td>'}
+      \${REPORT_ADD_ORDER.map((k) => tableCell(r[k], "add")).join("")}
+      <td class="calc">\${fmt(take)}</td>
       <td class="text" title="\${escapeHtml(r.note || "")}">\${escapeHtml(r.note || "")}</td>
     </tr>\`;
   }).join("");
 
-  // colgroup with explicit widths so 21 columns squeeze evenly across A4
-  // landscape. Adjust here if a deployment regularly truncates a column.
+  // Width allocation across 21 columns on A4 landscape (~277mm usable).
+  // Frozen identity cols take ~30%, deductions ~32%, additions ~16%,
+  // calc + note ~22%. Tweak here if a column regularly truncates.
   const colgroup = \`<colgroup>
-    <col style="width:3.2%">
-    <col style="width:11%">
-    <col style="width:7.5%">
-    <col style="width:6%">
+    <col style="width:3.2%"><col style="width:11%"><col style="width:7.5%"><col style="width:4.5%"><col style="width:5%"><col style="width:5.3%">
+    <col style="width:4.4%"><col style="width:4.4%"><col style="width:4.4%"><col style="width:4.4%"><col style="width:4.4%"><col style="width:4.4%"><col style="width:4.4%"><col style="width:4.4%">
+    <col style="width:4.7%">
+    <col style="width:4.4%"><col style="width:4.4%"><col style="width:4.4%"><col style="width:4.4%">
     <col style="width:5.5%">
-    \${REPORT_DEDUCT_ORDER.map(() => '<col style="width:4.4%">').join("")}
-    <col style="width:5%">
-    \${REPORT_ADD_ORDER.map(() => '<col style="width:4.4%">').join("")}
-    <col style="width:5%">
-    <col style="width:6.2%">
-    <col style="width:7%">
+    <col style="width:6.6%">
   </colgroup>\`;
 
   const generalNotesHtml = (sheet.generalNotes && sheet.generalNotes.trim())
     ? \`<div class="table-notes"><strong>หมายเหตุทั่วไป:</strong> \${escapeHtml(sheet.generalNotes)}</div>\`
     : "";
 
+  // Three-row header mirroring the worksheet exactly: top-level groups
+  // "รายการหัก" (8 cols) and "รับอื่นๆ" (2 cols) span their sub-cells;
+  // "อื่นๆ" inside the deduct group further splits into 4 leaf cells.
   return \`
     <div class="report-header">
       <h1>\${title}</h1>
@@ -1723,29 +1733,45 @@ function buildTableReport(sheet) {
       \${colgroup}
       <thead>
         <tr>
-          <th>ลำดับ</th>
-          <th>ชื่อ-สกุล</th>
-          <th>บัญชี</th>
-          <th>ตำแหน่ง</th>
-          <th>เงินเดือน</th>
-          \${REPORT_DEDUCT_ORDER.map((k) => \`<th>\${TABLE_HEADERS[k]}</th>\`).join("")}
-          <th>รวมหัก</th>
-          \${REPORT_ADD_ORDER.map((k) => \`<th>\${TABLE_HEADERS[k]}</th>\`).join("")}
-          <th>รวมเพิ่ม</th>
-          <th>รับสุทธิ</th>
-          <th>หมายเหตุ</th>
+          <th rowspan="3" class="frozen">ลำดับ</th>
+          <th rowspan="3" class="frozen">ชื่อ - สกุล</th>
+          <th rowspan="3" class="frozen">เลขที่บัญชี</th>
+          <th rowspan="3" class="frozen">ชื่อเล่น</th>
+          <th rowspan="3" class="frozen">ตำแหน่ง</th>
+          <th rowspan="3" class="frozen">เงินเดือน</th>
+          <th colspan="8" class="deduct">รายการหัก</th>
+          <th rowspan="3" class="calc">รวม<br>รายการหัก</th>
+          <th colspan="2" class="add">รับอื่นๆ</th>
+          <th rowspan="3" class="add">ค่าโอที</th>
+          <th rowspan="3" class="add">รวมรับอื่นๆ</th>
+          <th rowspan="3" class="calc">รวม<br>เงินเดือน</th>
+          <th rowspan="3">หมายเหตุ</th>
+        </tr>
+        <tr>
+          <th rowspan="2" class="deduct">ประกันสังคม<span class="hint">3%</span></th>
+          <th rowspan="2" class="deduct">เงินสะสม<span class="hint">5%</span></th>
+          <th rowspan="2" class="deduct">เบิก<br>ล่วงหน้า</th>
+          <th colspan="4" class="deduct">อื่นๆ</th>
+          <th rowspan="2" class="deduct">หัก<br>คอมมิชชั่น</th>
+          <th rowspan="2" class="add">คอมมิชชั่น</th>
+          <th rowspan="2" class="add">ทำอาหาร<br>เช้า<span class="hint">7%</span></th>
+        </tr>
+        <tr>
+          <th class="deduct">เงินยืม</th>
+          <th class="deduct">ดอกเบี้ย<span class="hint">1.50%</span></th>
+          <th class="deduct">ค่า<br>ห้องพัก</th>
+          <th class="deduct">ลากิจ /<br>ลาชม /<br>ลาป่วย</th>
         </tr>
       </thead>
       <tbody>\${rows}</tbody>
       <tfoot>
         <tr>
-          <td colspan="4" class="text" style="text-align:right">รวม</td>
-          <td>\${fmt(sums.salary)}</td>
-          \${REPORT_DEDUCT_ORDER.map((k) => \`<td>\${sums[k] > 0 ? fmt(sums[k]) : '<span class="zero">—</span>'}</td>\`).join("")}
-          <td>\${fmt(sumDeduct)}</td>
-          \${REPORT_ADD_ORDER.map((k) => \`<td>\${sums[k] > 0 ? fmt(sums[k]) : '<span class="zero">—</span>'}</td>\`).join("")}
-          <td>\${fmt(sumAdd)}</td>
-          <td class="takehome">\${fmt(sumTake)}</td>
+          <td colspan="5" class="text frozen" style="text-align:right">รวม</td>
+          <td class="frozen">\${fmt(sums.salary)}</td>
+          \${REPORT_DEDUCT_ORDER.map((k) => \`<td class="deduct">\${sums[k] > 0 ? fmt(sums[k]) : '<span class="zero">—</span>'}</td>\`).join("")}
+          <td class="calc">\${fmt(sumDeduct)}</td>
+          \${REPORT_ADD_ORDER.map((k) => \`<td class="add">\${sums[k] > 0 ? fmt(sums[k]) : '<span class="zero">—</span>'}</td>\`).join("")}
+          <td class="calc">\${fmt(sumTake)}</td>
           <td></td>
         </tr>
       </tfoot>
