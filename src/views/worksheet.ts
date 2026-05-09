@@ -482,7 +482,7 @@ export const WORKSHEET_HTML = `<!doctype html>
         <div id="colsMenu" hidden></div>
       </div>
       <button type="button" id="lockToggle" title="สลับโหมดแก้ไขข้อมูลพื้นฐาน">🔓 ปลดล็อคข้อมูลพื้นฐาน</button>
-      <button type="button" id="printBtn" title="พิมพ์สลิปเงินเดือนรายคน (A4 portrait)">🖨 สลิปเงินเดือน</button>
+      <button type="button" id="printBtn" title="พิมพ์สลิปเงินเดือนรายคน (A4 portrait)">🖨 Pay Slip (Print)</button>
       <button type="button" id="saveCardsBtn" title="บันทึกสลิปเงินเดือนเป็นรูป (.jpg)">🖼 สลิปเงินเดือน</button>
       <button type="button" id="printTableBtn" title="พิมพ์ตารางสรุปทั้งหน้า (A4 landscape)">🖨 ตาราง</button>
       <button type="button" id="saveTableBtn" title="บันทึกตารางสรุปเป็นรูป (.jpg)">🖼 ตาราง</button>
