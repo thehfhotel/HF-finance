@@ -178,6 +178,14 @@ export const WORKSHEET_HTML = `<!doctype html>
      The mode is selected by the body class set at print time. */
   #reportRoot { display: none; }
   @media print {
+    /* Force the browser to print background colors and column tints —
+       Chrome strips them by default. Inherits to all elements. */
+    body, #reportRoot, #reportRoot * {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      color-adjust: exact !important;
+    }
+
     /* Named pages: body class chooses which size/margin applies. */
     @page portrait-page { size: A4 portrait; margin: 14mm 14mm 16mm 14mm; @bottom-right { content: counter(page) " / " counter(pages); font: 8pt "Noto Sans Thai", sans-serif; color: #737373; } }
     @page landscape-page { size: A4 landscape; margin: 8mm 10mm; }
@@ -330,6 +338,13 @@ export const WORKSHEET_HTML = `<!doctype html>
     #reportRoot.mode-table td.zero { color: #cbd5e1; }
     #reportRoot.mode-table tfoot td {
       font-weight: 700; border-top: 0.6pt solid #404040;
+    }
+
+    /* Body row height — JS sets --row-h based on remaining vertical space
+       after header + footer + summary so the table fills the page rather
+       than ending in dead space. Falls back to auto when not measured. */
+    #reportRoot.mode-table tbody tr td {
+      height: var(--row-h, auto);
     }
 
     #reportRoot.mode-table .table-summary {
@@ -1792,35 +1807,56 @@ function setPrintMode(mode) {
   root.classList.add(\`mode-\${mode}\`);
 }
 
-// Measure the table-mode report after it's built and set --print-scale so
-// that the entire content fits A4 landscape (194mm tall after margins).
-// The CSS rule body.print-table #reportRoot { transform: scale(...) } then
-// uniformly scales the printed output. Width compensates so the visible
-// content still spans the page width.
+// Fit the table-mode report to one A4 landscape page. Two regimes:
+//   • Content taller than page → scale down via transform (--print-scale).
+//   • Content shorter than page → distribute the remaining height into
+//     each data row (--row-h) so the table fills the page rather than
+//     leaving blank space below.
 function fitTableToOnePage() {
   const root = document.getElementById("reportRoot");
-  const PAGE_W_MM = 277; // 297mm A4 landscape - 10mm × 2 margins
-  const PAGE_H_MM = 194; // 210mm                - 8mm  × 2
+  const PAGE_W_MM = 277; // 297mm A4 landscape − 10mm × 2 margins
+  const PAGE_H_MM = 194; // 210mm                − 8mm  × 2
   const MM_PER_PX = 25.4 / 96;
 
-  // Reveal off-screen at the print width so layout matches what the
-  // browser will render on the page.
+  // Reset previous measurements so a re-print starts from a clean state.
+  root.style.removeProperty("--print-scale");
+  root.style.removeProperty("--row-h");
+
+  // Reveal off-screen at the print width so layout matches the page.
   const prev = root.getAttribute("style") || "";
   root.setAttribute(
     "style",
     \`display:block!important;position:fixed;left:0;top:0;width:\${PAGE_W_MM}mm;visibility:hidden;transform:none;\`
   );
-  // Force a layout pass.
-  void root.offsetHeight;
-  const heightMM = root.scrollHeight * MM_PER_PX;
+  void root.offsetHeight; // force layout
+
+  const totalH = root.scrollHeight * MM_PER_PX;
+  const headerH = (root.querySelector(".report-header")?.offsetHeight || 0) * MM_PER_PX;
+  const summaryH = (root.querySelector(".table-summary")?.offsetHeight || 0) * MM_PER_PX;
+  const notesH = (root.querySelector(".table-notes")?.offsetHeight || 0) * MM_PER_PX;
+  const theadH = (root.querySelector("thead")?.offsetHeight || 0) * MM_PER_PX;
+  const tfootH = (root.querySelector("tfoot")?.offsetHeight || 0) * MM_PER_PX;
+  const dataRows = root.querySelectorAll("tbody tr").length || 1;
+
   root.setAttribute("style", prev);
-  const scale = heightMM > PAGE_H_MM ? PAGE_H_MM / heightMM : 1;
-  // Floor at 0.45 so a 60-row report still has legible glyphs even if
-  // it means the contents bleed slightly past one page. In practice
-  // every realistic month should land >= 0.6.
-  const clamped = Math.max(0.45, scale);
-  root.style.setProperty("--print-scale", String(clamped));
-  console.log("[print fit-table]", { heightMM: heightMM.toFixed(1), pageHMM: PAGE_H_MM, scale: clamped.toFixed(3) });
+
+  if (totalH > PAGE_H_MM) {
+    // Overflow: shrink uniformly. Floor at 0.45 to keep glyphs legible.
+    const scale = Math.max(0.45, PAGE_H_MM / totalH);
+    root.style.setProperty("--print-scale", String(scale));
+    console.log("[print fit-table] shrink", { totalH: totalH.toFixed(1), scale: scale.toFixed(3) });
+  } else {
+    // Underfill: distribute remaining vertical space across data rows
+    // so the body fills the page. 2mm safety so we don't push past the
+    // bottom margin under varied print engines.
+    const availForBody = PAGE_H_MM - headerH - summaryH - notesH - theadH - tfootH - 2;
+    const targetRowH = Math.max(4, availForBody / dataRows);
+    root.style.setProperty("--print-scale", "1");
+    root.style.setProperty("--row-h", \`\${targetRowH.toFixed(2)}mm\`);
+    console.log("[print fit-table] expand", {
+      totalH: totalH.toFixed(1), dataRows, targetRowH: targetRowH.toFixed(2),
+    });
+  }
 }
 
 document.getElementById("printBtn").addEventListener("click", () => {
