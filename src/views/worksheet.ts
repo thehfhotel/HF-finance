@@ -421,7 +421,9 @@ export const WORKSHEET_HTML = `<!doctype html>
       </div>
       <button type="button" id="lockToggle" title="สลับโหมดแก้ไขข้อมูลพื้นฐาน">🔓 ปลดล็อคข้อมูลพื้นฐาน</button>
       <button type="button" id="printBtn" title="พิมพ์รายงานแบบรายคน (A4 portrait)">🖨 รายคน</button>
+      <button type="button" id="saveCardsBtn" title="บันทึกรายงานรายคนเป็นรูป (.jpg)">🖼 รายคน</button>
       <button type="button" id="printTableBtn" title="พิมพ์ตารางสรุปทั้งหน้า (A4 landscape)">🖨 ตาราง</button>
+      <button type="button" id="saveTableBtn" title="บันทึกตารางสรุปเป็นรูป (.jpg)">🖼 ตาราง</button>
       <button type="button" id="submit" class="primary">ส่งให้อนุมัติ</button>
     </div>
   </div>
@@ -487,6 +489,7 @@ export const WORKSHEET_HTML = `<!doctype html>
 
 <script src="/static/flatpickr.js"></script>
 <script src="/static/flatpickr-th.js"></script>
+<script src="/static/html2canvas.js"></script>
 <script>
 const FIELDS = [
   "salary",
@@ -1818,6 +1821,67 @@ document.getElementById("printTableBtn").addEventListener("click", () => {
   fitTableToOnePage();
   window.print();
 });
+
+// Render the report off-screen at the print width and capture it with
+// html2canvas. Image contains the entire report at native size — for
+// tables that's 291mm wide; for cards 180mm. JPG, quality 0.92, scale 2
+// for crisp text.
+async function saveAsImage(mode) {
+  if (!currentSheet) return;
+  const root = document.getElementById("reportRoot");
+  const widthMM = mode === "table" ? 291 : 180;
+  const buttonId = mode === "table" ? "saveTableBtn" : "saveCardsBtn";
+  const btn = document.getElementById(buttonId);
+  const prevText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "กำลังบันทึก…";
+
+  // Mode class only — NOT body.print-X (avoids @page transforms etc.)
+  root.classList.remove("mode-cards", "mode-table");
+  root.classList.add(\`mode-\${mode}\`);
+  root.style.removeProperty("--print-scale");
+  root.querySelectorAll("tbody tr").forEach((tr) => { tr.style.height = ""; });
+
+  const prev = root.getAttribute("style") || "";
+  root.setAttribute(
+    "style",
+    \`display:block!important;position:fixed;left:-99999px;top:0;width:\${widthMM}mm;background:#fff;\`
+  );
+  // Force layout, then yield a frame so flatpickr/etc. settle.
+  void root.offsetHeight;
+  await new Promise((r) => requestAnimationFrame(r));
+
+  try {
+    const canvas = await html2canvas(root, {
+      backgroundColor: "#ffffff",
+      scale: 2,
+      windowWidth: root.offsetWidth,
+      windowHeight: root.scrollHeight,
+    });
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+    if (!blob) throw new Error("blob creation failed");
+
+    // Filename: payroll-{mode}-{period}-{YYYYMMDD-HHmm}.jpg
+    const period = currentPeriod || "no-period";
+    const now = new Date();
+    const stamp = \`\${now.getFullYear()}\${pad(now.getMonth()+1)}\${pad(now.getDate())}-\${pad(now.getHours())}\${pad(now.getMinutes())}\`;
+    const filename = \`payroll-\${mode}-\${period}-\${stamp}.jpg\`;
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    showError("บันทึกรูปไม่สำเร็จ: " + (e && e.message ? e.message : e));
+  } finally {
+    root.setAttribute("style", prev);
+    btn.disabled = false;
+    btn.textContent = prevText;
+  }
+}
+
+document.getElementById("saveCardsBtn").addEventListener("click", () => saveAsImage("cards"));
+document.getElementById("saveTableBtn").addEventListener("click", () => saveAsImage("table"));
 
 // Auto-print on ?print=1 — call after the sheet finishes rendering. We
 // hook a one-shot below in the bootstrap section after loadPeriod /
