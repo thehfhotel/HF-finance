@@ -273,7 +273,7 @@ export const WORKSHEET_HTML = `<!doctype html>
   #reportRoot .slip-net {
     display: flex; justify-content: space-between; align-items: baseline;
     padding: 1.5mm 3mm; margin: 1mm 0 2.5mm;
-    background: #1d4ed8; color: #fff;
+    background: #262626; color: #fff;
     border-radius: 0.5mm;
   }
   #reportRoot .slip-net .label { font-size: 10pt; font-weight: 700; letter-spacing: 0.04em; }
@@ -1617,14 +1617,18 @@ const SLIP_DEDUCTIONS = [
 // file spells some names inconsistently (เบ้นท์/เบนท์, ไกด์/ไกส์,
 // จิ้ม/จิ๋ม, etc.). Refresh by re-importing the xlsx and updating
 // the values + SAVINGS_AS_OF below.
+//
+// เตย (ปัทมาพร) was paid out 4,194.17 with her April 69 final payroll
+// (resigned 27/3/69) and นิ่ม (กนกวรรณ) was paid out 2,583.34 with her
+// Jan 69 final payroll, so neither has a remaining balance and they are
+// omitted here — lookupSavings returns null and the slip suppresses the
+// savings line.
 const SAVINGS_AS_OF = "30 เมษายน 2569";
 const SAVINGS_BALANCE = {
   "วิว": 32900,
   "เบ้นท์": 28700, "เบนท์": 28700, "เบ้น": 28700, "เบนซ์": 28700,
   "ไกด์": 21350, "ไกส์": 21350,
   "ดรีม": 11998.05,
-  "เตย": 4194.17,
-  "นิ่ม": 2583.34,
   "โจ้": 1725.84,
   "นิว": 3400,
   "จิ้ม": 30196, "จิ๋ม": 30196,

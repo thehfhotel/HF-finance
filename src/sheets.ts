@@ -48,16 +48,19 @@ export function isValidPeriod(p: string): boolean {
 }
 
 // Defaults pulled from the most recent payroll snapshot
-// (ตารางเงินเดือนบจกสายชล เดือน เมษายน-69.xlsx). Applied to rows that
-// have no nickname / position / salary set — keeps existing user edits.
-// Refresh by re-importing the latest monthly sheet and updating values.
+// (ตารางเงินเดือนบจกสายชล เดือน เมษายน-69.xlsx, last refreshed 30 เม.ย. 2569).
+// Applied to rows that have no nickname / position / salary set — keeps
+// existing user edits. Refresh by re-importing the latest monthly sheet
+// and updating values. Includes former employees (นิ่ม, โจ้) so historic
+// months still resolve a nickname/position/salary if their bank account
+// rows are ever reloaded.
 const EMPLOYEE_DEFAULTS: Record<string, { nickname: string; position: string; salary: number }> = {
   "นางสาวสลิลทิพย์ เพชรรักษ์":   { nickname: "วิว",    position: "Reception",       salary: 14000 },
   "นายณัฐวุฒิ จงจิตร":           { nickname: "เบนท์",  position: "Reception",       salary: 12200 },
   "นางสาวกฤษณา บุญนาค":          { nickname: "ไกด์",   position: "Reception",       salary: 11200 },
   "นายเชิดพงษ์ หมั่นถนอม":       { nickname: "ดรีม",   position: "Reception",       salary: 10600 },
   "นางพรทิพย์ แตงกลด":           { nickname: "ทิพย์",  position: "แม่บ้าน",         salary: 11930 },
-  "นางวราภรณ์ วังนรา":           { nickname: "จิ้ม",   position: "แม่บ้าน",         salary: 11930 },
+  "นางวราภรณ์ วังนรา":           { nickname: "จิ๋ม",   position: "แม่บ้าน",         salary: 11930 },
   "นางสาวอุไรวรรรณ รอดสั้น":     { nickname: "หมวย",   position: "แม่บ้าน",         salary: 11930 },
   "นางสาวณัฏฐณิชา รุ่งสุวรรณ":   { nickname: "พราว",   position: "แม่บ้าน",         salary: 11430 },
   "นางสายใจ คงราช":              { nickname: "อ้อย",   position: "ธุรการทั่วไป",    salary: 12500 },
@@ -65,11 +68,15 @@ const EMPLOYEE_DEFAULTS: Record<string, { nickname: string; position: string; sa
   "นางสาวพัชรา จันทร์ธุป":       { nickname: "ดาว",    position: "แม่บ้าน",         salary: 10000 },
   "นางสาวเจนจิรา คุ้มกัน":       { nickname: "นิว",    position: "Reception",       salary: 10000 },
   "นางสาวเกศรา จันทร์ประสิทธ์":  { nickname: "ครีม",   position: "Reception",       salary: 10000 },
+  "นางสาวเกศรา จันทร์ประสิทธิ์": { nickname: "ครีม",   position: "Reception",       salary: 10000 },
   "นายธีรชา อาจหาญ":             { nickname: "อาร์ม",  position: "Reception",       salary: 10000 },
   "นางสาวธัญวรัตน์ ทองหยู":      { nickname: "แอน",    position: "Reception",       salary: 9500 },
-  "นางสาวรวีวรรณ พัฒนะ":         { nickname: "เฟิร์น", position: "Reception",       salary: 9500 },
+  "นางสาวรวีวรรณ พัฒนะ":         { nickname: "เฟิร์ม", position: "Reception",       salary: 9500 },
   "นายสุชาติ รักษายศ":           { nickname: "",       position: "รปภ.",            salary: 12000 },
   "นายสุรินทร์ เกษกวี":          { nickname: "",       position: "รปภ.",            salary: 3000 },
+  // Former employees — kept for historical-month lookups.
+  "นางสาวกนกวรรณ สังข์แก้ว":     { nickname: "นิ่ม",   position: "Reception",       salary: 10000 },
+  "นายธรรศกร จันทร์สง":          { nickname: "โจ้",    position: "Reception",       salary: 9500 },
 };
 
 function normalizeName(name: string): string {
