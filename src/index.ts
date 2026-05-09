@@ -348,21 +348,21 @@ const app = new Elysia()
     }
   )
 
+  // Bulk listing stays admin-gated — /status uses the sanitised
+  // /api/queue/status feed for HR. Single-item GET + xlsx are open so
+  // that the /worksheet?snapshot=<id> view and the "ดาวน์โหลด xlsx" link
+  // on /status work without requiring an admin OTP.
   .get("/api/queue", ({ headers, set }) => {
     const guard = adminGuard(headers, set);
     if (guard !== true) return guard;
     return listRequests();
   })
-  .get("/api/queue/:id", async ({ params, headers, set }) => {
-    const guard = adminGuard(headers, set);
-    if (guard !== true) return guard;
+  .get("/api/queue/:id", async ({ params, set }) => {
     const req = await getRequest(params.id);
     if (!req) { set.status = 404; return "not found"; }
     return req;
   })
-  .get("/api/queue/:id/xlsx", async ({ params, headers, set }) => {
-    const guard = adminGuard(headers, set);
-    if (guard !== true) return guard;
+  .get("/api/queue/:id/xlsx", async ({ params, set }) => {
     const req = await getRequest(params.id);
     if (!req) { set.status = 404; return "not found"; }
     const buf = await readFile(req.xlsxPath);
