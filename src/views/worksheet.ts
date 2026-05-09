@@ -292,7 +292,10 @@ export const WORKSHEET_HTML = `<!doctype html>
     }
 
     @page portrait-page { size: A4 portrait; margin: 14mm 14mm 16mm 14mm; @bottom-right { content: counter(page) " / " counter(pages); font: 8pt "Noto Sans Thai", sans-serif; color: #737373; } }
-    @page landscape-page { size: A4 landscape; margin: 8mm 10mm; }
+    /* Landscape: minimal CSS margin — let the printer's own non-printable
+       area act as the white border. This buys back ~10mm of vertical
+       space which keeps the summary band from spilling onto a 2nd page. */
+    @page landscape-page { size: A4 landscape; margin: 3mm; }
     body.print-cards { page: portrait-page; }
     body.print-table { page: landscape-page; }
     body { page: portrait-page; max-width: none; margin: 0; padding: 0; color: #0a0a0a; background: #fff; }
@@ -300,11 +303,12 @@ export const WORKSHEET_HTML = `<!doctype html>
     body > #reportRoot { display: block !important; }
 
     /* Optional uniform shrink for overflow case (table mode). JS sets
-       --print-scale; default 1. */
+       --print-scale; default 1. Width matches the new usable area
+       (297mm - 2×3mm @page margin = 291mm). */
     body.print-table #reportRoot {
       transform: scale(var(--print-scale, 1));
       transform-origin: top left;
-      width: calc(277mm / var(--print-scale, 1));
+      width: calc(291mm / var(--print-scale, 1));
     }
   }
 
@@ -1754,8 +1758,9 @@ function setPrintMode(mode) {
 // apply during the measurement reveal).
 function fitTableToOnePage() {
   const root = document.getElementById("reportRoot");
-  const PAGE_W_MM = 277; // 297mm A4 landscape − 10mm × 2 margins
-  const PAGE_H_MM = 194; // 210mm                − 8mm  × 2
+  // Match the @page landscape-page rule: 3mm margin all sides.
+  const PAGE_W_MM = 291; // 297mm A4 landscape − 3mm × 2
+  const PAGE_H_MM = 204; // 210mm                − 3mm × 2
   const MM_PER_PX = 25.4 / 96;
 
   // Reset previous measurements + inline row heights so a re-print starts clean.
@@ -1788,8 +1793,9 @@ function fitTableToOnePage() {
     console.log("[print fit-table] shrink", { totalH: totalH.toFixed(1), scale: scale.toFixed(3) });
   } else {
     // Underfill: distribute remaining vertical space across data rows
-    // via inline tr.style.height. 3mm safety against bottom margin drift.
-    const availForBody = PAGE_H_MM - headerH - summaryH - notesH - theadH - tfootH - 3;
+    // via inline tr.style.height. 6mm safety against rounding + Chrome's
+    // print-dialog options inserting their own header/footer chrome.
+    const availForBody = PAGE_H_MM - headerH - summaryH - notesH - theadH - tfootH - 6;
     const targetRowH = Math.max(4, availForBody / dataRows);
     trList.forEach((tr) => { tr.style.height = \`\${targetRowH.toFixed(2)}mm\`; });
     console.log("[print fit-table] expand", {
