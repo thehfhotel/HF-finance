@@ -172,99 +172,103 @@ export const WORKSHEET_HTML = `<!doctype html>
   #historyPanel a:hover { text-decoration: underline; }
 
   /* Report (PDF) view. Built on demand into #reportRoot, hidden on screen,
-     swapped for the editable view in @media print. Per-employee cards in
-     A4 portrait — see buildReport() in JS for the structure. */
+     swapped for the editable view in @media print. Per-employee compact
+     cards in A4 portrait, grayscale only — see buildReport() in JS.
+     Density target ~5 cards/page for typical employees, with
+     break-inside:avoid pushing heavy ones to next page. */
   #reportRoot { display: none; }
   @media print {
     @page { size: A4 portrait; margin: 14mm 14mm 16mm 14mm; }
-    @page { @bottom-right { content: counter(page) " / " counter(pages); font: 8pt "Noto Sans Thai", sans-serif; color: #6b7280; } }
-    body { max-width: none; margin: 0; padding: 0; color: #111827; background: #fff; }
+    @page { @bottom-right { content: counter(page) " / " counter(pages); font: 8pt "Noto Sans Thai", sans-serif; color: #737373; } }
+    body { max-width: none; margin: 0; padding: 0; color: #0a0a0a; background: #fff; }
     body > * { display: none !important; }
     body > #reportRoot { display: block !important; }
 
-    #reportRoot { font: 10pt/1.45 "Noto Sans Thai", sans-serif; }
+    #reportRoot { font: 9pt/1.4 "Noto Sans Thai", sans-serif; color: #0a0a0a; }
     #reportRoot .report-header {
-      margin-bottom: 6mm; padding-bottom: 3mm;
-      border-bottom: 0.5pt solid #1d4ed8;
+      margin-bottom: 5mm; padding-bottom: 2.5mm;
+      border-bottom: 0.5pt solid #404040;
     }
-    #reportRoot .report-header h1 { font-size: 16pt; font-weight: 600; margin: 0 0 1.5mm; }
-    #reportRoot .report-meta { font-size: 9pt; color: #4b5563; }
-    #reportRoot .report-meta strong { color: #111827; font-weight: 500; margin-right: 2mm; }
+    #reportRoot .report-header h1 { font-size: 14pt; font-weight: 600; margin: 0 0 1mm; color: #0a0a0a; }
+    #reportRoot .report-meta { font-size: 8.5pt; color: #404040; }
+    #reportRoot .report-meta strong { color: #0a0a0a; font-weight: 500; margin-right: 1.5mm; }
 
+    /* Cards: flat 0.4pt border, no radius, no fill. */
     #reportRoot .emp-card {
-      border: 0.4pt solid #d1d5db; border-radius: 1.5mm;
-      padding: 4mm 5mm; margin-bottom: 4mm;
+      border: 0.4pt solid #d4d4d4;
+      padding: 3mm 4mm; margin-bottom: 1.5mm;
       page-break-inside: avoid; break-inside: avoid;
     }
+    /* Header row: # + name (left) + period (right). All inline. */
     #reportRoot .emp-head {
-      display: flex; align-items: baseline; gap: 3mm;
-      margin-bottom: 2.5mm; padding-bottom: 1.5mm;
-      border-bottom: 0.25pt solid #e5e7eb;
+      display: flex; align-items: baseline; gap: 2mm;
+      margin-bottom: 1.5mm;
     }
     #reportRoot .emp-num {
-      font-weight: 600; color: #6b7280; font-size: 10pt; min-width: 6mm;
+      font-size: 9pt; color: #737373; font-weight: 400; min-width: 7mm;
     }
-    #reportRoot .emp-name { font-weight: 600; font-size: 12pt; }
-    #reportRoot .emp-nick { color: #6b7280; font-size: 10pt; margin-left: 2mm; }
-    #reportRoot .emp-pos { color: #6b7280; font-size: 10pt; margin-left: 3mm; }
-    #reportRoot .emp-account {
-      margin-left: auto; font-family: ui-monospace, SFMono-Regular, monospace;
-      font-size: 9.5pt; color: #374151; font-variant-numeric: tabular-nums;
-    }
+    #reportRoot .emp-name { font-weight: 600; font-size: 11pt; color: #0a0a0a; }
+    #reportRoot .emp-period { margin-left: auto; font-size: 9pt; color: #737373; }
 
+    /* Section label: "หักเงิน" / "เพิ่ม" — small, restrained, lowercase
+       letterspacing for a label feel. */
+    #reportRoot .section-label {
+      font-size: 8pt; font-weight: 600; color: #404040;
+      letter-spacing: 0.04em; margin-top: 1mm; margin-bottom: 0.3mm;
+    }
     #reportRoot .emp-line {
       display: flex; justify-content: space-between;
-      padding: 0.6mm 0; font-size: 10pt;
+      padding: 0.3mm 0 0.3mm 4mm; font-size: 9pt; color: #404040;
     }
-    #reportRoot .emp-line .amt { font-variant-numeric: tabular-nums; }
+    #reportRoot .emp-line .amt { font-variant-numeric: tabular-nums; color: #0a0a0a; }
     #reportRoot .emp-line.salary {
-      border-bottom: 0.4pt solid #d1d5db;
-      padding-bottom: 1.5mm; margin-bottom: 0.8mm;
-      font-weight: 600;
+      padding-left: 0; font-weight: 500; color: #0a0a0a;
     }
-    #reportRoot .emp-line.deduct .amt { color: #b91c1c; }
-    #reportRoot .emp-line.add .amt { color: #15803d; }
-    #reportRoot .emp-line .label { color: #374151; }
 
-    #reportRoot .emp-note {
-      font-size: 9pt; color: #4b5563;
-      margin-top: 2mm; padding: 1.5mm 2.5mm;
-      background: #f9fafb; border-left: 0.6pt solid #d1d5db;
-    }
+    /* Take-home: rule above + weight + size — no color. */
     #reportRoot .emp-takehome {
       display: flex; justify-content: space-between; align-items: baseline;
-      margin-top: 2.5mm; padding: 2.2mm 3mm;
-      background: #eff6ff; border: 0.4pt solid #1d4ed8; border-radius: 1mm;
+      margin-top: 1.5mm; padding-top: 1.5mm;
+      border-top: 1pt solid #404040;
     }
-    #reportRoot .emp-takehome .label { font-size: 11pt; font-weight: 600; color: #1e3a8a; }
+    #reportRoot .emp-takehome .label {
+      font-size: 10pt; font-weight: 700; color: #404040; letter-spacing: 0.04em;
+    }
     #reportRoot .emp-takehome .amt {
-      font-size: 14pt; font-weight: 700; color: #1d4ed8;
+      font-size: 13pt; font-weight: 700; color: #0a0a0a;
       font-variant-numeric: tabular-nums;
     }
 
+    /* Meta row at bottom: account · position · note — single line, muted. */
+    #reportRoot .emp-meta {
+      margin-top: 1.2mm; font-size: 8pt; color: #737373;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    #reportRoot .emp-meta .acct { font-variant-numeric: tabular-nums; }
+
+    /* Summary block — same vocabulary, scaled. */
     #reportRoot .report-summary {
-      margin-top: 8mm; padding: 6mm; page-break-before: auto;
-      background: #f9fafb; border: 0.5pt solid #d1d5db; border-radius: 2mm;
+      margin-top: 6mm; padding-top: 3mm;
+      border-top: 1.5pt solid #404040;
     }
     #reportRoot .summary-line {
       display: flex; justify-content: space-between; align-items: baseline;
-      padding: 1.5mm 0; font-size: 12pt; font-weight: 500;
+      padding: 1mm 0; font-size: 10pt; color: #404040;
     }
-    #reportRoot .summary-line .amt { font-variant-numeric: tabular-nums; }
-    #reportRoot .summary-line.grand {
-      margin-top: 3mm; padding-top: 4mm;
-      border-top: 0.5pt solid #1d4ed8;
+    #reportRoot .summary-line .amt { font-variant-numeric: tabular-nums; color: #0a0a0a; font-weight: 500; }
+    #reportRoot .summary-line.grand { margin-top: 2mm; padding-top: 2mm; border-top: 0.5pt solid #d4d4d4; }
+    #reportRoot .summary-line.grand .label {
+      font-size: 12pt; font-weight: 700; color: #404040; letter-spacing: 0.04em;
     }
-    #reportRoot .summary-line.grand .label { font-size: 14pt; font-weight: 600; }
     #reportRoot .summary-line.grand .amt {
-      font-size: 22pt; font-weight: 700; color: #1d4ed8;
+      font-size: 18pt; font-weight: 700; color: #0a0a0a;
     }
     #reportRoot .summary-notes {
-      margin-top: 5mm; padding-top: 3mm;
-      border-top: 0.25pt solid #e5e7eb;
-      font-size: 10pt; color: #374151; white-space: pre-wrap;
+      margin-top: 4mm; padding-top: 2.5mm;
+      border-top: 0.25pt solid #d4d4d4;
+      font-size: 9pt; color: #404040; white-space: pre-wrap;
     }
-    #reportRoot .summary-notes strong { font-weight: 600; color: #111827; }
+    #reportRoot .summary-notes strong { font-weight: 600; color: #0a0a0a; }
   }
 
   /* Past-month banner — appears when the selected period is older than
@@ -1470,46 +1474,44 @@ const REPORT_FIELD_LABEL = {
   otherAddition: "รับอื่นๆ",
 };
 
-function buildEmpCard(r, idx) {
-  const lines = [];
-  lines.push(
-    \`<div class="emp-line salary"><span class="label">เงินเดือน</span>\` +
-    \`<span class="amt">\${fmt(num(r.salary))}</span></div>\`
-  );
-  for (const k of REPORT_DEDUCT_ORDER) {
-    const v = num(r[k]);
-    if (v <= 0) continue;
-    lines.push(
-      \`<div class="emp-line deduct"><span class="label">หัก \${REPORT_FIELD_LABEL[k]}</span>\` +
-      \`<span class="amt">−\${fmt(v)}</span></div>\`
-    );
-  }
-  for (const k of REPORT_ADD_ORDER) {
-    const v = num(r[k]);
-    if (v <= 0) continue;
-    lines.push(
-      \`<div class="emp-line add"><span class="label">+ \${REPORT_FIELD_LABEL[k]}</span>\` +
-      \`<span class="amt">+\${fmt(v)}</span></div>\`
-    );
-  }
-  const noteHtml = (r.note && r.note.trim())
-    ? \`<div class="emp-note">หมายเหตุ: \${escapeHtml(r.note)}</div>\`
-    : "";
-  const account = displayAccount(r);
+function buildEmpCard(r, idx, periodLabel) {
+  // Salary always renders. Deductions/additions only render when non-zero,
+  // each section preceded by its label. If a section has zero items, the
+  // label is omitted (skip-when-zero applies to the whole group too).
+  const deductLines = REPORT_DEDUCT_ORDER
+    .filter((k) => num(r[k]) > 0)
+    .map((k) =>
+      \`<div class="emp-line"><span class="label">\${escapeHtml(REPORT_FIELD_LABEL[k])}</span>\` +
+      \`<span class="amt">\${fmt(num(r[k]))}</span></div>\`
+    ).join("");
+  const addLines = REPORT_ADD_ORDER
+    .filter((k) => num(r[k]) > 0)
+    .map((k) =>
+      \`<div class="emp-line"><span class="label">\${escapeHtml(REPORT_FIELD_LABEL[k])}</span>\` +
+      \`<span class="amt">\${fmt(num(r[k]))}</span></div>\`
+    ).join("");
+
+  // Meta line at bottom: bank · account · position · (nickname) · note.
+  const metaParts = [];
+  metaParts.push(\`<span class="acct">\${escapeHtml(displayAccount(r))}</span>\`);
+  if (r.position) metaParts.push(escapeHtml(r.position));
+  if (r.nickname) metaParts.push(\`(\${escapeHtml(r.nickname)})\`);
+  if (r.note && r.note.trim()) metaParts.push(\`หมายเหตุ: \${escapeHtml(r.note.trim())}\`);
+
   return \`<div class="emp-card">
     <div class="emp-head">
-      <span class="emp-num">\${String(idx + 1).padStart(2, "0")}</span>
+      <span class="emp-num">#\${String(idx + 1).padStart(2, "0")}</span>
       <span class="emp-name">\${escapeHtml(r.accountName || "—")}</span>
-      \${r.nickname ? \`<span class="emp-nick">(\${escapeHtml(r.nickname)})</span>\` : ""}
-      \${r.position ? \`<span class="emp-pos">\${escapeHtml(r.position)}</span>\` : ""}
-      <span class="emp-account">\${escapeHtml(account)}</span>
+      <span class="emp-period">\${escapeHtml(periodLabel)}</span>
     </div>
-    \${lines.join("")}
-    \${noteHtml}
+    <div class="emp-line salary"><span class="label">เงินเดือน</span><span class="amt">\${fmt(num(r.salary))}</span></div>
+    \${deductLines ? \`<div class="section-label">หักเงิน</div>\${deductLines}\` : ""}
+    \${addLines ? \`<div class="section-label">เพิ่ม</div>\${addLines}\` : ""}
     <div class="emp-takehome">
-      <span class="label">รวมรับสุทธิ</span>
-      <span class="amt">฿\${fmt(rowTakeHome(r))}</span>
+      <span class="label">รับสุทธิ</span>
+      <span class="amt">\${fmt(rowTakeHome(r))}</span>
     </div>
+    <div class="emp-meta">\${metaParts.join(" · ")}</div>
   </div>\`;
 }
 
@@ -1527,7 +1529,7 @@ function buildReport(sheet) {
   if (snapId) metaParts.push(\`<strong>คำขอ</strong><code>\${escapeHtml(snapId)}</code>\`);
   metaParts.push(\`<strong>พิมพ์เมื่อ</strong>\${new Date().toLocaleString("th-TH-u-ca-buddhist")}\`);
 
-  const cards = sheet.rows.map((r, i) => buildEmpCard(r, i)).join("");
+  const cards = sheet.rows.map((r, i) => buildEmpCard(r, i, periodLabel)).join("");
 
   const generalNotesHtml = (sheet.generalNotes && sheet.generalNotes.trim())
     ? \`<div class="summary-notes"><strong>หมายเหตุทั่วไป</strong><br>\${escapeHtml(sheet.generalNotes)}</div>\`
@@ -1546,7 +1548,7 @@ function buildReport(sheet) {
       </div>
       <div class="summary-line grand">
         <span class="label">รวมยอดโอนทั้งสิ้น</span>
-        <span class="amt">฿\${fmt(totalAll)}</span>
+        <span class="amt">\${fmt(totalAll)}</span>
       </div>
       \${generalNotesHtml}
     </div>
