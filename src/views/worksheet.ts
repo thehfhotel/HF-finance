@@ -257,18 +257,18 @@ export const WORKSHEET_HTML = `<!doctype html>
   #reportRoot .slip-savings {
     display: flex; align-items: baseline; gap: 2mm;
     padding: 1.2mm 3mm; margin: 1mm 0;
-    background: #fef9c3; border: 0.3pt solid #eab308;
+    background: #f5f5f5; border: 0.3pt solid #525252;
     border-radius: 0.5mm;
     font-size: 9pt;
   }
-  #reportRoot .slip-savings .label { color: #422006; font-weight: 600; }
-  #reportRoot .slip-savings .label .en { color: #78350f; font-weight: 500; font-size: 7.8pt; margin-left: 1mm; }
+  #reportRoot .slip-savings .label { color: #0a0a0a; font-weight: 600; }
+  #reportRoot .slip-savings .label .en { color: #525252; font-weight: 500; font-size: 7.8pt; margin-left: 1mm; }
   #reportRoot .slip-savings .amt {
-    margin-left: auto; color: #422006; font-weight: 700;
+    margin-left: auto; color: #0a0a0a; font-weight: 700;
     font-size: 11pt; font-variant-numeric: tabular-nums;
   }
-  #reportRoot .slip-savings .amt .baht { font-size: 8pt; font-weight: 500; opacity: 0.75; margin-left: 1mm; }
-  #reportRoot .slip-savings .asof { color: #78350f; font-size: 7.5pt; font-style: italic; }
+  #reportRoot .slip-savings .amt .baht { font-size: 8pt; font-weight: 500; color: #525252; margin-left: 1mm; }
+  #reportRoot .slip-savings .asof { color: #737373; font-size: 7.5pt; font-style: italic; }
 
   #reportRoot .slip-net {
     display: flex; justify-content: space-between; align-items: baseline;
