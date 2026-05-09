@@ -273,7 +273,7 @@ export const WORKSHEET_HTML = `<!doctype html>
   #reportRoot .slip-net {
     display: flex; justify-content: space-between; align-items: baseline;
     padding: 1.5mm 3mm; margin: 1mm 0 2.5mm;
-    background: #1d4ed8; color: #fff;
+    background: #262626; color: #fff;
     border-radius: 0.5mm;
   }
   #reportRoot .slip-net .label { font-size: 10pt; font-weight: 700; letter-spacing: 0.04em; }
@@ -1617,6 +1617,12 @@ const SLIP_DEDUCTIONS = [
 // NOT committed — they load from gitignored data/ via src/roster-data.ts.
 // Refresh by re-importing the spreadsheet into that file and updating
 // SAVINGS_AS_OF below.
+//
+// Two employees who resigned during the covered cycles were paid their
+// remaining balance with their final payroll, so neither carries a
+// balance forward and they are
+// omitted here — lookupSavings returns null and the slip suppresses the
+// savings line.
 const SAVINGS_AS_OF = "30 เมษายน 2569";
 const SAVINGS_BALANCE = {
   "ทดสอบ": 11111.11,

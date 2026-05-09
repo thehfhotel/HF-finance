@@ -48,9 +48,12 @@ export function isValidPeriod(p: string): boolean {
 }
 
 // Defaults pulled from the most recent payroll snapshot
-// (payroll-table เดือน เมษายน-69.xlsx). Applied to rows that
-// have no nickname / position / salary set — keeps existing user edits.
-// Refresh by re-importing the latest monthly sheet and updating values.
+// (payroll-table เดือน เมษายน-69.xlsx, last refreshed 30 เม.ย. 2569).
+// Applied to rows that have no nickname / position / salary set — keeps
+// existing user edits. Refresh by re-importing the latest monthly sheet
+// and updating values. Includes former employees so historic
+// months still resolve a nickname/position/salary if their bank account
+// rows are ever reloaded.
 const EMPLOYEE_DEFAULTS: Record<string, { nickname: string; position: string; salary: number }> = {
   "นางสาวทดสอบ ตัวอย่าง": { nickname: "ทดสอบ", position: "Reception", salary: 11111 },
   // Real values live outside the repo (gitignored data/); see src/roster-data.ts.
