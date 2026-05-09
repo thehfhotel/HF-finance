@@ -298,7 +298,7 @@ function renderPendingCard(req) {
     ? \`<button class="primary" data-action="approve" data-id="\${req.id}">อนุมัติ</button>
        <button class="danger" data-action="reject" data-id="\${req.id}">ปฏิเสธ</button>\`
     : "";
-  const snapshotHtml = req.type === "transfer-payroll" && req.summary && req.summary.sheet
+  const snapshotHtml = req.type === "transfer-payroll"
     ? \`<a href="/worksheet?snapshot=\${encodeURIComponent(req.id)}">ดูรายละเอียดเงินเดือน</a>\`
     : "";
   const recipientCount = req.type === "transfer-payroll" ? req.summary.rows.length : (req.type === "add-payroll" ? req.summary.accounts.length : 0);
@@ -330,7 +330,7 @@ function renderHistoryRow(req) {
   const figures = req.type === "transfer-payroll"
     ? \`\${req.summary.rows.length} คน · ฿\${fmtAmount(req.summary.totalAmount)}\`
     : (req.type === "add-payroll" ? \`\${req.summary.accounts.length} บัญชี\` : "");
-  const snapLink = req.type === "transfer-payroll" && req.summary && req.summary.sheet
+  const snapLink = req.type === "transfer-payroll"
     ? \`<a href="/worksheet?snapshot=\${encodeURIComponent(req.id)}">รายละเอียด</a>\`
     : "";
   return \`<div class="row s-\${req.status}" title="\${escapeHtml(req.id)}">
