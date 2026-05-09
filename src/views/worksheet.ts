@@ -138,8 +138,8 @@ export const WORKSHEET_HTML = `<!doctype html>
   .flatpickr-current-month .cur-year { font-weight: 600; }
 
   /* Lock-mode controls */
-  #lockToggle { font-size: 13px; padding: 6px 12px; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; cursor: pointer; white-space: nowrap; }
-  #lockToggle.unlocked { background: #fef3c7; border-color: #f59e0b; color: #92400e; }
+  #lockToggle { font-size: 16px; line-height: 1; padding: 7px 9px; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; cursor: pointer; }
+  #lockToggle.unlocked { background: #fef3c7; border-color: #f59e0b; }
   #lockToggle:hover { background: #f3f4f6; }
   #lockToggle.unlocked:hover { background: #fde68a; }
 
@@ -158,6 +158,17 @@ export const WORKSHEET_HTML = `<!doctype html>
   #colsMenu label:hover { background: #f3f4f6; }
   #colsMenu input[type="checkbox"] { margin: 0; }
   #colsMenu .menu-title { font-size: 11px; color: #6b7280; padding: 2px 10px 6px; border-bottom: 1px solid #e5e7eb; margin-bottom: 4px; }
+
+  /* Export dropdown — mirrors #colsBox/#colsMenu pattern. */
+  #exportBox { position: relative; display: inline-block; }
+  #exportBtn { font-size: 13px; padding: 6px 12px; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; cursor: pointer; white-space: nowrap; }
+  #exportBtn:hover { background: #f3f4f6; }
+  #exportMenu { position: absolute; top: calc(100% + 4px); right: 0; min-width: 220px; background: #fff; border: 1px solid #d1d5db; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.12); padding: 8px 4px; z-index: 20; }
+  #exportMenu .menu-title { font-size: 11px; color: #6b7280; padding: 6px 12px 4px; text-transform: none; letter-spacing: 0.02em; }
+  #exportMenu .menu-title + .menu-title { border-top: 1px solid #e5e7eb; margin-top: 4px; }
+  #exportMenu .menu-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 12px; font-size: 14px; border: 0; background: transparent; color: #111827; text-align: left; cursor: pointer; border-radius: 3px; }
+  #exportMenu .menu-item:hover { background: #f3f4f6; }
+  #exportMenu .menu-item .ico { font-size: 14px; line-height: 1; width: 16px; text-align: center; }
   #addRow { padding: 8px 14px; border: 1px dashed #9ca3af; background: #fff; border-radius: 4px; cursor: pointer; color: #374151; font-size: 14px; }
   #addRow:hover { background: #f3f4f6; border-color: #6b7280; }
 
@@ -481,11 +492,18 @@ export const WORKSHEET_HTML = `<!doctype html>
         <button type="button" id="colsBtn" title="ซ่อน/แสดงคอลัมน์ที่ค้าง">⚙ คอลัมน์</button>
         <div id="colsMenu" hidden></div>
       </div>
-      <button type="button" id="lockToggle" title="สลับโหมดแก้ไขข้อมูลพื้นฐาน">🔓 ปลดล็อคข้อมูลพื้นฐาน</button>
-      <button type="button" id="printBtn" title="พิมพ์สลิปเงินเดือนรายคน (A4 portrait)">🖨 Pay Slip (Print)</button>
-      <button type="button" id="saveCardsBtn" title="บันทึกสลิปเงินเดือนเป็นรูป (.jpg)">🖼 สลิปเงินเดือน</button>
-      <button type="button" id="printTableBtn" title="พิมพ์ตารางสรุปทั้งหน้า (A4 landscape)">🖨 ตาราง</button>
-      <button type="button" id="saveTableBtn" title="บันทึกตารางสรุปเป็นรูป (.jpg)">🖼 ตาราง</button>
+      <button type="button" id="lockToggle" title="ปลดล็อคข้อมูลพื้นฐาน">🔓</button>
+      <div id="exportBox">
+        <button type="button" id="exportBtn" title="พิมพ์ / บันทึกสลิปเงินเดือน หรือ ตาราง">⤓ ส่งออก ▾</button>
+        <div id="exportMenu" hidden>
+          <div class="menu-title">สลิปเงินเดือน</div>
+          <button type="button" class="menu-item" id="printBtn" title="พิมพ์สลิปเงินเดือนรายคน (A4 แนวตั้ง)"><span class="ico">🖨</span> พิมพ์</button>
+          <button type="button" class="menu-item" id="saveCardsBtn" title="บันทึกสลิปเงินเดือนเป็นรูป (.jpg)"><span class="ico">🖼</span> บันทึกเป็นรูป</button>
+          <div class="menu-title">ตารางสรุป</div>
+          <button type="button" class="menu-item" id="printTableBtn" title="พิมพ์ตารางสรุปทั้งหน้า (A4 แนวนอน)"><span class="ico">🖨</span> พิมพ์</button>
+          <button type="button" class="menu-item" id="saveTableBtn" title="บันทึกตารางสรุปเป็นรูป (.jpg)"><span class="ico">🖼</span> บันทึกเป็นรูป</button>
+        </div>
+      </div>
       <button type="button" id="submit" class="primary">ส่งให้อนุมัติ</button>
     </div>
   </div>
@@ -1329,11 +1347,13 @@ function applyLockUI() {
   const btn = document.getElementById("lockToggle");
   const addBox = document.getElementById("addRowBox");
   if (locked) {
-    btn.textContent = "🔓 ปลดล็อคข้อมูลพื้นฐาน";
+    btn.textContent = "🔓";
+    btn.title = "ปลดล็อคข้อมูลพื้นฐาน";
     btn.classList.remove("unlocked");
     if (addBox) addBox.hidden = true;
   } else {
-    btn.textContent = "🔒 ล็อคข้อมูลพื้นฐาน";
+    btn.textContent = "🔒";
+    btn.title = "ล็อคข้อมูลพื้นฐาน";
     btn.classList.add("unlocked");
     if (addBox) addBox.hidden = false;
   }
@@ -1998,6 +2018,24 @@ function fitTableToOnePage() {
     });
   }
 }
+
+// Export-menu toggle. Mirrors the colsBox/colsBtn pattern: button click
+// toggles, document click outside closes, item click closes (the per-item
+// click handlers below still fire because they bind by id).
+(function wireExportMenu() {
+  const menu = document.getElementById("exportMenu");
+  const btn = document.getElementById("exportBtn");
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    menu.hidden = !menu.hidden;
+  });
+  menu.addEventListener("click", (e) => {
+    if (e.target.closest(".menu-item")) menu.hidden = true;
+  });
+  document.addEventListener("click", (e) => {
+    if (!document.getElementById("exportBox").contains(e.target)) menu.hidden = true;
+  });
+})();
 
 document.getElementById("printBtn").addEventListener("click", () => {
   if (!currentSheet) return;
