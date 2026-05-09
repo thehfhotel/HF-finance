@@ -849,6 +849,13 @@ async function refreshHistory() {
   } catch { historyPanel.hidden = true; }
 }
 
+// Derive a YYYY-MM period from a "DD/MM/YYYY" effectiveDate string.
+// Used as a last-resort hint for queue items that predate summary.period.
+function periodFromEffective(eff) {
+  const m = /^(\\d{2})\\/(\\d{2})\\/(\\d{4})$/.exec(eff || "");
+  return m ? \`\${m[3]}-\${m[2]}\` : null;
+}
+
 async function loadSnapshot(id) {
   saveStateEl.className = "save-state";
   const res = await fetch(\`/api/queue/\${id}\`);
@@ -862,13 +869,49 @@ async function loadSnapshot(id) {
   document.getElementById("snapStatus").innerHTML =
     "สถานะ: <strong>" + escapeHtml(req.status) + "</strong>" +
     (req.summary && req.summary.effectiveDate ? " · เงินเข้า " + escapeHtml(req.summary.effectiveDate) : "");
-  if (!req.summary || req.type !== "transfer-payroll" || !req.summary.sheet) {
-    showError("คำขอนี้ไม่มี snapshot ของ worksheet (อาจจะเก่ากว่า feature นี้). " +
-      'ดู xlsx ได้ที่ <a href="/api/queue/' + encodeURIComponent(id) + '/xlsx">ดาวน์โหลด xlsx</a>');
+
+  if (!req.summary || req.type !== "transfer-payroll") {
+    showError("คำขอนี้ไม่ใช่ payroll transfer — ไม่มีรายละเอียดเงินเดือนให้ดู");
     return;
   }
-  const sheet = req.summary.sheet;
-  currentPeriod = sheet.period || (req.summary.period || "");
+
+  // Two paths: (1) snapshot embedded in the queue item — exact state at
+  // submit time (preferred); (2) no snapshot (older items) — derive the
+  // period and load the current worksheet for that month, with a warning
+  // that the data may have been edited since.
+  let sheet = req.summary.sheet;
+  let isLiveFallback = false;
+
+  if (!sheet) {
+    const period = req.summary.period || periodFromEffective(req.summary.effectiveDate);
+    if (!period) {
+      showError(
+        "คำขอนี้ไม่มีข้อมูลเดือนที่อ้างอิง — ดูเฉพาะ xlsx ได้ที่ " +
+        '<a href="/api/queue/' + encodeURIComponent(id) + '/xlsx">ดาวน์โหลด xlsx</a>'
+      );
+      return;
+    }
+    const sheetRes = await fetch(\`/api/sheets/\${period}\`);
+    if (!sheetRes.ok) {
+      showError(\`โหลด worksheet ของเดือน \${period} ไม่สำเร็จ\`);
+      return;
+    }
+    sheet = await sheetRes.json();
+    isLiveFallback = true;
+  }
+
+  if (isLiveFallback) {
+    const banner = document.querySelector(".snap-banner");
+    if (banner) {
+      const warn = document.createElement("div");
+      warn.style.cssText = "margin-top:6px;color:#92400e;font-size:13px;";
+      warn.textContent =
+        "⚠️ ไม่มี snapshot ของช่วงที่ส่งคำขอ — กำลังแสดง worksheet ปัจจุบัน (อาจถูกแก้ไขหลังส่งคำขอ)";
+      banner.appendChild(warn);
+    }
+  }
+
+  currentPeriod = sheet.period || (req.summary.period || periodFromEffective(req.summary.effectiveDate) || "");
   if (currentPeriod) periodSelect.value = currentPeriod;
   currentSheet = sheet;
   generalNotesEl.value = sheet.generalNotes || "";
@@ -1118,20 +1161,34 @@ rowsTbody.addEventListener("drop", (e) => {
 });
 rowsTbody.addEventListener("dragend", clearDragState);
 
-// Wire section-jump scroll buttons
+// Wire section-jump scroll buttons. Click handler is position-relative
+// (find the next/prev target strictly past current scrollLeft), not
+// anchor-index-relative — otherwise when the user has scrolled with the
+// wheel into the gap between anchor 0 and anchor 1, the button looks
+// enabled (scrollLeft > 2) but currentSectionIdx() returns 0 and the
+// click is silently a no-op.
 (function() {
   const wrap = document.getElementById("tableWrap");
   const leftBtn = document.getElementById("scrollLeft");
   const rightBtn = document.getElementById("scrollRight");
+  const EPS = 4;
+
   leftBtn.addEventListener("click", () => {
     const t = sectionTargets();
-    const i = currentSectionIdx();
-    if (i > 0) wrap.scrollTo({ left: t[i-1].left, behavior: "smooth" });
+    const sl = wrap.scrollLeft;
+    let target = 0;
+    for (const tg of t) if (tg.left < sl - EPS) target = tg.left;
+    console.log("[scroll-left]", { from: sl, to: target, targets: t.map(x => x.left) });
+    wrap.scrollTo({ left: target, behavior: "smooth" });
   });
   rightBtn.addEventListener("click", () => {
     const t = sectionTargets();
-    const i = currentSectionIdx();
-    if (i < t.length - 1) wrap.scrollTo({ left: t[i+1].left, behavior: "smooth" });
+    const sl = wrap.scrollLeft;
+    const max = Math.max(0, wrap.scrollWidth - wrap.clientWidth);
+    let target = max;
+    for (let i = t.length - 1; i >= 0; i--) if (t[i].left > sl + EPS) target = t[i].left;
+    console.log("[scroll-right]", { from: sl, to: target, max, targets: t.map(x => x.left) });
+    wrap.scrollTo({ left: target, behavior: "smooth" });
   });
   wrap.addEventListener("scroll", updateScrollBtns);
   window.addEventListener("resize", () => { setupStickyAndScroll(); });
