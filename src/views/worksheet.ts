@@ -176,194 +176,131 @@ export const WORKSHEET_HTML = `<!doctype html>
        - cards    → per-employee compact cards, A4 portrait (default)
        - table    → single-page summary table, A4 landscape
      The mode is selected by the body class set at print time. */
-  #reportRoot { display: none; }
+  /* Report styling lives OUTSIDE @media print so off-screen measurements
+     in JS (display:block + visibility:hidden) get the same layout the
+     print engine will use. The screen render is hidden via #reportRoot
+     { display:none }; @media print flips that on plus adds @page rules. */
+  #reportRoot { display: none; font: 9pt/1.4 "Noto Sans Thai", sans-serif; color: #0a0a0a; }
+
+  #reportRoot .report-header {
+    margin-bottom: 5mm; padding-bottom: 2.5mm;
+    border-bottom: 0.5pt solid #404040;
+  }
+  #reportRoot .report-header h1 { font-size: 14pt; font-weight: 600; margin: 0 0 1mm; color: #0a0a0a; }
+  #reportRoot .report-meta { font-size: 8.5pt; color: #404040; }
+  #reportRoot .report-meta strong { color: #0a0a0a; font-weight: 500; margin-right: 1.5mm; }
+
+  /* ── Cards mode (A4 portrait, grayscale) ────────────────────────────── */
+  #reportRoot .emp-card {
+    border: 0.4pt solid #d4d4d4;
+    padding: 3mm 4mm; margin-bottom: 1.5mm;
+    page-break-inside: avoid; break-inside: avoid;
+  }
+  #reportRoot .emp-head { display: flex; align-items: baseline; gap: 2mm; margin-bottom: 1.5mm; }
+  #reportRoot .emp-num { font-size: 9pt; color: #737373; font-weight: 400; min-width: 7mm; }
+  #reportRoot .emp-name { font-weight: 600; font-size: 11pt; color: #0a0a0a; }
+  #reportRoot .emp-period { margin-left: auto; font-size: 9pt; color: #737373; }
+  #reportRoot .section-label {
+    font-size: 8pt; font-weight: 600; color: #404040;
+    letter-spacing: 0.04em; margin-top: 1mm; margin-bottom: 0.3mm;
+  }
+  #reportRoot .emp-line {
+    display: flex; justify-content: space-between;
+    padding: 0.3mm 0 0.3mm 4mm; font-size: 9pt; color: #404040;
+  }
+  #reportRoot .emp-line .amt { font-variant-numeric: tabular-nums; color: #0a0a0a; }
+  #reportRoot .emp-line.salary { padding-left: 0; font-weight: 500; color: #0a0a0a; }
+  #reportRoot .emp-takehome {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-top: 1.5mm; padding-top: 1.5mm;
+    border-top: 1pt solid #404040;
+  }
+  #reportRoot .emp-takehome .label { font-size: 10pt; font-weight: 700; color: #404040; letter-spacing: 0.04em; }
+  #reportRoot .emp-takehome .amt { font-size: 13pt; font-weight: 700; color: #0a0a0a; font-variant-numeric: tabular-nums; }
+  #reportRoot .emp-meta {
+    margin-top: 1.2mm; font-size: 8pt; color: #737373;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #reportRoot .emp-meta .acct { font-variant-numeric: tabular-nums; }
+
+  #reportRoot .report-summary { margin-top: 6mm; padding-top: 3mm; border-top: 1.5pt solid #404040; }
+  #reportRoot .summary-line {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 1mm 0; font-size: 10pt; color: #404040;
+  }
+  #reportRoot .summary-line .amt { font-variant-numeric: tabular-nums; color: #0a0a0a; font-weight: 500; }
+  #reportRoot .summary-line.grand { margin-top: 2mm; padding-top: 2mm; border-top: 0.5pt solid #d4d4d4; }
+  #reportRoot .summary-line.grand .label { font-size: 12pt; font-weight: 700; color: #404040; letter-spacing: 0.04em; }
+  #reportRoot .summary-line.grand .amt { font-size: 18pt; font-weight: 700; color: #0a0a0a; }
+  #reportRoot .summary-notes {
+    margin-top: 4mm; padding-top: 2.5mm;
+    border-top: 0.25pt solid #d4d4d4;
+    font-size: 9pt; color: #404040; white-space: pre-wrap;
+  }
+  #reportRoot .summary-notes strong { font-weight: 600; color: #0a0a0a; }
+
+  /* ── Table mode (A4 landscape, fit-on-one-page summary) ─────────────── */
+  /* Visual structure mirrors the editable worksheet — 3-row header with
+     grouped columns and the same color-coded backgrounds. */
+  #reportRoot.mode-table { font: 7.5pt/1.2 "Noto Sans Thai", sans-serif; }
+  #reportRoot.mode-table .report-header { margin-bottom: 2mm; padding-bottom: 1.5mm; border-bottom: 0.5pt solid #404040; }
+  #reportRoot.mode-table .report-header h1 { font-size: 11pt; margin: 0 0 0.5mm; font-weight: 600; }
+  #reportRoot.mode-table .report-meta { font-size: 7pt; color: #404040; }
+  #reportRoot.mode-table .report-meta strong { color: #0a0a0a; font-weight: 500; margin-right: 1mm; }
+  #reportRoot.mode-table table { width: 100%; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
+  #reportRoot.mode-table th,
+  #reportRoot.mode-table td {
+    border: 0.25pt solid #d4d4d4;
+    padding: 0.6mm 1mm; text-align: right;
+    vertical-align: middle;
+  }
+  #reportRoot.mode-table thead th {
+    background: #f3f4f6; font-weight: 600; color: #1f2937;
+    font-size: 6.4pt; line-height: 1.1; text-align: center;
+  }
+  #reportRoot.mode-table thead th .hint { display: block; color: #9ca3af; font-weight: 400; font-size: 5.8pt; }
+  /* Column-group backgrounds — match the worksheet palette. */
+  #reportRoot.mode-table th.deduct, #reportRoot.mode-table td.deduct { background: #fff7ed; }
+  #reportRoot.mode-table th.add,    #reportRoot.mode-table td.add    { background: #ecfdf5; }
+  #reportRoot.mode-table th.calc,   #reportRoot.mode-table td.calc   { background: #eff6ff; font-weight: 600; }
+  #reportRoot.mode-table thead th.frozen { background: #f3f4f6; }
+  #reportRoot.mode-table tbody td.frozen { background: #ffffff; }
+  #reportRoot.mode-table tfoot td.frozen { background: #f9fafb; }
+  #reportRoot.mode-table td.text { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #reportRoot.mode-table td.idx { text-align: center; color: #737373; font-size: 6.5pt; }
+  #reportRoot.mode-table td.acct {
+    text-align: left; font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 6.6pt; color: #404040;
+  }
+  #reportRoot.mode-table td.zero { color: #cbd5e1; }
+  #reportRoot.mode-table tfoot td { font-weight: 700; border-top: 0.6pt solid #404040; }
+  #reportRoot.mode-table .table-summary {
+    margin-top: 3mm; padding-top: 2mm; border-top: 0.5pt solid #d4d4d4;
+    display: flex; gap: 8mm; font-size: 8pt; color: #404040; align-items: baseline;
+  }
+  #reportRoot.mode-table .table-summary strong { color: #0a0a0a; font-weight: 600; margin-right: 1mm; }
+  #reportRoot.mode-table .table-summary .grand { margin-left: auto; font-size: 12pt; font-weight: 700; color: #0a0a0a; }
+  #reportRoot.mode-table .table-notes { margin-top: 2mm; font-size: 7.5pt; color: #404040; white-space: pre-wrap; }
+  #reportRoot.mode-table .table-notes strong { font-weight: 600; color: #0a0a0a; }
+
   @media print {
-    /* Force the browser to print background colors and column tints —
-       Chrome strips them by default. Inherits to all elements. */
+    /* Print backgrounds + tints regardless of "Background graphics" toggle. */
     body, #reportRoot, #reportRoot * {
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
       color-adjust: exact !important;
     }
 
-    /* Named pages: body class chooses which size/margin applies. */
     @page portrait-page { size: A4 portrait; margin: 14mm 14mm 16mm 14mm; @bottom-right { content: counter(page) " / " counter(pages); font: 8pt "Noto Sans Thai", sans-serif; color: #737373; } }
     @page landscape-page { size: A4 landscape; margin: 8mm 10mm; }
     body.print-cards { page: portrait-page; }
     body.print-table { page: landscape-page; }
-    /* Default fallback: someone hits Ctrl+P from a normal screen view —
-       still get something printable rather than the wide editable table. */
-    body { page: portrait-page; }
-    body { max-width: none; margin: 0; padding: 0; color: #0a0a0a; background: #fff; }
+    body { page: portrait-page; max-width: none; margin: 0; padding: 0; color: #0a0a0a; background: #fff; }
     body > * { display: none !important; }
     body > #reportRoot { display: block !important; }
 
-    #reportRoot { font: 9pt/1.4 "Noto Sans Thai", sans-serif; color: #0a0a0a; }
-    #reportRoot .report-header {
-      margin-bottom: 5mm; padding-bottom: 2.5mm;
-      border-bottom: 0.5pt solid #404040;
-    }
-    #reportRoot .report-header h1 { font-size: 14pt; font-weight: 600; margin: 0 0 1mm; color: #0a0a0a; }
-    #reportRoot .report-meta { font-size: 8.5pt; color: #404040; }
-    #reportRoot .report-meta strong { color: #0a0a0a; font-weight: 500; margin-right: 1.5mm; }
-
-    /* Cards: flat 0.4pt border, no radius, no fill. */
-    #reportRoot .emp-card {
-      border: 0.4pt solid #d4d4d4;
-      padding: 3mm 4mm; margin-bottom: 1.5mm;
-      page-break-inside: avoid; break-inside: avoid;
-    }
-    /* Header row: # + name (left) + period (right). All inline. */
-    #reportRoot .emp-head {
-      display: flex; align-items: baseline; gap: 2mm;
-      margin-bottom: 1.5mm;
-    }
-    #reportRoot .emp-num {
-      font-size: 9pt; color: #737373; font-weight: 400; min-width: 7mm;
-    }
-    #reportRoot .emp-name { font-weight: 600; font-size: 11pt; color: #0a0a0a; }
-    #reportRoot .emp-period { margin-left: auto; font-size: 9pt; color: #737373; }
-
-    /* Section label: "หักเงิน" / "เพิ่ม" — small, restrained, lowercase
-       letterspacing for a label feel. */
-    #reportRoot .section-label {
-      font-size: 8pt; font-weight: 600; color: #404040;
-      letter-spacing: 0.04em; margin-top: 1mm; margin-bottom: 0.3mm;
-    }
-    #reportRoot .emp-line {
-      display: flex; justify-content: space-between;
-      padding: 0.3mm 0 0.3mm 4mm; font-size: 9pt; color: #404040;
-    }
-    #reportRoot .emp-line .amt { font-variant-numeric: tabular-nums; color: #0a0a0a; }
-    #reportRoot .emp-line.salary {
-      padding-left: 0; font-weight: 500; color: #0a0a0a;
-    }
-
-    /* Take-home: rule above + weight + size — no color. */
-    #reportRoot .emp-takehome {
-      display: flex; justify-content: space-between; align-items: baseline;
-      margin-top: 1.5mm; padding-top: 1.5mm;
-      border-top: 1pt solid #404040;
-    }
-    #reportRoot .emp-takehome .label {
-      font-size: 10pt; font-weight: 700; color: #404040; letter-spacing: 0.04em;
-    }
-    #reportRoot .emp-takehome .amt {
-      font-size: 13pt; font-weight: 700; color: #0a0a0a;
-      font-variant-numeric: tabular-nums;
-    }
-
-    /* Meta row at bottom: account · position · note — single line, muted. */
-    #reportRoot .emp-meta {
-      margin-top: 1.2mm; font-size: 8pt; color: #737373;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    #reportRoot .emp-meta .acct { font-variant-numeric: tabular-nums; }
-
-    /* Summary block — same vocabulary, scaled. */
-    #reportRoot .report-summary {
-      margin-top: 6mm; padding-top: 3mm;
-      border-top: 1.5pt solid #404040;
-    }
-    #reportRoot .summary-line {
-      display: flex; justify-content: space-between; align-items: baseline;
-      padding: 1mm 0; font-size: 10pt; color: #404040;
-    }
-    #reportRoot .summary-line .amt { font-variant-numeric: tabular-nums; color: #0a0a0a; font-weight: 500; }
-    #reportRoot .summary-line.grand { margin-top: 2mm; padding-top: 2mm; border-top: 0.5pt solid #d4d4d4; }
-    #reportRoot .summary-line.grand .label {
-      font-size: 12pt; font-weight: 700; color: #404040; letter-spacing: 0.04em;
-    }
-    #reportRoot .summary-line.grand .amt {
-      font-size: 18pt; font-weight: 700; color: #0a0a0a;
-    }
-    #reportRoot .summary-notes {
-      margin-top: 4mm; padding-top: 2.5mm;
-      border-top: 0.25pt solid #d4d4d4;
-      font-size: 9pt; color: #404040; white-space: pre-wrap;
-    }
-    #reportRoot .summary-notes strong { font-weight: 600; color: #0a0a0a; }
-
-    /* ── Table mode (A4 landscape, fit-on-one-page summary) ───────────── */
-    /* Visual structure mirrors the editable worksheet — 3-row header with
-       grouped columns and the same color-coded backgrounds (peach for
-       deductions, mint for additions, light-blue for computed totals). */
-    #reportRoot.mode-table { font: 7.5pt/1.2 "Noto Sans Thai", sans-serif; }
-    #reportRoot.mode-table .report-header {
-      margin-bottom: 2mm; padding-bottom: 1.5mm;
-      border-bottom: 0.5pt solid #404040;
-    }
-    #reportRoot.mode-table .report-header h1 {
-      font-size: 11pt; margin: 0 0 0.5mm; font-weight: 600;
-    }
-    #reportRoot.mode-table .report-meta { font-size: 7pt; color: #404040; }
-    #reportRoot.mode-table .report-meta strong { color: #0a0a0a; font-weight: 500; margin-right: 1mm; }
-
-    #reportRoot.mode-table table {
-      width: 100%; border-collapse: collapse; table-layout: fixed;
-      font-variant-numeric: tabular-nums;
-    }
-    #reportRoot.mode-table th,
-    #reportRoot.mode-table td {
-      border: 0.25pt solid #d4d4d4;
-      padding: 0.6mm 1mm; text-align: right;
-      vertical-align: middle;
-    }
-    #reportRoot.mode-table thead th {
-      background: #f3f4f6; font-weight: 600; color: #1f2937;
-      font-size: 6.4pt; line-height: 1.1; text-align: center;
-    }
-    #reportRoot.mode-table thead th .hint {
-      display: block; color: #9ca3af; font-weight: 400; font-size: 5.8pt;
-    }
-
-    /* Column-group backgrounds — match the worksheet palette. */
-    #reportRoot.mode-table th.deduct, #reportRoot.mode-table td.deduct { background: #fff7ed; }
-    #reportRoot.mode-table th.add,    #reportRoot.mode-table td.add    { background: #ecfdf5; }
-    #reportRoot.mode-table th.calc,   #reportRoot.mode-table td.calc   { background: #eff6ff; font-weight: 600; }
-
-    /* Frozen-left columns (idx, name, account, nickname, position, salary)
-       — same gray header treatment as the worksheet, white body cells. */
-    #reportRoot.mode-table thead th.frozen { background: #f3f4f6; }
-    #reportRoot.mode-table tbody td.frozen { background: #ffffff; }
-    #reportRoot.mode-table tfoot td.frozen { background: #f9fafb; }
-
-    /* Cell modifiers. */
-    #reportRoot.mode-table td.text { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    #reportRoot.mode-table td.idx { text-align: center; color: #737373; font-size: 6.5pt; }
-    #reportRoot.mode-table td.acct {
-      text-align: left; font-family: ui-monospace, SFMono-Regular, monospace;
-      font-size: 6.6pt; color: #404040;
-    }
-    #reportRoot.mode-table td.zero { color: #cbd5e1; }
-    #reportRoot.mode-table tfoot td {
-      font-weight: 700; border-top: 0.6pt solid #404040;
-    }
-
-    /* Body row height — JS sets --row-h based on remaining vertical space
-       after header + footer + summary so the table fills the page rather
-       than ending in dead space. Falls back to auto when not measured. */
-    #reportRoot.mode-table tbody tr td {
-      height: var(--row-h, auto);
-    }
-
-    #reportRoot.mode-table .table-summary {
-      margin-top: 3mm; padding-top: 2mm; border-top: 0.5pt solid #d4d4d4;
-      display: flex; gap: 8mm; font-size: 8pt; color: #404040; align-items: baseline;
-    }
-    #reportRoot.mode-table .table-summary strong { color: #0a0a0a; font-weight: 600; margin-right: 1mm; }
-    #reportRoot.mode-table .table-summary .grand {
-      margin-left: auto; font-size: 12pt; font-weight: 700; color: #0a0a0a;
-    }
-    #reportRoot.mode-table .table-notes {
-      margin-top: 2mm; font-size: 7.5pt; color: #404040; white-space: pre-wrap;
-    }
-    #reportRoot.mode-table .table-notes strong { font-weight: 600; color: #0a0a0a; }
-
-    /* Fit-to-one-page scale for table mode. JS measures the rendered
-       table after layout, computes the height ratio against A4 landscape
-       (194mm usable), and sets --print-scale. Width compensates so the
-       visual content still fills the page horizontally. */
+    /* Optional uniform shrink for overflow case (table mode). JS sets
+       --print-scale; default 1. */
     body.print-table #reportRoot {
       transform: scale(var(--print-scale, 1));
       transform-origin: top left;
@@ -1808,19 +1745,22 @@ function setPrintMode(mode) {
 }
 
 // Fit the table-mode report to one A4 landscape page. Two regimes:
-//   • Content taller than page → scale down via transform (--print-scale).
-//   • Content shorter than page → distribute the remaining height into
-//     each data row (--row-h) so the table fills the page rather than
-//     leaving blank space below.
+//   • Content taller than page → uniform shrink via transform (--print-scale).
+//   • Content shorter than page → distribute remaining height into each
+//     <tr> via inline style so the table reaches the bottom margin.
+//
+// Measurement happens off-screen at the exact print width with the same
+// CSS in effect (the report styles live outside @media print so they
+// apply during the measurement reveal).
 function fitTableToOnePage() {
   const root = document.getElementById("reportRoot");
   const PAGE_W_MM = 277; // 297mm A4 landscape − 10mm × 2 margins
   const PAGE_H_MM = 194; // 210mm                − 8mm  × 2
   const MM_PER_PX = 25.4 / 96;
 
-  // Reset previous measurements so a re-print starts from a clean state.
+  // Reset previous measurements + inline row heights so a re-print starts clean.
   root.style.removeProperty("--print-scale");
-  root.style.removeProperty("--row-h");
+  root.querySelectorAll("tbody tr").forEach((tr) => { tr.style.height = ""; });
 
   // Reveal off-screen at the print width so layout matches the page.
   const prev = root.getAttribute("style") || "";
@@ -1836,7 +1776,8 @@ function fitTableToOnePage() {
   const notesH = (root.querySelector(".table-notes")?.offsetHeight || 0) * MM_PER_PX;
   const theadH = (root.querySelector("thead")?.offsetHeight || 0) * MM_PER_PX;
   const tfootH = (root.querySelector("tfoot")?.offsetHeight || 0) * MM_PER_PX;
-  const dataRows = root.querySelectorAll("tbody tr").length || 1;
+  const trList = root.querySelectorAll("tbody tr");
+  const dataRows = trList.length || 1;
 
   root.setAttribute("style", prev);
 
@@ -1847,12 +1788,10 @@ function fitTableToOnePage() {
     console.log("[print fit-table] shrink", { totalH: totalH.toFixed(1), scale: scale.toFixed(3) });
   } else {
     // Underfill: distribute remaining vertical space across data rows
-    // so the body fills the page. 2mm safety so we don't push past the
-    // bottom margin under varied print engines.
-    const availForBody = PAGE_H_MM - headerH - summaryH - notesH - theadH - tfootH - 2;
+    // via inline tr.style.height. 3mm safety against bottom margin drift.
+    const availForBody = PAGE_H_MM - headerH - summaryH - notesH - theadH - tfootH - 3;
     const targetRowH = Math.max(4, availForBody / dataRows);
-    root.style.setProperty("--print-scale", "1");
-    root.style.setProperty("--row-h", \`\${targetRowH.toFixed(2)}mm\`);
+    trList.forEach((tr) => { tr.style.height = \`\${targetRowH.toFixed(2)}mm\`; });
     console.log("[print fit-table] expand", {
       totalH: totalH.toFixed(1), dataRows, targetRowH: targetRowH.toFixed(2),
     });
