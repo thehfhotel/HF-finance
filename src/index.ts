@@ -1,19 +1,17 @@
 import { Elysia, t } from "elysia";
 import { readFile } from "node:fs/promises";
-import { randomInt } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import { buildWorkbook, buildBeneficiaryWorkbook } from "./excel";
 import { MAIN_HTML } from "./views/main";
 import { ACCOUNTS_HTML } from "./views/accounts";
 import { APPROVALS_HTML } from "./views/approvals";
 import { WORKSHEET_HTML } from "./views/worksheet";
+import { ADMIN_MODAL_HTML, adminNavHtml } from "./views/admin";
 import { addAccount, deleteAccount, listAccounts, updateAccount } from "./store";
 import { loadRegistered, registeredSet } from "./registered";
 import { getRequest, listRequests, submitRequest, updateRequest } from "./queue";
 import { notifySlack } from "./slack";
 import { isValidPeriod, loadSheet, saveSheet } from "./sheets";
-
-const html = (body: string) =>
-  new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
 
 const staticFile = async (path: string, mime: string) => {
   const buf = await readFile(path);
@@ -33,12 +31,110 @@ const OTP_MAX_ATTEMPTS = 5;
 const otpChallenges = new Map<string, { otp: string; expiresAt: number; attempts: number }>();
 const newOtp = () => String(randomInt(100000, 1_000_000));
 
+// Admin session unlock — gates the สร้างไฟล์ (/) and คิวอนุมัติ (/approvals)
+// pages plus their state-changing endpoints. Two-step Slack OTP:
+//   POST /api/admin/request-otp  → returns { token }, sends OTP to Slack
+//   POST /api/admin/unlock       → { token, otp } → sets admin_session cookie
+// Sessions and pending OTPs are in-memory; restart logs everyone out.
+const ADMIN_SESSION_TTL_MS = 4 * 60 * 60_000; // 4h
+const adminSessions = new Map<string, number>(); // sessionId → expiresAt
+const adminOtpChallenges = new Map<string, { otp: string; expiresAt: number; attempts: number }>(); // pre-unlock token → challenge
+
+function parseCookies(header: string | undefined | null): Record<string, string> {
+  if (!header) return {};
+  const out: Record<string, string> = {};
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx < 0) continue;
+    const k = part.slice(0, idx).trim();
+    const v = part.slice(idx + 1).trim();
+    if (k) out[k] = v;
+  }
+  return out;
+}
+
+function isAdminUnlocked(headers: Record<string, string | undefined>): boolean {
+  const sid = parseCookies(headers.cookie)["admin_session"];
+  if (!sid) return false;
+  const expiresAt = adminSessions.get(sid);
+  if (!expiresAt) return false;
+  if (Date.now() > expiresAt) {
+    adminSessions.delete(sid);
+    return false;
+  }
+  return true;
+}
+
+function renderHTML(template: string, currentPath: string, isAdmin: boolean): Response {
+  const body = template
+    .replace("<!--ADMIN_NAV-->", adminNavHtml(currentPath, isAdmin))
+    .replace("<!--ADMIN_MODAL-->", ADMIN_MODAL_HTML);
+  return new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
+}
+
+function adminGuard(headers: Record<string, string | undefined>, set: { status?: number }): true | Response {
+  if (isAdminUnlocked(headers)) return true;
+  set.status = 401;
+  return new Response("ต้องเข้าโหมด admin ก่อน", { status: 401 });
+}
+
+
 const app = new Elysia()
-  .get("/", () => html(MAIN_HTML))
-  .get("/worksheet", () => html(WORKSHEET_HTML))
-  .get("/accounts", () => html(ACCOUNTS_HTML))
-  .get("/approvals", () => html(APPROVALS_HTML))
+  .get("/", ({ headers, redirect }) =>
+    isAdminUnlocked(headers) ? renderHTML(MAIN_HTML, "/", true) : redirect("/worksheet", 302)
+  )
+  .get("/worksheet", ({ headers }) => renderHTML(WORKSHEET_HTML, "/worksheet", isAdminUnlocked(headers)))
+  .get("/accounts", ({ headers }) => renderHTML(ACCOUNTS_HTML, "/accounts", isAdminUnlocked(headers)))
+  .get("/approvals", ({ headers, redirect }) =>
+    isAdminUnlocked(headers) ? renderHTML(APPROVALS_HTML, "/approvals", true) : redirect("/worksheet", 302)
+  )
   .get("/health", () => "ok")
+
+  // Admin OTP unlock flow. Pre-unlock token is single-use; on success a
+  // 4-hour session cookie is set. Lock endpoint clears both server-side
+  // session and the cookie.
+  .post("/api/admin/request-otp", async () => {
+    const token = randomBytes(16).toString("hex");
+    const otp = newOtp();
+    adminOtpChallenges.set(token, { otp, expiresAt: Date.now() + OTP_TTL_MS, attempts: 0 });
+    await notifySlack(`:closed_lock_with_key: *Admin unlock OTP*\nOTP: \`${otp}\`  (5 นาที)`);
+    return { token };
+  })
+  .post(
+    "/api/admin/unlock",
+    ({ body, set }) => {
+      const ch = adminOtpChallenges.get(body.token);
+      if (!ch) { set.status = 400; return "ยังไม่ได้ขอ OTP — กดส่ง OTP อีกครั้ง"; }
+      if (Date.now() > ch.expiresAt) {
+        adminOtpChallenges.delete(body.token);
+        set.status = 400;
+        return "OTP หมดอายุแล้ว กรุณาขอ OTP ใหม่";
+      }
+      ch.attempts++;
+      if (ch.attempts > OTP_MAX_ATTEMPTS) {
+        adminOtpChallenges.delete(body.token);
+        set.status = 429;
+        return "ลอง OTP เกินจำนวนที่อนุญาต กรุณาขอ OTP ใหม่";
+      }
+      if (ch.otp !== body.otp.trim()) {
+        set.status = 400;
+        return `OTP ไม่ถูกต้อง (ลอง ${ch.attempts}/${OTP_MAX_ATTEMPTS})`;
+      }
+      adminOtpChallenges.delete(body.token);
+      const sid = randomBytes(24).toString("hex");
+      const expiresAt = Date.now() + ADMIN_SESSION_TTL_MS;
+      adminSessions.set(sid, expiresAt);
+      set.headers["set-cookie"] = `admin_session=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${ADMIN_SESSION_TTL_MS / 1000}`;
+      return { unlocked: true, expiresAt };
+    },
+    { body: t.Object({ token: t.String({ minLength: 1, maxLength: 64 }), otp: t.String({ pattern: "^\\d{6}$" }) }) }
+  )
+  .post("/api/admin/lock", ({ headers, set }) => {
+    const sid = parseCookies(headers.cookie)["admin_session"];
+    if (sid) adminSessions.delete(sid);
+    set.headers["set-cookie"] = `admin_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+    return { unlocked: false };
+  })
 
   .get("/static/flatpickr.css", () => staticFile("node_modules/flatpickr/dist/flatpickr.min.css", "text/css; charset=utf-8"))
   .get("/static/flatpickr.js", () => staticFile("node_modules/flatpickr/dist/flatpickr.min.js", "application/javascript; charset=utf-8"))
@@ -137,7 +233,9 @@ const app = new Elysia()
 
   .post(
     "/api/queue/transfer",
-    async ({ body }) => {
+    async ({ body, headers, set }) => {
+      const guard = adminGuard(headers, set);
+      if (guard !== true) return guard;
       const buf = await buildWorkbook(body);
       const totalAmount = body.rows.reduce((s, r) => s + r.amount, 0);
       const req = await submitRequest({
@@ -209,13 +307,21 @@ const app = new Elysia()
     }
   )
 
-  .get("/api/queue", () => listRequests())
-  .get("/api/queue/:id", async ({ params, set }) => {
+  .get("/api/queue", ({ headers, set }) => {
+    const guard = adminGuard(headers, set);
+    if (guard !== true) return guard;
+    return listRequests();
+  })
+  .get("/api/queue/:id", async ({ params, headers, set }) => {
+    const guard = adminGuard(headers, set);
+    if (guard !== true) return guard;
     const req = await getRequest(params.id);
     if (!req) { set.status = 404; return "not found"; }
     return req;
   })
-  .get("/api/queue/:id/xlsx", async ({ params, set }) => {
+  .get("/api/queue/:id/xlsx", async ({ params, headers, set }) => {
+    const guard = adminGuard(headers, set);
+    if (guard !== true) return guard;
     const req = await getRequest(params.id);
     if (!req) { set.status = 404; return "not found"; }
     const buf = await readFile(req.xlsxPath);
@@ -225,7 +331,9 @@ const app = new Elysia()
   })
   .post(
     "/api/queue/:id/request-otp",
-    async ({ params, set }) => {
+    async ({ params, headers, set }) => {
+      const guard = adminGuard(headers, set);
+      if (guard !== true) return guard;
       const existing = await getRequest(params.id);
       if (!existing) { set.status = 404; return "not found"; }
       if (existing.status !== "pending") { set.status = 409; return `cannot OTP-challenge (status: ${existing.status})`; }
@@ -241,7 +349,9 @@ const app = new Elysia()
   )
   .post(
     "/api/queue/:id/approve",
-    async ({ params, body, set }) => {
+    async ({ params, body, headers, set }) => {
+      const guard = adminGuard(headers, set);
+      if (guard !== true) return guard;
       const existing = await getRequest(params.id);
       if (!existing) { set.status = 404; return "not found"; }
       if (existing.status !== "pending") { set.status = 409; return `cannot approve (status: ${existing.status})`; }
@@ -274,7 +384,9 @@ const app = new Elysia()
   )
   .post(
     "/api/queue/:id/reject",
-    async ({ params, body, set }) => {
+    async ({ params, body, headers, set }) => {
+      const guard = adminGuard(headers, set);
+      if (guard !== true) return guard;
       const existing = await getRequest(params.id);
       if (!existing) { set.status = 404; return "not found"; }
       if (existing.status !== "pending") { set.status = 409; return `cannot reject (status: ${existing.status})`; }
@@ -292,7 +404,9 @@ const app = new Elysia()
   // Legacy direct-download endpoints (PoC, kept as fallback)
   .post(
     "/generate",
-    async ({ body, set }) => {
+    async ({ body, headers, set }) => {
+      const guard = adminGuard(headers, set);
+      if (guard !== true) return guard;
       const buf = await buildWorkbook(body);
       const stamp = body.effectiveDate.replaceAll("/", "-");
       set.headers["content-type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";

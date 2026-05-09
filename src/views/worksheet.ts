@@ -166,13 +166,13 @@ export const WORKSHEET_HTML = `<!doctype html>
 <header>
   <h1>คำนวณเงินเดือน</h1>
   <nav>
-    <a href="/">สร้างไฟล์</a>
     <a href="/worksheet" class="active">คำนวณเงินเดือน</a>
     <a href="/accounts">จัดการบัญชี</a>
-    <a href="/approvals">คิวอนุมัติ</a>
+    <!--ADMIN_NAV-->
   </nav>
   ${ZOOM_HTML}
 </header>
+<!--ADMIN_MODAL-->
 
 <fieldset>
   <legend>ข้อมูลทั่วไป &middot; สรุป</legend>

@@ -62,13 +62,13 @@ export const APPROVALS_HTML = `<!doctype html>
 <header>
   <h1>คิวอนุมัติคำขอ</h1>
   <nav>
-    <a href="/">สร้างไฟล์</a>
     <a href="/worksheet">คำนวณเงินเดือน</a>
     <a href="/accounts">จัดการบัญชี</a>
-    <a href="/approvals" class="active">คิวอนุมัติ</a>
+    <!--ADMIN_NAV-->
   </nav>
   ${ZOOM_HTML}
 </header>
+<!--ADMIN_MODAL-->
 
 <fieldset>
   <legend>คำขอทั้งหมด</legend>
