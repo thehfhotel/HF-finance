@@ -1587,12 +1587,12 @@ function buildEmpCard(r, idx, periodLabel) {
 function buildReport(sheet) {
   const period = sheet.period || currentPeriod || "";
   const periodLabel = periodMonthLabelTH(period);
-  // Skip rows with no take-home — they're worksheet entries for employees
-  // who aren't being paid this month. Including them just bloats the report
-  // with rows of em-dashes.
-  const eligibleRows = sheet.rows.filter((r) => rowTakeHome(r) > 0);
-  const totalAll = eligibleRows.reduce((s, r) => s + rowTakeHome(r), 0);
-  const recipientCount = eligibleRows.length;
+  // Keep every row including those with no take-home — the report doubles
+  // as a roster view, so an employee not paid this cycle should still
+  // appear (with all-zero figures) for accountability.
+  const allRows = sheet.rows;
+  const totalAll = allRows.reduce((s, r) => s + rowTakeHome(r), 0);
+  const recipientCount = allRows.filter((r) => rowTakeHome(r) > 0).length;
   const snapId = readonly ? (new URLSearchParams(window.location.search).get("snapshot") || "") : "";
   const title = readonly ? "รายงานคำขอโอนเงินเดือน (snapshot)" : "ตารางคำนวณเงินเดือน";
 
@@ -1602,7 +1602,7 @@ function buildReport(sheet) {
   if (snapId) metaParts.push(\`<strong>คำขอ</strong><code>\${escapeHtml(snapId)}</code>\`);
   metaParts.push(\`<strong>พิมพ์เมื่อ</strong>\${new Date().toLocaleString("th-TH-u-ca-buddhist")}\`);
 
-  const cards = eligibleRows.map((r, i) => buildEmpCard(r, i, periodLabel)).join("");
+  const cards = allRows.map((r, i) => buildEmpCard(r, i, periodLabel)).join("");
 
   const generalNotesHtml = (sheet.generalNotes && sheet.generalNotes.trim())
     ? \`<div class="summary-notes"><strong>หมายเหตุทั่วไป</strong><br>\${escapeHtml(sheet.generalNotes)}</div>\`
@@ -1654,9 +1654,11 @@ function tableCell(v) {
 function buildTableReport(sheet) {
   const period = sheet.period || currentPeriod || "";
   const periodLabel = periodMonthLabelTH(period);
-  const eligibleRows = sheet.rows.filter((r) => rowTakeHome(r) > 0);
-  const totalAll = eligibleRows.reduce((s, r) => s + rowTakeHome(r), 0);
-  const recipientCount = eligibleRows.length;
+  // Keep all rows (matches buildReport — see comment there). recipientCount
+  // counts only rows that actually get paid this round.
+  const allRows = sheet.rows;
+  const totalAll = allRows.reduce((s, r) => s + rowTakeHome(r), 0);
+  const recipientCount = allRows.filter((r) => rowTakeHome(r) > 0).length;
   const snapId = readonly ? (new URLSearchParams(window.location.search).get("snapshot") || "") : "";
   const title = readonly ? "ตารางสรุปคำขอโอนเงินเดือน (snapshot)" : "ตารางสรุปเงินเดือน";
 
@@ -1671,7 +1673,7 @@ function buildTableReport(sheet) {
   for (const k of allKeys) sums[k] = 0;
   let sumDeduct = 0, sumAdd = 0, sumTake = 0;
 
-  const rows = eligibleRows.map((r, i) => {
+  const rows = allRows.map((r, i) => {
     for (const k of allKeys) sums[k] += num(r[k]);
     const ded = REPORT_DEDUCT_ORDER.reduce((s, k) => s + num(r[k]), 0);
     const add = REPORT_ADD_ORDER.reduce((s, k) => s + num(r[k]), 0);
