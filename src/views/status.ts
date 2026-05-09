@@ -57,8 +57,15 @@ export const STATUS_HTML = `<!doctype html>
   .hero-state.failure { background: #fef2f2; border-left-color: #b91c1c; color: #991b1b; }
   .hero-state .ref { font-family: ui-monospace, SFMono-Regular, monospace; color: #111827; }
   .hero-state .label { color: #6b7280; margin-right: 6px; }
+  .hero-actions {
+    margin-top: 16px; display: flex; gap: 14px; align-items: center;
+  }
+  .hero-actions a { color: #1d4ed8; text-decoration: none; font-size: 13px; }
+  .hero-actions a:hover { text-decoration: underline; }
+  .hero-actions .spacer { color: #d1d5db; }
+
   .hero-details {
-    margin-top: 16px; font-size: 13px; color: #6b7280;
+    margin-top: 12px; font-size: 13px; color: #6b7280;
   }
   .hero-details summary { cursor: pointer; user-select: none; color: #1d4ed8; font-size: 13px; }
   .hero-details[open] summary { margin-bottom: 8px; }
@@ -72,7 +79,7 @@ export const STATUS_HTML = `<!doctype html>
   /* History rows — single line, muted, scannable. */
   .row {
     display: grid;
-    grid-template-columns: 90px 70px 1fr auto auto;
+    grid-template-columns: 90px 70px 1fr auto auto auto;
     gap: 14px; align-items: center;
     padding: 10px 14px; font-size: 14px;
     border: 1px solid #f0f0f0; border-radius: 6px; background: #fff;
@@ -87,6 +94,9 @@ export const STATUS_HTML = `<!doctype html>
   .row .label { color: #1f2937; }
   .row .figures { color: #6b7280; font-variant-numeric: tabular-nums; font-size: 13px; }
   .row .ref { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: #6b7280; }
+  .row .links { display: flex; gap: 10px; }
+  .row .links a { color: #1d4ed8; text-decoration: none; font-size: 12px; }
+  .row .links a:hover { text-decoration: underline; }
 
   /* Pills (shared with hero + rows). Color tokens match /approvals. */
   .pill.p-pending  { background: #fef3c7; color: #92400e; }
@@ -247,6 +257,16 @@ function renderHero(req) {
   if (req.completedAt) audit.push(["เสร็จ", req.completedAt]);
   const auditHtml = audit.map(([k, v]) => \`<dt>\${k}</dt><dd>\${fmtDate(v)}</dd>\`).join("");
 
+  // Detail links — only meaningful for transfer-payroll items (the
+  // worksheet snapshot view is structured around the worksheet schema).
+  const actionsHtml = req.type === "transfer-payroll"
+    ? \`<div class="hero-actions">
+        <a href="/worksheet?snapshot=\${encodeURIComponent(req.id)}">ดูรายละเอียดเงินเดือน</a>
+        <span class="spacer">·</span>
+        <a href="/api/queue/\${encodeURIComponent(req.id)}/xlsx">ดาวน์โหลด xlsx</a>
+       </div>\`
+    : "";
+
   return \`<div class="\${cardClass}">
     <div class="hero-row1">
       <span class="pill \${pillClass}">\${STATUS_LABELS[status] || status}</span>
@@ -255,6 +275,7 @@ function renderHero(req) {
     <div class="hero-headline">\${escapeHtml(headlineFor(req))}</div>
     <div class="hero-figures">\${bits.join(" · ")}</div>
     \${stateHtml}
+    \${actionsHtml}
     <details class="hero-details">
       <summary>ดูเวลาทุกขั้นตอน</summary>
       <dl class="kv">\${auditHtml}<dt>ID</dt><dd><code>\${escapeHtml(req.id)}</code></dd></dl>
@@ -268,12 +289,16 @@ function renderRow(req) {
     req.recipientCount ? \`\${req.recipientCount} \${req.type === "transfer-payroll" ? "คน" : "บัญชี"}\` : "",
     req.totalAmount != null ? \`฿\${fmtAmount(req.totalAmount)}\` : "",
   ].filter(Boolean).join(" · ");
+  const detailLink = req.type === "transfer-payroll"
+    ? \`<a href="/worksheet?snapshot=\${encodeURIComponent(req.id)}">รายละเอียด</a>\`
+    : "";
   return \`<div class="row s-\${req.status}" title="\${escapeHtml(req.id)}">
     <span class="pill p-\${req.status}">\${STATUS_LABELS[req.status] || req.status}</span>
     <span class="when">\${shortWhen(effectiveTime(req))}</span>
     <span class="label">\${escapeHtml(headlineFor(req))}</span>
     <span class="figures">\${figures}</span>
     <span class="ref">\${ref}</span>
+    <span class="links">\${detailLink}</span>
   </div>\`;
 }
 
