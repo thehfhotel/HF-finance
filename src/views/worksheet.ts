@@ -676,22 +676,25 @@ function displayAccount(r) {
 
 // Verified = (accountName, accountNumber) matches an entry in /api/accounts.
 // Warning = accountNumber contains letters (non-KBANK formatted by the user).
+// Set of normalized accountNumbers from /api/accounts. Match by number only —
+// names drift between sources (prod uses "น.ส." prefix; xlsx imports use
+// "นาง"/"นางสาว"; KBIZ uses English) but the bank account number is the
+// canonical identifier.
 let accountsIndex = new Set();
 let accountsById = new Map();
 function normalizeAcct(s) { return String(s || "").replace(/[\\s-]/g, "").toLowerCase(); }
-function normalizeName(s) { return String(s || "").trim().toLowerCase(); }
 async function refreshAccountsIndex() {
   try {
     const res = await fetch("/api/accounts");
     if (!res.ok) return;
     const accs = await res.json();
-    accountsIndex = new Set(accs.map((a) => normalizeName(a.accountName) + "|||" + normalizeAcct(a.accountNumber)));
+    accountsIndex = new Set(accs.map((a) => normalizeAcct(a.accountNumber)));
     accountsById = new Map(accs.map((a) => [a.id, a]));
   } catch {}
 }
 function isVerified(r) {
-  if (!r.accountName || !r.accountNumber) return false;
-  return accountsIndex.has(normalizeName(r.accountName) + "|||" + normalizeAcct(r.accountNumber));
+  if (!r.accountNumber) return false;
+  return accountsIndex.has(normalizeAcct(r.accountNumber));
 }
 function isNonKbank(r) {
   if (typeof r === "string") return /[A-Za-z]/.test(r); // legacy callsite
