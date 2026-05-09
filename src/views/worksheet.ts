@@ -160,6 +160,33 @@ export const WORKSHEET_HTML = `<!doctype html>
   #colsMenu .menu-title { font-size: 11px; color: #6b7280; padding: 2px 10px 6px; border-bottom: 1px solid #e5e7eb; margin-bottom: 4px; }
   #addRow { padding: 8px 14px; border: 1px dashed #9ca3af; background: #fff; border-radius: 4px; cursor: pointer; color: #374151; font-size: 14px; }
   #addRow:hover { background: #f3f4f6; border-color: #6b7280; }
+
+  /* History panel — small one-liner above the worksheet showing how many
+     queue submissions exist for the currently-selected period. */
+  #historyPanel {
+    display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
+    background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px;
+    font-size: 13px; color: #78350f;
+  }
+  #historyPanel a { color: #1d4ed8; text-decoration: none; font-weight: 600; }
+  #historyPanel a:hover { text-decoration: underline; }
+
+  /* Snapshot (read-only) mode: shown when /worksheet?snapshot=:requestId. */
+  body.snap input, body.snap textarea, body.snap select {
+    pointer-events: none; background: #f9fafb !important; color: #374151;
+  }
+  body.snap #periodSelect { pointer-events: none; opacity: 0.7; }
+  body.snap #submit, body.snap #lockToggle, body.snap #addRowBox, body.snap #addRow,
+  body.snap #restoreAll, body.snap .delete-row, body.snap #saveState,
+  body.snap #historyPanel, body.snap .row-handle { display: none !important; }
+  body.snap .snap-banner {
+    display: flex; align-items: center; gap: 12px; padding: 8px 14px;
+    background: #dbeafe; border: 1px solid #1d4ed8; border-radius: 6px;
+    margin-bottom: 12px; color: #1e3a8a; font-size: 14px;
+  }
+  body.snap .snap-banner strong { color: #1d4ed8; }
+  body.snap .snap-banner a { color: #1d4ed8; margin-left: auto; }
+  .snap-banner { display: none; }
 </style>
 </head>
 <body>
@@ -168,11 +195,17 @@ export const WORKSHEET_HTML = `<!doctype html>
   <nav>
     <a href="/worksheet" class="active">คำนวณเงินเดือน</a>
     <a href="/accounts">จัดการบัญชี</a>
+    <a href="/status">สถานะคำขอ</a>
     <!--ADMIN_NAV-->
   </nav>
   ${ZOOM_HTML}
 </header>
 <!--ADMIN_MODAL-->
+
+<div class="snap-banner" id="snapBanner">
+  <span>📜 กำลังดูประวัติคำขอ <code id="snapId"></code> · <span id="snapStatus"></span></span>
+  <a href="/worksheet">← กลับสู่หน้าคำนวณ</a>
+</div>
 
 <fieldset>
   <legend>ข้อมูลทั่วไป &middot; สรุป</legend>
@@ -180,6 +213,10 @@ export const WORKSHEET_HTML = `<!doctype html>
     <div>
       <label for="periodSelect">เดือน</label>
       <select id="periodSelect"></select>
+    </div>
+    <div id="historyPanel" hidden>
+      <span id="historyText"></span>
+      <a id="historyLink" href="">ดูทั้งหมด →</a>
     </div>
     <div>
       <label for="effectiveDate">วันที่เงินเข้าบัญชี</label>
@@ -708,6 +745,7 @@ function recalcGrand() {
 }
 
 function scheduleSave() {
+  if (readonly) return;
   if (saveTimer) clearTimeout(saveTimer);
   saveStateEl.className = "save-state saving";
   saveStateEl.textContent = "กำลังบันทึก…";
@@ -769,6 +807,14 @@ async function loadPeriod(period) {
   }
 }
 
+// Snapshot mode: /worksheet?snapshot=<request-id> renders the queue item's
+// embedded sheet snapshot read-only (admin-only — relies on /api/queue/:id
+// being admin-gated to enforce). Picked up before period-select wiring so
+// the period dropdown is populated for context but disabled.
+const snapshotId = new URLSearchParams(window.location.search).get("snapshot");
+const readonly = !!snapshotId;
+if (readonly) document.body.classList.add("snap");
+
 // Wire period selector
 const periods = listPeriods();
 for (const p of periods) {
@@ -778,7 +824,58 @@ for (const p of periods) {
   periodSelect.appendChild(opt);
 }
 periodSelect.value = defaultPeriod();
-periodSelect.addEventListener("change", () => loadPeriod(periodSelect.value));
+periodSelect.addEventListener("change", () => loadPeriod(periodSelect.value).then(() => refreshHistory()));
+
+// History panel: shows count of past transfer-payroll submissions for the
+// currently-loaded period, with a link to /status?period=YYYY-MM. Hidden in
+// snapshot mode (where the period is fixed and history is moot).
+const historyPanel = document.getElementById("historyPanel");
+const historyText = document.getElementById("historyText");
+const historyLink = document.getElementById("historyLink");
+
+async function refreshHistory() {
+  if (readonly || !currentPeriod) { historyPanel.hidden = true; return; }
+  try {
+    const res = await fetch("/api/queue/status");
+    if (!res.ok) { historyPanel.hidden = true; return; }
+    const all = await res.json();
+    const matching = all.filter((r) => r.type === "transfer-payroll" && r.period === currentPeriod);
+    if (matching.length === 0) { historyPanel.hidden = true; return; }
+    const counts = matching.reduce((a, r) => { a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
+    const bits = Object.entries(counts).map(([k, v]) => \`\${k}: \${v}\`).join(" · ");
+    historyText.textContent = \`คำขอเดือนนี้: \${matching.length} ราย (\${bits})\`;
+    historyLink.href = \`/status?period=\${currentPeriod}\`;
+    historyPanel.hidden = false;
+  } catch { historyPanel.hidden = true; }
+}
+
+async function loadSnapshot(id) {
+  saveStateEl.className = "save-state";
+  const res = await fetch(\`/api/queue/\${id}\`);
+  if (!res.ok) {
+    showError(\`โหลดคำขอไม่สำเร็จ (\${res.status}). คำขอนี้อาจไม่มีอยู่ หรือคุณไม่มีสิทธิ์ดู — \` +
+      \`<a href="/worksheet">กลับหน้าคำนวณ</a>\`);
+    return;
+  }
+  const req = await res.json();
+  document.getElementById("snapId").textContent = id;
+  document.getElementById("snapStatus").innerHTML =
+    "สถานะ: <strong>" + escapeHtml(req.status) + "</strong>" +
+    (req.summary && req.summary.effectiveDate ? " · เงินเข้า " + escapeHtml(req.summary.effectiveDate) : "");
+  if (!req.summary || req.type !== "transfer-payroll" || !req.summary.sheet) {
+    showError("คำขอนี้ไม่มี snapshot ของ worksheet (อาจจะเก่ากว่า feature นี้). " +
+      'ดู xlsx ได้ที่ <a href="/api/queue/' + encodeURIComponent(id) + '/xlsx">ดาวน์โหลด xlsx</a>');
+    return;
+  }
+  const sheet = req.summary.sheet;
+  currentPeriod = sheet.period || (req.summary.period || "");
+  if (currentPeriod) periodSelect.value = currentPeriod;
+  currentSheet = sheet;
+  generalNotesEl.value = sheet.generalNotes || "";
+  selectedDate = parseGregorian(sheet.effectiveDate);
+  if (selectedDate) fp.setDate(selectedDate, true); else fp.clear();
+  renderRows(sheet);
+}
 
 // Wire effective date (flatpickr with BE display, like main page)
 function setupYearDisplay(fp) {
@@ -846,12 +943,12 @@ document.getElementById("submit").addEventListener("click", async () => {
     const res = await fetch("/api/queue/transfer", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ effectiveDate: currentSheet.effectiveDate, rows }),
+      body: JSON.stringify({ effectiveDate: currentSheet.effectiveDate, period: currentPeriod, rows }),
     });
     if (!res.ok) { showError("ส่งคำขอไม่สำเร็จ: " + res.status + " " + (await res.text())); return; }
     const req = await res.json();
     showOk("✓ ส่งคำขออนุมัติแล้ว · ID: <code>" + req.id + "</code> · " +
-      '<a href="/approvals">ตรวจสอบที่คิวอนุมัติ</a>');
+      '<a href="/status">ดูสถานะคำขอ</a>');
   } finally {
     btn.disabled = false;
     btn.textContent = prev;
@@ -1096,7 +1193,12 @@ refreshAccountsIndex().then(() => {
   if (currentSheet) renderRows(currentSheet);
   updateRestoreUI();
 });
-loadPeriod(periodSelect.value);
+
+if (readonly) {
+  loadSnapshot(snapshotId);
+} else {
+  loadPeriod(periodSelect.value).then(() => refreshHistory());
+}
 </script>
 </body>
 </html>`;

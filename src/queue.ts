@@ -1,5 +1,6 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { Sheet } from "./sheets";
 
 const QUEUE_DIR = process.env.QUEUE_DIR ?? "data/queue";
 
@@ -16,6 +17,13 @@ export type TransferSummary = {
   effectiveDate: string;
   totalAmount: number;
   rows: { accountNumber: string; accountName: string; amount: number }[];
+  // Period (YYYY-MM) and full worksheet snapshot are recorded at submission
+  // time so the historical view can show the breakdown (deductions, additions,
+  // notes) exactly as the operator saw it. Older queue items predate this
+  // and have neither field — the snapshot UI gracefully falls back to the
+  // bare row list in that case.
+  period?: string;
+  sheet?: Sheet;
 };
 
 export type Summary = AddPayrollSummary | TransferSummary;

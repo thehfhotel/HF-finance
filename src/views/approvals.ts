@@ -64,6 +64,7 @@ export const APPROVALS_HTML = `<!doctype html>
   <nav>
     <a href="/worksheet">คำนวณเงินเดือน</a>
     <a href="/accounts">จัดการบัญชี</a>
+    <a href="/status">สถานะคำขอ</a>
     <!--ADMIN_NAV-->
   </nav>
   ${ZOOM_HTML}
@@ -81,6 +82,10 @@ export const APPROVALS_HTML = `<!doctype html>
     <button data-filter="done">สำเร็จ</button>
     <button data-filter="failed">ไม่สำเร็จ</button>
     <button data-filter="rejected">ปฏิเสธ</button>
+    <span style="margin-left:14px;">เดือน:</span>
+    <select id="periodFilter" style="padding:4px 8px;border:1px solid #ccc;border-radius:4px;font:inherit;">
+      <option value="all">ทุกเดือน</option>
+    </select>
     <span style="margin-left:auto;color:#6b7280;font-size:13px;" id="meta"></span>
     <button type="button" id="refresh">รีเฟรช</button>
   </div>
@@ -103,8 +108,33 @@ export const APPROVALS_HTML = `<!doctype html>
 <script>
 const list = document.getElementById("list");
 const meta = document.getElementById("meta");
+const periodFilter = document.getElementById("periodFilter");
 let currentFilter = "all";
+let currentPeriod = new URLSearchParams(window.location.search).get("period") || "all";
 let cache = [];
+
+const TH_MONTHS = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน",
+                   "กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+
+function periodLabel(p) {
+  if (!p || !/^\\d{4}-\\d{2}$/.test(p)) return p || "—";
+  const [y, m] = p.split("-").map(Number);
+  return \`\${TH_MONTHS[m-1]} \${y + 543}\`;
+}
+
+// Convert effectiveDate "DD/MM/YYYY" (Gregorian) → "YYYY-MM" period key.
+// Used as a fallback for queue items predating the period field.
+function periodFromEffective(eff) {
+  if (!eff) return null;
+  const m = /^(\\d{2})\\/(\\d{2})\\/(\\d{4})$/.exec(eff);
+  return m ? \`\${m[3]}-\${m[2]}\` : null;
+}
+
+function reqPeriod(req) {
+  if (req.summary && req.summary.period) return req.summary.period;
+  if (req.summary && req.summary.effectiveDate) return periodFromEffective(req.summary.effectiveDate);
+  return null;
+}
 
 const otpDialog = document.getElementById("otpDialog");
 const otpInput = document.getElementById("otpInput");
@@ -237,26 +267,35 @@ function renderCard(req) {
     ? \`<button class="primary" data-action="approve" data-id="\${req.id}">อนุมัติ</button>
        <button class="danger" data-action="reject" data-id="\${req.id}">ปฏิเสธ</button>\`
     : "";
+  // Snapshot view link only when the queue item carries an embedded sheet
+  // (transfer-payroll items submitted post-feature). Older items have no
+  // worksheet snapshot so the link would dead-end.
+  const snapLink = req.type === "transfer-payroll" && req.summary && req.summary.sheet
+    ? \`<a href="/worksheet?snapshot=\${encodeURIComponent(req.id)}" style="font-size:13px;">ดูรายละเอียดเงินเดือน</a>\`
+    : "";
   return \`<div class="req-card">
     <div class="req-head">
       <span class="req-type">\${summarize(req)}</span>
       \${statusBadge(req.status)}
       <span class="req-id">\${req.id}</span>
       <span class="req-actions">
+        \${snapLink}
         <a href="/api/queue/\${req.id}/xlsx" style="font-size:13px;">ดาวน์โหลด xlsx</a>
         \${actions}
       </span>
     </div>
     \${renderResult(req)}
     \${renderAudit(req)}
-    <details><summary>ดูรายละเอียดทั้งหมด (\${req.type === "transfer-payroll" ? req.summary.rows.length : req.summary.accounts.length} รายการ)</summary>
+    <details><summary>ดูรายการผู้รับเงิน (\${req.type === "transfer-payroll" ? req.summary.rows.length : req.summary.accounts.length} รายการ)</summary>
       <div class="req-summary">\${renderRows(req)}</div>
     </details>
   </div>\`;
 }
 
 function applyFilter() {
-  const filtered = currentFilter === "all" ? cache : cache.filter((r) => r.status === currentFilter);
+  let filtered = cache;
+  if (currentFilter !== "all") filtered = filtered.filter((r) => r.status === currentFilter);
+  if (currentPeriod !== "all") filtered = filtered.filter((r) => reqPeriod(r) === currentPeriod);
   if (filtered.length === 0) {
     list.innerHTML = '<div class="empty">ไม่มีคำขอในกลุ่มนี้</div>';
   } else {
@@ -270,12 +309,35 @@ function applyFilter() {
   meta.textContent = cache.length === 0 ? "" : \`\${cache.length} รายการทั้งหมด · \${bits}\`;
 }
 
+function rebuildPeriodOptions() {
+  const seen = new Set();
+  for (const r of cache) { const p = reqPeriod(r); if (p) seen.add(p); }
+  const sorted = Array.from(seen).sort().reverse();
+  const cur = periodFilter.value;
+  while (periodFilter.options.length > 1) periodFilter.remove(1);
+  for (const p of sorted) {
+    const opt = document.createElement("option");
+    opt.value = p;
+    opt.textContent = periodLabel(p);
+    periodFilter.appendChild(opt);
+  }
+  if (sorted.includes(currentPeriod)) periodFilter.value = currentPeriod;
+  else if (sorted.includes(cur)) { periodFilter.value = cur; currentPeriod = cur; }
+  else { periodFilter.value = "all"; currentPeriod = "all"; }
+}
+
 async function refresh() {
   const res = await fetch("/api/queue");
   if (!res.ok) { list.innerHTML = '<div class="empty err">โหลดข้อมูลไม่สำเร็จ</div>'; return; }
   cache = await res.json();
+  rebuildPeriodOptions();
   applyFilter();
 }
+
+periodFilter.addEventListener("change", () => {
+  currentPeriod = periodFilter.value;
+  applyFilter();
+});
 
 async function handleAction(action, id) {
   if (action === "approve") {

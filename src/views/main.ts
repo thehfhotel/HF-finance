@@ -64,6 +64,7 @@ export const MAIN_HTML = `<!doctype html>
   <nav>
     <a href="/worksheet">คำนวณเงินเดือน</a>
     <a href="/accounts">จัดการบัญชี</a>
+    <a href="/status">สถานะคำขอ</a>
     <!--ADMIN_NAV-->
   </nav>
   ${ZOOM_HTML}

@@ -6,6 +6,7 @@ import { MAIN_HTML } from "./views/main";
 import { ACCOUNTS_HTML } from "./views/accounts";
 import { APPROVALS_HTML } from "./views/approvals";
 import { WORKSHEET_HTML } from "./views/worksheet";
+import { STATUS_HTML } from "./views/status";
 import { ADMIN_MODAL_HTML, adminNavHtml } from "./views/admin";
 import { addAccount, deleteAccount, listAccounts, updateAccount } from "./store";
 import { loadRegistered, registeredSet } from "./registered";
@@ -88,7 +89,34 @@ const app = new Elysia()
   .get("/approvals", ({ headers, redirect }) =>
     isAdminUnlocked(headers) ? renderHTML(APPROVALS_HTML, "/approvals", true) : redirect("/worksheet", 302)
   )
+  .get("/status", ({ headers }) => renderHTML(STATUS_HTML, "/status", isAdminUnlocked(headers)))
   .get("/health", () => "ok")
+
+  // Sanitised status feed for the /status page — no per-row PII, no xlsx
+  // path, no embedded sheet snapshot. Just enough for HR to track their
+  // own submissions through to the KBIZ result. Open to non-admins on
+  // purpose: counterpart to the open POST /api/queue/transfer.
+  .get("/api/queue/status", async () => {
+    const all = await listRequests();
+    return all.map((r) => ({
+      id: r.id,
+      type: r.type,
+      status: r.status,
+      period: r.summary.type === "transfer-payroll" ? r.summary.period : undefined,
+      effectiveDate: r.summary.type === "transfer-payroll" ? r.summary.effectiveDate : undefined,
+      totalAmount: r.summary.type === "transfer-payroll" ? r.summary.totalAmount : undefined,
+      recipientCount:
+        r.summary.type === "transfer-payroll" ? r.summary.rows.length :
+        r.summary.type === "add-payroll" ? r.summary.accounts.length : 0,
+      createdAt: r.createdAt,
+      approvedAt: r.approvedAt,
+      rejectedAt: r.rejectedAt,
+      rejectionReason: r.rejectionReason,
+      startedAt: r.startedAt,
+      completedAt: r.completedAt,
+      result: r.result,
+    }));
+  })
 
   // Admin OTP unlock flow. Pre-unlock token is single-use; on success a
   // 4-hour session cookie is set. Lock endpoint clears both server-side
@@ -232,12 +260,22 @@ const app = new Elysia()
   )
 
   .post(
+    // Open to non-admins: HR submits transfer requests; admins approve them
+    // separately via /approvals (still OTP-gated). The submission contains
+    // sensitive row/amount data, but only HR can land here in the first
+    // place — there's no anonymous internet access (Cloudflare tunnel only).
     "/api/queue/transfer",
-    async ({ body, headers, set }) => {
-      const guard = adminGuard(headers, set);
-      if (guard !== true) return guard;
+    async ({ body }) => {
       const buf = await buildWorkbook(body);
       const totalAmount = body.rows.reduce((s, r) => s + r.amount, 0);
+      // Snapshot the full worksheet (deductions/additions/notes) into the
+      // queue item. The worksheet has just been autosaved by the client
+      // before submit — loadSheet() returns the current on-disk state.
+      // Falls back to undefined for malformed periods so older clients that
+      // don't send period still work.
+      const sheet = body.period && isValidPeriod(body.period)
+        ? await loadSheet(body.period)
+        : undefined;
       const req = await submitRequest({
         type: "transfer-payroll",
         summary: {
@@ -245,6 +283,8 @@ const app = new Elysia()
           effectiveDate: body.effectiveDate,
           totalAmount: Math.round(totalAmount * 100) / 100,
           rows: body.rows,
+          period: body.period,
+          sheet,
         },
         xlsxBuffer: buf,
       });
@@ -260,6 +300,7 @@ const app = new Elysia()
     {
       body: t.Object({
         effectiveDate: t.String({ pattern: "^\\d{2}/\\d{2}/\\d{4}$" }),
+        period: t.Optional(t.String({ pattern: "^\\d{4}-(0[1-9]|1[0-2])$" })),
         rows: t.Array(
           t.Object({
             accountNumber: t.String({ minLength: 1, maxLength: 20 }),
