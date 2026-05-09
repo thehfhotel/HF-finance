@@ -1832,43 +1832,55 @@ document.getElementById("printTableBtn").addEventListener("click", () => {
   window.print();
 });
 
-// Render the report off-screen at the print width and capture it with
-// html2canvas. Image contains the entire report at native size — for
-// tables that's 291mm wide; for cards 180mm. JPG, quality 0.92, scale 2
-// for crisp text.
+// Capture canvas → JPEG Blob. Tries the native toBlob first (cheapest);
+// falls back to toDataURL + fetch when toBlob returns null (happens when
+// html2canvas taints the canvas with cross-origin font/resource hits).
+async function canvasToJpegBlob(canvas, quality = 0.92) {
+  const native = await new Promise((resolve) =>
+    canvas.toBlob(resolve, "image/jpeg", quality),
+  );
+  if (native) return native;
+  const dataUrl = canvas.toDataURL("image/jpeg", quality);
+  const res = await fetch(dataUrl);
+  return await res.blob();
+}
+
+// Render the report at the print width into a TEMPORARY in-flow node
+// (briefly visible at the top of the page — html2canvas captures
+// position:fixed/absolute elements unreliably). Result is one JPG with
+// the entire report at native size: 291mm wide for tables, 180mm for
+// cards. scale: 2 for crisp text on retina screens.
 async function saveAsImage(mode) {
   if (!currentSheet) return;
-  const root = document.getElementById("reportRoot");
-  const widthMM = mode === "table" ? 291 : 180;
   const buttonId = mode === "table" ? "saveTableBtn" : "saveCardsBtn";
   const btn = document.getElementById(buttonId);
   const prevText = btn.textContent;
   btn.disabled = true;
   btn.textContent = "กำลังบันทึก…";
 
-  // Mode class only — NOT body.print-X (avoids @page transforms etc.)
-  root.classList.remove("mode-cards", "mode-table");
-  root.classList.add(\`mode-\${mode}\`);
-  root.style.removeProperty("--print-scale");
-  root.querySelectorAll("tbody tr").forEach((tr) => { tr.style.height = ""; });
+  // Build the report into a SEPARATE detached div so we don't fight with
+  // #reportRoot's screen visibility. Once we're done, we just remove it.
+  const widthMM = mode === "table" ? 291 : 180;
+  const host = document.createElement("div");
+  host.id = "reportRoot";
+  host.classList.add(\`mode-\${mode}\`);
+  host.style.cssText =
+    \`display:block!important;position:absolute;left:0;top:0;width:\${widthMM}mm;background:#fff;z-index:99999;\`;
+  host.innerHTML = mode === "table" ? buildTableReport(currentSheet) : buildReport(currentSheet);
+  document.body.appendChild(host);
 
-  const prev = root.getAttribute("style") || "";
-  root.setAttribute(
-    "style",
-    \`display:block!important;position:fixed;left:-99999px;top:0;width:\${widthMM}mm;background:#fff;\`
-  );
-  // Force layout, then yield a frame so flatpickr/etc. settle.
-  void root.offsetHeight;
+  // Force layout + yield a frame so the browser computes the table layout.
+  void host.offsetHeight;
   await new Promise((r) => requestAnimationFrame(r));
 
   try {
-    const canvas = await html2canvas(root, {
+    const canvas = await html2canvas(host, {
       backgroundColor: "#ffffff",
       scale: 2,
       useCORS: true,
-      windowWidth: root.offsetWidth,
-      windowHeight: root.scrollHeight,
     });
+    const blob = await canvasToJpegBlob(canvas, 0.92);
+    if (!blob || blob.size < 1024) throw new Error("output too small");
 
     // Filename: payroll-{mode}-{period}-{YYYYMMDD-HHmm}.jpg
     const period = currentPeriod || "no-period";
@@ -1876,18 +1888,18 @@ async function saveAsImage(mode) {
     const stamp = \`\${now.getFullYear()}\${pad(now.getMonth()+1)}\${pad(now.getDate())}-\${pad(now.getHours())}\${pad(now.getMinutes())}\`;
     const filename = \`payroll-\${mode}-\${period}-\${stamp}.jpg\`;
 
-    // toDataURL instead of toBlob — html2canvas occasionally taints the
-    // canvas (font/external resource quirks) and toBlob then returns null.
-    // dataURL works regardless of taint and the browser handles the
-    // download-attribute redirect efficiently.
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = canvas.toDataURL("image/jpeg", 0.92);
+    a.href = url;
     a.download = filename;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 200);
   } catch (e) {
     showError("บันทึกรูปไม่สำเร็จ: " + (e && e.message ? e.message : e));
   } finally {
-    root.setAttribute("style", prev);
+    if (host.parentNode) host.parentNode.removeChild(host);
     btn.disabled = false;
     btn.textContent = prevText;
   }
