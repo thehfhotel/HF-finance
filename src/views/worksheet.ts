@@ -611,6 +611,12 @@ function fmt(n) {
 function pad(n) { return String(n).padStart(2, "0"); }
 function formatBE(date) { return \`\${pad(date.getDate())}/\${pad(date.getMonth() + 1)}/\${date.getFullYear() + 543}\`; }
 function formatGregorian(date) { return \`\${pad(date.getDate())}/\${pad(date.getMonth() + 1)}/\${date.getFullYear()}\`; }
+// "30/04/2026" → "30 เมษายน 2569" (Buddhist year). Returns "" for empty/bad input.
+function formatLongBE(str) {
+  const d = parseGregorian(str);
+  if (!d) return "";
+  return \`\${d.getDate()} \${THAI_MONTHS[d.getMonth()]} \${d.getFullYear() + 543}\`;
+}
 function parseGregorian(str) {
   if (!str) return null;
   const [d, m, y] = str.split("/").map(Number);
@@ -1694,10 +1700,9 @@ function buildPaySlip(r, idx, periodLabel, effectiveDate) {
     ? \`<div class="slip-note"><strong>หมายเหตุ / Remarks:</strong> \${escapeHtml(r.note.trim())}</div>\`
     : "";
 
-  const empName = r.accountName || "—";
-  const position = r.position
-    ? r.position + (r.nickname ? \` (\${r.nickname})\` : "")
-    : (r.nickname || "—");
+  const empName = (r.accountName || "—") + (r.nickname ? \` (\${r.nickname})\` : "");
+  const position = r.position || "—";
+  const paymentDate = formatLongBE(effectiveDate) || "—";
 
   return \`<div class="pay-slip">
     <div class="slip-header">
@@ -1728,7 +1733,7 @@ function buildPaySlip(r, idx, periodLabel, effectiveDate) {
       </div>
       <div class="field">
         <span class="lbl">วันที่ชำระ <span class="en">/ Payment Date</span></span>
-        <span class="val">\${escapeHtml(effectiveDate || "—")}</span>
+        <span class="val">\${escapeHtml(paymentDate)}</span>
       </div>
       <div class="field" style="grid-column: 1 / -1">
         <span class="lbl">เลขที่บัญชี <span class="en">/ Bank Account</span></span>
