@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright:v1.59.1-noble
+FROM mcr.microsoft.com/playwright:v1.60.0-noble
 
 # kbiz-bot lives at /app/kbiz-bot so resolve("..", "data", ...) hits /app/data,
 # matching how docker-compose mounts the shared data volume into both
