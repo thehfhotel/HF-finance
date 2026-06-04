@@ -258,11 +258,15 @@ function setupYearDisplay(fp) {
   fp._beSync = sync;
 }
 
-function nextMonth5th() {
+function currentCyclePayout() {
+  // Payout date of the current cycle = the next 5th-of-month. Before the 5th
+  // that's this month's 5th (paying the previous cycle, e.g. 5 Jun for May);
+  // from the 5th onward it's next month's 5th.
   const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth() + 1, 5);
+  const mo = now.getDate() < 5 ? now.getMonth() : now.getMonth() + 1;
+  return new Date(now.getFullYear(), mo, 5);
 }
-const defaultEffective = nextMonth5th();
+const defaultEffective = currentCyclePayout();
 selectedDate = defaultEffective;
 
 const fp = flatpickr("#effectiveDate", {
