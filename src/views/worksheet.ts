@@ -458,11 +458,11 @@ export const WORKSHEET_HTML = `<!doctype html>
 
 <div class="past-banner locked" id="pastBannerLocked" hidden>
   <span>📅 <strong>เดือน<span id="pastMonthName"></span></strong> เป็นเดือนเก่า — <strong>ดูได้อย่างเดียว</strong></span>
-  <span class="hint">(ตัดยอดทุกวันที่ 4 ของเดือนถัดไป)</span>
+  <span class="hint">(ตัดยอดทุกวันที่ 5 ของเดือนถัดไป — วันจ่ายเงิน)</span>
   <button type="button" id="unlockPast">🔓 ปลดล็อคเพื่อแก้ไข</button>
 </div>
 <div class="past-banner unlocked" id="pastBannerUnlocked" hidden>
-  <span>⚠️ <strong>กำลังแก้ไขเดือน<span id="pastMonthName2"></span></strong> (ย้อนหลัง) — บันทึกอัตโนมัติเปิดอยู่ การเปลี่ยนแปลงจะไม่กระทบคำขอที่ส่งไปแล้ว</span>
+  <span>⚠️ <strong>กำลังแก้ไขเดือน<span id="pastMonthName2"></span></strong> (ย้อนหลัง) — แจ้งแอดมินผ่าน Slack แล้ว · บันทึกอัตโนมัติเปิดอยู่ การเปลี่ยนแปลงจะไม่กระทบคำขอที่ส่งไปแล้ว</span>
 </div>
 
 <div id="reportRoot"></div>
@@ -656,8 +656,25 @@ function listPeriods() {
 }
 
 function defaultPeriod() {
+  // The "current" cycle is the one whose payout (5th of the following month)
+  // comes next. Before payout day the current cycle is still the *previous*
+  // calendar month — e.g. on 4 Jun the May cycle (pays 5 Jun) is current, and
+  // only once 5 Jun arrives does June become current. Date() handles Jan rollover.
   const now = new Date();
-  return \`\${now.getFullYear()}-\${pad(now.getMonth() + 1)}\`;
+  const d = new Date(now.getFullYear(), now.getDate() < 5 ? now.getMonth() - 1 : now.getMonth(), 1);
+  return \`\${d.getFullYear()}-\${pad(d.getMonth() + 1)}\`;
+}
+
+// Payout date for a period = the 5th of the following month (the "payout on the
+// 5th of the next month" rule). e.g. 2026-05 → 5 Jun 2026, 2026-06 → 5 Jul 2026.
+// Distinct per cycle by construction, so two months never share a payout date.
+// Matches isPastPeriod()'s lock cutoff — a period locks exactly on its payout.
+function periodPayoutDate(period) {
+  const m = /^(\\d{4})-(\\d{2})$/.exec(period || "");
+  if (!m) return null;
+  const y = parseInt(m[1], 10);
+  const mo = parseInt(m[2], 10); // 1-12; Date wants 0-11, so mo lands on the next month.
+  return new Date(y, mo, 5);
 }
 
 function rowTakeHome(r) {
@@ -1030,14 +1047,15 @@ function recalcGrand() {
 // the inputs themselves are pointer-events:none in this state.
 let pastLocked = false;
 
-// "Past" = period older than the 4th of the following month at 00:00
-// local time. e.g. for period 2026-04, the cutoff is 2026-05-04 00:00.
+// "Past" = period locked once its payout day arrives. Payout is the 5th of the
+// following month, so for period 2026-05 the cutoff is 2026-06-05 00:00 — the
+// May cycle stays editable through 4 Jun and locks on payout day, 5 Jun.
 function isPastPeriod(period) {
   const m = /^(\\d{4})-(\\d{2})$/.exec(period || "");
   if (!m) return false;
   const y = parseInt(m[1], 10);
   const mo = parseInt(m[2], 10); // 1-12; Date constructor wants 0-11 so passing mo lands on the next month.
-  const cutoff = new Date(y, mo, 4, 0, 0, 0);
+  const cutoff = new Date(y, mo, 5, 0, 0, 0);
   return new Date() >= cutoff;
 }
 
@@ -1124,6 +1142,14 @@ async function loadPeriod(period) {
     for (const r of sheet.rows) if (applyLinkedRateFillRow(r)) filledAny = true;
   }
   generalNotesEl.value = sheet.generalNotes || "";
+  // Default a blank payout date to this period's own payout (5th of the next
+  // month) so every cycle carries its own correct, distinct date — May pays
+  // 5 Jun, June pays 5 Jul, never the same day. Past/locked sheets keep
+  // whatever was recorded (preserve the historical record).
+  if (!sheet.effectiveDate && !pastLocked) {
+    const d = periodPayoutDate(period);
+    if (d) { sheet.effectiveDate = formatGregorian(d); filledAny = true; }
+  }
   selectedDate = parseGregorian(sheet.effectiveDate);
   if (selectedDate) fp.setDate(selectedDate, true);
   else fp.clear();
@@ -2125,13 +2151,33 @@ const autoPrint = new URLSearchParams(window.location.search).get("print") === "
 // Wire unlock-past button. One-shot per period: clicking flips the body
 // class + banner; navigating to another period (or reloading) re-applies
 // the lock automatically via applyPastLockState() in loadPeriod().
+//
+// Editing a closed (payout-passed) cycle is a "special manual request": we let
+// HR proceed immediately but notify admins via Slack so the off-cycle change
+// is on record. The notification is best-effort — fire-and-forget, never
+// awaited, and the edit is never re-locked if it fails.
 document.getElementById("unlockPast").addEventListener("click", () => {
+  const reason = prompt(
+    "แก้ไขเดือนที่ปิดรอบแล้ว (จ่ายเงินไปแล้ว)\\n\\n" +
+    "ระบุเหตุผลในการแก้ไขย้อนหลัง — แอดมินจะได้รับแจ้งเตือนผ่าน Slack\\n" +
+    "(กด ตกลง เพื่อปลดล็อคแก้ไข · กด ยกเลิก เพื่อไม่แก้ไข)"
+  );
+  if (reason === null) return; // cancelled — keep the month locked
+
   pastLocked = false;
   document.body.classList.remove("past-locked");
   document.getElementById("pastBannerLocked").hidden = true;
   document.getElementById("pastMonthName2").textContent =
     document.getElementById("pastMonthName").textContent;
   document.getElementById("pastBannerUnlocked").hidden = false;
+
+  if (currentPeriod) {
+    fetch(\`/api/sheets/\${currentPeriod}/adjust-request\`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: reason.trim() }),
+    }).catch(() => {}); // best-effort; the edit stands regardless
+  }
 });
 
 function maybeAutoPrint() {

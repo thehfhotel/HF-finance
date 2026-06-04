@@ -90,6 +90,17 @@ function periodFromEffective(eff: string | undefined): string | undefined {
   return m ? `${m[3]}-${m[2]}` : undefined;
 }
 
+// Thai/Buddhist-era label for a YYYY-MM period, e.g. "2026-05" → "พฤษภาคม 2569".
+const TH_MONTHS = [
+  "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+  "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
+];
+function periodLabelTH(period: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(period);
+  if (!m) return period;
+  return `${TH_MONTHS[Number(m[2]) - 1]} ${Number(m[1]) + 543}`;
+}
+
 function adminGuard(headers: Record<string, string | undefined>, set: { status?: number }): true | Response {
   if (isAdminUnlocked(headers)) return true;
   set.status = 401;
@@ -242,6 +253,27 @@ const app = new Elysia()
         ),
       }),
     }
+  )
+
+  // Manual adjustment of a closed cycle. The worksheet lock (past the 5th-of-
+  // next-month payout) is advisory UX, not an approval gate: HR can still edit
+  // a past month, but doing so is a "special manual request" we put on record
+  // by pinging admins on Slack. Best-effort — notifySlack swallows its own
+  // errors, so a Slack outage never blocks the edit.
+  .post(
+    "/api/sheets/:period/adjust-request",
+    async ({ params, body, set }) => {
+      if (!isValidPeriod(params.period)) { set.status = 400; return "invalid period (expected YYYY-MM)"; }
+      const reason = (body?.reason || "").trim();
+      await notifySlack(
+        `:unlock: *Past payroll edit — manual adjustment*\n` +
+          `• Cycle: ${periodLabelTH(params.period)} (${params.period}) — payout already passed\n` +
+          `• Reason: ${reason || "(none given)"}\n` +
+          `• Worksheet: <http://localhost:3000/worksheet|open>`
+      );
+      return { ok: true };
+    },
+    { body: t.Object({ reason: t.Optional(t.String({ maxLength: 500 })) }) }
   )
 
   .post(
