@@ -71,6 +71,7 @@ export const WORKSHEET_HTML = `<!doctype html>
     font-weight: 600;
   }
   .row-badge.warn { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+  .row-badge.bank-ok { background: #dcfce7; color: #065f46; border: 1px solid #86efac; cursor: help; pointer-events: auto; }
   .acct-check { color: #047857; font-weight: 700; font-size: 14px; margin-left: 6px; }
   .acct-edit-wrap { display: flex; align-items: center; gap: 4px; }
   .acct-edit-wrap input { flex: 1; min-width: 0; }
@@ -704,19 +705,57 @@ function displayAccount(r) {
 // canonical identifier.
 let accountsIndex = new Set();
 let accountsById = new Map();
+// KBIZ-registered payroll beneficiaries scraped from the bank: normalized
+// account number → the bank's confirmed account-holder name (romanized, e.g.
+// "MS. WARAPHON VANGNARA"). This is the only bank-confirmed identity we have;
+// names are English so we can't auto-equate them to the Thai worksheet names —
+// instead we surface the bank name for the operator to eyeball, and flag any
+// KBANK number that the bank has no beneficiary record for.
+let registeredNames = new Map();
+let registeredLoaded = false;
 function normalizeAcct(s) { return String(s || "").replace(/[\\s-]/g, "").toLowerCase(); }
 async function refreshAccountsIndex() {
   try {
     const res = await fetch("/api/accounts");
-    if (!res.ok) return;
-    const accs = await res.json();
-    accountsIndex = new Set(accs.map((a) => normalizeAcct(a.accountNumber)));
-    accountsById = new Map(accs.map((a) => [a.id, a]));
+    if (res.ok) {
+      const accs = await res.json();
+      accountsIndex = new Set(accs.map((a) => normalizeAcct(a.accountNumber)));
+      accountsById = new Map(accs.map((a) => [a.id, a]));
+    }
+  } catch {}
+  try {
+    const rr = await fetch("/api/registered");
+    if (rr.ok) {
+      const data = await rr.json();
+      registeredNames = new Map((data.accounts || []).map((a) => [normalizeAcct(a.accountNumber), a.accountName]));
+      registeredLoaded = true;
+    }
   } catch {}
 }
 function isVerified(r) {
   if (!r.accountNumber) return false;
   return accountsIndex.has(normalizeAcct(r.accountNumber));
+}
+// Cross-check a row's account number against the bank's registered-beneficiary
+// list. "confirmed" → the bank knows this account (bankName is its record);
+// "unregistered" → a complete KBANK number the bank has NO beneficiary record
+// for (likely typo or not-yet-added — verify before paying); "none" → nothing
+// to assert (blank/short number, non-KBANK, or registered data unavailable).
+function bankCheck(r) {
+  if ((r.bank || "KBANK").toUpperCase() !== "KBANK") return { state: "none" };
+  const norm = normalizeAcct(r.accountNumber);
+  if (norm.length < 10) return { state: "none" };
+  if (registeredNames.has(norm)) return { state: "confirmed", bankName: registeredNames.get(norm) };
+  if (!registeredLoaded) return { state: "none" };
+  return { state: "unregistered" };
+}
+function bankBadgeHtml(r) {
+  const c = bankCheck(r);
+  if (c.state === "confirmed")
+    return \`<span class="row-badge bank-ok" title="ธนาคารยืนยันชื่อบัญชี (KBIZ): \${escapeHtml(c.bankName)}">🏦 KBIZ</span>\`;
+  if (c.state === "unregistered")
+    return '<span class="row-badge warn" title="เลขบัญชีนี้ไม่อยู่ในรายชื่อผู้รับเงินที่ลงทะเบียนกับธนาคาร (KBIZ) — ตรวจสอบให้แน่ใจก่อนโอน">⚠ ไม่พบใน KBIZ</span>';
+  return "";
 }
 function isNonKbank(r) {
   if (typeof r === "string") return /[A-Za-z]/.test(r); // legacy callsite
@@ -727,8 +766,9 @@ function isNonKbank(r) {
 function frontCells(r, locked) {
   const checkInline = isVerified(r)
     ? '<span class="acct-check" title="ตรงกับฐาน /accounts">✓</span>' : "";
-  const warnBadge = isNonKbank(r)
-    ? '<span class="row-badge warn" title="ไม่ใช่บัญชี KBANK — ตรวจสอบก่อนโอน">⚠ ไม่ใช่ KBANK</span>' : "";
+  const warnBadge = (isNonKbank(r)
+    ? '<span class="row-badge warn" title="ไม่ใช่บัญชี KBANK — ตรวจสอบก่อนโอน">⚠ ไม่ใช่ KBANK</span>'
+    : bankBadgeHtml(r));
   if (locked) {
     return \`<td class="name sticky-l" data-col="name">\${escapeHtml(r.accountName || "")}</td>\` +
       \`<td class="acct sticky-l" data-col="account">\${escapeHtml(displayAccount(r))}\${checkInline}\${warnBadge}</td>\` +
@@ -918,10 +958,15 @@ function updateBadges(tr, r) {
     if (nameCell) nameCell.insertAdjacentHTML("beforeend",
       '<span class="row-badge verified" title="ตรงกับฐาน /accounts">✓ ตรงกับฐาน</span>');
   }
-  if (isNonKbank(r)) {
-    const acctCell = tr.children[2];
-    if (acctCell) acctCell.insertAdjacentHTML("beforeend",
-      '<span class="row-badge warn" title="ไม่ใช่บัญชี KBANK — ตรวจสอบก่อนโอน">⚠ ไม่ใช่ KBANK</span>');
+  const acctCell = tr.children[2];
+  if (acctCell) {
+    if (isNonKbank(r)) {
+      acctCell.insertAdjacentHTML("beforeend",
+        '<span class="row-badge warn" title="ไม่ใช่บัญชี KBANK — ตรวจสอบก่อนโอน">⚠ ไม่ใช่ KBANK</span>');
+    } else {
+      const bankHtml = bankBadgeHtml(r);
+      if (bankHtml) acctCell.insertAdjacentHTML("beforeend", bankHtml);
+    }
   }
 }
 
