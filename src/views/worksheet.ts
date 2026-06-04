@@ -642,26 +642,31 @@ function parseGregorian(str) {
   return new Date(y, m - 1, d);
 }
 
-function listPeriods() {
-  // Last 12 months + next 1, newest first
+// The current cycle's month (1st of). The current cycle is the one whose payout
+// (5th of the next month) comes next; before payout day that's still the
+// *previous* calendar month — e.g. on 4 Jun the May cycle (pays 5 Jun) is
+// current, and only once 5 Jun arrives does June become current. Date() handles
+// the January rollover.
+function currentCycleDate() {
   const now = new Date();
+  return new Date(now.getFullYear(), now.getDate() < 5 ? now.getMonth() - 1 : now.getMonth(), 1);
+}
+
+function listPeriods() {
+  // Newest first: the next cycle (only ONE month ahead is ever offered) down
+  // through the last 12 months. Anchored on the current cycle, not the calendar
+  // month, so a period 2+ cycles ahead is never selectable.
+  const base = currentCycleDate();
   const months = [];
   for (let i = 1; i >= -12; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    const y = d.getFullYear();
-    const m = pad(d.getMonth() + 1);
-    months.push({ value: \`\${y}-\${m}\`, label: \`\${THAI_MONTHS[d.getMonth()]} \${y + 543}\` });
+    const d = new Date(base.getFullYear(), base.getMonth() + i, 1);
+    months.push({ value: \`\${d.getFullYear()}-\${pad(d.getMonth() + 1)}\`, label: \`\${THAI_MONTHS[d.getMonth()]} \${d.getFullYear() + 543}\` });
   }
   return months;
 }
 
 function defaultPeriod() {
-  // The "current" cycle is the one whose payout (5th of the following month)
-  // comes next. Before payout day the current cycle is still the *previous*
-  // calendar month — e.g. on 4 Jun the May cycle (pays 5 Jun) is current, and
-  // only once 5 Jun arrives does June become current. Date() handles Jan rollover.
-  const now = new Date();
-  const d = new Date(now.getFullYear(), now.getDate() < 5 ? now.getMonth() - 1 : now.getMonth(), 1);
+  const d = currentCycleDate();
   return \`\${d.getFullYear()}-\${pad(d.getMonth() + 1)}\`;
 }
 
@@ -1677,6 +1682,45 @@ const SLIP_DEDUCTIONS = [
 // omitted here — lookupSavings returns null and the slip suppresses the
 // savings line.
 const SAVINGS_AS_OF = "30 เมษายน 2569";
+// The cycle the SAVINGS_BALANCE snapshot is current through. Deposits from the
+// months AFTER this (read from each sheet) are added on top, so the slip's
+// balance includes the cycle being paid. Bump this whenever SAVINGS_BALANCE is
+// re-imported from a newer xlsx.
+const SAVINGS_AS_OF_PERIOD = "2026-04";
+
+// YYYY-MM months strictly after the anchor, up to and including end.
+// e.g. ("2026-04","2026-06") gives ["2026-05","2026-06"]. Empty if end <= anchor.
+function periodsAfter(anchor, end) {
+  const out = [];
+  let [y, m] = anchor.split("-").map(Number);
+  while (true) {
+    m++; if (m > 12) { m = 1; y++; }
+    const p = \`\${y}-\${pad(m)}\`;
+    if (p > end) break;
+    out.push(p);
+  }
+  return out;
+}
+
+async function fetchSheetSafe(period) {
+  try { const res = await fetch(\`/api/sheets/\${period}\`); return res.ok ? await res.json() : null; }
+  catch (_) { return null; }
+}
+
+// Sum of each employee's เงินสะสม deposits from the month after the anchor
+// through this sheet's period (the current sheet is used directly; earlier
+// months are fetched). Keyed by accountId. Empty for periods at/before anchor.
+async function savingsSinceAnchorMap(sheet) {
+  const period = sheet.period || currentPeriod || "";
+  const map = new Map();
+  if (!period || period <= SAVINGS_AS_OF_PERIOD) return map;
+  for (const p of periodsAfter(SAVINGS_AS_OF_PERIOD, period)) {
+    const s = p === period ? sheet : await fetchSheetSafe(p);
+    if (!s || !Array.isArray(s.rows)) continue;
+    for (const r of s.rows) map.set(r.accountId, (map.get(r.accountId) || 0) + num(r.savings));
+  }
+  return map;
+}
 const SAVINGS_BALANCE = {
   "วิว": 32900,
   "เบ้นท์": 28700, "เบนท์": 28700, "เบ้น": 28700, "เบนซ์": 28700,
@@ -1718,7 +1762,7 @@ function emptyCells() {
   return '<td class="lbl">&nbsp;</td><td class="amt zero">—</td>';
 }
 
-function buildPaySlip(r, idx, periodLabel, effectiveDate) {
+function buildPaySlip(r, idx, periodLabel, effectiveDate, savingsSinceAnchor, asOf) {
   // Pair earnings ↔ deductions into a single 4-column table. When the
   // arrays are uneven, the shorter side gets blank cells.
   const rowCount = Math.max(SLIP_EARNINGS.length, SLIP_DEDUCTIONS.length);
@@ -1733,12 +1777,18 @@ function buildPaySlip(r, idx, periodLabel, effectiveDate) {
   const totalDed = SLIP_DEDUCTIONS.reduce((s, it) => s + num(r[it.key]), 0);
   const net = Math.round((totalEarn - totalDed) * 100) / 100;
 
-  const savingsBalance = lookupSavings(r.nickname);
+  // เงินสะสมคงเหลือ = the anchor snapshot PLUS every deposit since the anchor
+  // up to and including this cycle (savingsSinceAnchor). So a slip for the cycle
+  // about to be paid reflects this month's deposit, not last month's total.
+  const anchorBalance = lookupSavings(r.nickname);
+  const savingsBalance = anchorBalance != null
+    ? Math.round((anchorBalance + (num(savingsSinceAnchor))) * 100) / 100
+    : null;
   const savingsHtml = savingsBalance != null
     ? \`<div class="slip-savings">
          <span class="label">เงินสะสมคงเหลือ <span class="en">/ Total Savings Balance</span></span>
          <span class="amt">\${fmt(savingsBalance)}<span class="baht">บาท / THB</span></span>
-         <span class="asof">ณ \${escapeHtml(SAVINGS_AS_OF)}</span>
+         <span class="asof">ณ \${escapeHtml(asOf || SAVINGS_AS_OF)}</span>
        </div>\`
     : "";
 
@@ -1832,14 +1882,18 @@ function buildPaySlip(r, idx, periodLabel, effectiveDate) {
   </div>\`;
 }
 
-function buildReport(sheet) {
+async function buildReport(sheet) {
   const period = sheet.period || currentPeriod || "";
   const periodLabel = periodMonthLabelTH(period);
   // One slip per row, including zero-pay rows (slip doubles as proof of
   // employment for the period). Skip rows with no name/account number —
   // those are placeholder entries that haven't been filled in yet.
   const rows = sheet.rows.filter((r) => (r.accountName && r.accountName.trim()) || num(r.salary) > 0);
-  const slips = rows.map((r, i) => buildPaySlip(r, i, periodLabel, sheet.effectiveDate || "")).join("");
+  // Roll the cumulative savings forward to this cycle (see savingsSinceAnchorMap).
+  const since = await savingsSinceAnchorMap(sheet);
+  const asOf = since.size ? (formatLongBE(sheet.effectiveDate) || periodLabel) : SAVINGS_AS_OF;
+  const slips = rows.map((r, i) =>
+    buildPaySlip(r, i, periodLabel, sheet.effectiveDate || "", since.get(r.accountId) || 0, asOf)).join("");
   return slips || \`<div style="padding:20mm;text-align:center;color:#737373;font-size:10pt">ยังไม่มีข้อมูลพนักงานสำหรับเดือน\${escapeHtml(periodLabel)}</div>\`;
 }
 
@@ -2064,10 +2118,10 @@ function fitTableToOnePage() {
   });
 })();
 
-document.getElementById("printBtn").addEventListener("click", () => {
+document.getElementById("printBtn").addEventListener("click", async () => {
   if (!currentSheet) return;
   setPrintMode("cards");
-  document.getElementById("reportRoot").innerHTML = buildReport(currentSheet);
+  document.getElementById("reportRoot").innerHTML = await buildReport(currentSheet);
   window.print();
 });
 
@@ -2113,7 +2167,7 @@ async function saveAsImage(mode) {
   host.classList.add(\`mode-\${mode}\`);
   host.style.cssText =
     \`display:block!important;position:absolute;left:0;top:0;width:\${widthMM}mm;background:#fff;z-index:99999;\`;
-  host.innerHTML = mode === "table" ? buildTableReport(currentSheet) : buildReport(currentSheet);
+  host.innerHTML = mode === "table" ? buildTableReport(currentSheet) : await buildReport(currentSheet);
   document.body.appendChild(host);
 
   // Force layout + yield a frame so the browser computes the table layout.
@@ -2197,10 +2251,10 @@ function maybeAutoPrint() {
   // Defer one tick so the layout settles after renderRows().
   // Mode is picked from ?print=cards|table; defaults to cards.
   const mode = new URLSearchParams(window.location.search).get("print") === "table" ? "table" : "cards";
-  setTimeout(() => {
+  setTimeout(async () => {
     setPrintMode(mode);
     const root = document.getElementById("reportRoot");
-    root.innerHTML = mode === "table" ? buildTableReport(currentSheet) : buildReport(currentSheet);
+    root.innerHTML = mode === "table" ? buildTableReport(currentSheet) : await buildReport(currentSheet);
     if (mode === "table") fitTableToOnePage();
     window.print();
   }, 250);
