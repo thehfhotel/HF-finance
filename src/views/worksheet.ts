@@ -778,6 +778,7 @@ function renderRows(sheet) {
     inp.addEventListener("input", onInput);
     inp.addEventListener("blur", onBlur);
     inp.addEventListener("keydown", onKeyDown);
+    if (inp.classList.contains("num")) inp.addEventListener("mouseup", caretToEnd);
   });
   rowsTbody.querySelectorAll(".idx-del").forEach((b) => {
     b.addEventListener("click", onDeleteRow);
@@ -867,21 +868,6 @@ function updateScrollBtns() {
 // touch that field.
 const LINKED_RATES = { socialSecurity: 0.03, savings: 0.05 };
 
-// Backfill helper: rows saved before linked-rate logic existed (or rows
-// where salary was entered without triggering an edit event) still need
-// their ประกันสังคม/เงินสะสม populated. Only fills cells that are exactly 0.
-function applyLinkedRateFillRow(r) {
-  const sal = num(r.salary);
-  if (sal <= 0) return false;
-  let changed = false;
-  for (const k of Object.keys(LINKED_RATES)) {
-    if (num(r[k]) === 0) {
-      r[k] = Math.round(sal * LINKED_RATES[k] * 100) / 100;
-      changed = true;
-    }
-  }
-  return changed;
-}
 function setRowField(tr, row, field, value) {
   row[field] = value;
   const inp = tr.querySelector('input[data-field="' + field + '"]');
@@ -895,13 +881,18 @@ function onInput(e) {
   const row = currentSheet.rows[idx];
   if (e.target.classList.contains("num")) {
     if (field === "salary") {
+      const oldSalary = num(row.salary);
       const newSalary = num(e.target.value);
       row.salary = newSalary;
-      // Always recompute linked rates whenever salary is edited; manual
-      // overrides are expected to be entered AFTER setting the salary.
+      // Linked rates follow salary ONLY while still untouched — i.e. the field
+      // still equals the OLD salary's 3%/5%. Any manual override (including an
+      // intentional 0 the user cleared) breaks the link and is left alone.
       for (const k of Object.keys(LINKED_RATES)) {
-        const v = Math.round(newSalary * LINKED_RATES[k] * 100) / 100;
-        setRowField(tr, row, k, v);
+        const linkedToOld = Math.round(oldSalary * LINKED_RATES[k] * 100) / 100;
+        if (num(row[k]) === linkedToOld) {
+          const v = Math.round(newSalary * LINKED_RATES[k] * 100) / 100;
+          setRowField(tr, row, k, v);
+        }
       }
     } else {
       row[field] = num(e.target.value);
@@ -933,6 +924,17 @@ function onBlur(e) {
   if (e.target.classList.contains("num")) {
     e.target.value = fmt(num(e.target.value));
   }
+}
+
+// Clicking a numeric cell parks the caret at the END (after the browser's own
+// mouseup caret placement, hence the rAF defer) so backspace always deletes the
+// right-most digit — consistent no matter where in the number the user clicked.
+function caretToEnd(e) {
+  const inp = e.target;
+  requestAnimationFrame(() => {
+    const n = inp.value.length;
+    try { inp.setSelectionRange(n, n); } catch (_) {}
+  });
 }
 
 function siblingRowField(inp, dir) {
@@ -1132,15 +1134,11 @@ async function loadPeriod(period) {
   const sheet = await res.json();
   currentPeriod = period;
   currentSheet = sheet;
-  // Apply past-month lock state BEFORE the linked-rate backfill so a
-  // backfill on a past sheet doesn't accidentally trigger autosave.
   applyPastLockState(period);
-  // Backfill ส.ส./สะสม only on the current/grace period — past periods
-  // stay as-was to preserve the historical record.
+  // NOTE: we deliberately do NOT backfill ประกันสังคม/เงินสะสม on load. A stored
+  // 0 is an intentional value (the user cleared it), not "needs filling" — the
+  // 3%/5% link is applied live while editing salary (see onInput), never here.
   let filledAny = false;
-  if (!pastLocked) {
-    for (const r of sheet.rows) if (applyLinkedRateFillRow(r)) filledAny = true;
-  }
   generalNotesEl.value = sheet.generalNotes || "";
   // Default a blank payout date to this period's own payout (5th of the next
   // month) so every cycle carries its own correct, distinct date — May pays
