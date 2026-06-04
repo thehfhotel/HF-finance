@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { listAccounts } from "./store";
 
@@ -126,6 +126,40 @@ async function readSheet(period: string): Promise<Sheet | null> {
   }
 }
 
+// Most recent sheet for a period strictly before `period` (e.g. for 2026-06 →
+// 2026-05). Used to carry salaries forward into a brand-new cycle.
+async function latestPriorSheet(period: string): Promise<Sheet | null> {
+  let files: string[];
+  try { files = await readdir(SHEETS_DIR); } catch { return null; }
+  const priors = files
+    .filter((f) => /^\d{4}-\d{2}\.json$/.test(f))
+    .map((f) => f.slice(0, -5))
+    .filter((p) => isValidPeriod(p) && p < period)
+    .sort();
+  for (let i = priors.length - 1; i >= 0; i--) {
+    const s = await readSheet(priors[i]);
+    if (s) return s;
+  }
+  return null;
+}
+
+// A fresh row for a NEW cycle, seeded from the same account's prior-cycle row:
+// carry the salary forward and recompute ประกันสังคม 3% / เงินสะสม 5%; all
+// one-time fields (advance, loan, OT, …) and the note start at 0/blank.
+function seededRow(a: { id: string; accountNumber: string; accountName: string }, prior: SheetRow): SheetRow {
+  const base = emptyRow(a); // identity + EMPLOYEE_DEFAULTS fallback for new accounts
+  const salary = Number(prior.salary) || 0;
+  return {
+    ...base,
+    bank: prior.bank || base.bank,
+    nickname: prior.nickname || base.nickname,
+    position: prior.position || base.position,
+    salary,
+    socialSecurity: Math.round(salary * 0.03 * 100) / 100,
+    savings: Math.round(salary * 0.05 * 100) / 100,
+  };
+}
+
 export async function loadSheet(period: string): Promise<Sheet> {
   const accounts = await listAccounts();
   const existing = await readSheet(period);
@@ -144,8 +178,15 @@ export async function loadSheet(period: string): Promise<Sheet> {
   sheet.rows = sheet.rows.map(normalize);
   const have = new Set(sheet.rows.map((r) => r.accountId));
   const dismissed = new Set(sheet.dismissed);
+  // For a brand-new sheet, seed each fresh row from the most recent prior cycle
+  // (carry salary + recompute 3%/5%). Existing sheets are never reseeded, so a
+  // value the user cleared stays cleared.
+  const seed = existing ? null : new Map((await latestPriorSheet(period))?.rows.map((r) => [r.accountId, r]) ?? []);
   for (const a of accounts) {
-    if (!have.has(a.id) && !dismissed.has(a.id)) sheet.rows.push(emptyRow(a));
+    if (!have.has(a.id) && !dismissed.has(a.id)) {
+      const prior = seed?.get(a.id);
+      sheet.rows.push(prior ? seededRow(a, prior) : emptyRow(a));
+    }
   }
   return sheet;
 }
