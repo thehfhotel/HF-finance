@@ -11,76 +11,105 @@ export const APPROVALS_HTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>คิวอนุมัติ - KBIZ Payroll</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root { font: 16px/1.5 "Noto Sans Thai", system-ui, sans-serif; }
-  body { max-width: 880px; margin: 24px auto; padding: 0 20px; color: #1a1a1a; }
+  :root {
+    font: 16px/1.5 "Sarabun", "Noto Sans Thai", system-ui, sans-serif;
+    --hf-brand-50: #FBEAEA;
+    --hf-brand-100: #F5C9C9;
+    --hf-brand-300: #C76060;
+    --hf-brand-500: #8B0000;
+    --hf-brand-600: #7A0000;
+    --hf-brand-700: #6B1212;
+    --hf-brand-800: #4F0E0E;
+    --hf-gold-100: #F6EACB;
+    --hf-gold-300: #E7C97F;
+    --hf-gold-500: #D9A441;
+    --hf-gold-600: #B98730;
+    --hf-gold-700: #93691F;
+    --hf-shell: #FAF9F7;
+    --hf-panel: #FFFFFF;
+    --hf-panel-tint: #F4F1ED;
+    --hf-zebra: #FAFAFB;
+    --hf-border: #E8E4DF;
+    --hf-border-strong: #CFC9C1;
+    --hf-text: #26221E;
+    --hf-text-muted: #7A7268;
+    --hf-success: #2F855A;
+    --hf-warning: #B7791F;
+    --hf-error: #C53030;
+    --hf-info: #2C5282;
+  }
+  body { max-width: 880px; margin: 24px auto; padding: 0 20px; color: var(--hf-text); }
   header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
   h1 { font-size: 22px; margin: 0; flex: 1; font-weight: 600; }
-  nav a { color: #1d4ed8; text-decoration: none; margin-left: 14px; font-size: 15px; }
+  nav a { color: var(--hf-brand-500); text-decoration: none; margin-left: 14px; font-size: 15px; }
   nav a.active { font-weight: 600; }
-  h2 { font-size: 14px; font-weight: 500; color: #6b7280; margin: 32px 0 10px; letter-spacing: 0.02em; }
+  h2 { font-size: 14px; font-weight: 500; color: var(--hf-text-muted); margin: 32px 0 10px; letter-spacing: 0.02em; }
 
-  .updated { font-size: 12px; color: #9ca3af; margin-bottom: 12px; transition: color 0.4s; }
-  .updated.pulse { color: #047857; }
+  .updated { font-size: 12px; color: var(--hf-text-muted); margin-bottom: 12px; transition: color 0.4s; }
+  .updated.pulse { color: var(--hf-success); }
 
   /* Pending card — hero-style, since admin needs to act on it. */
   .pcard {
-    border: 1px solid #e5e7eb; border-radius: 10px; padding: 22px 26px;
-    background: #fff; border-left: 4px solid #f59e0b;
+    border: 1px solid var(--hf-border-strong); border-radius: 10px; padding: 22px 26px;
+    background: var(--hf-panel); border-left: 4px solid var(--hf-warning);
     margin-bottom: 14px;
   }
-  .pcard.s-approved { border-left-color: #1d4ed8; }
-  .pcard.s-running { border-left-color: #6d28d9; }
+  .pcard.s-approved { border-left-color: var(--hf-brand-500); }
+  .pcard.s-running { border-left-color: var(--hf-info); }
   .pcard-row1 { display: flex; align-items: baseline; gap: 12px; }
-  .pcard-row1 .ago { color: #6b7280; font-size: 14px; }
+  .pcard-row1 .ago { color: var(--hf-text-muted); font-size: 14px; }
   .pcard-headline { font-size: 18px; font-weight: 600; margin-top: 8px; }
-  .pcard-figures { margin-top: 4px; color: #4b5563; font-size: 14px; font-variant-numeric: tabular-nums; }
-  .pcard-figures .amount { color: #0f172a; font-weight: 600; font-size: 18px; }
+  .pcard-figures { margin-top: 4px; color: var(--hf-text-muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+  .pcard-figures .amount { color: var(--hf-text); font-weight: 600; font-size: 18px; }
   .pcard-state {
     margin-top: 14px; padding: 8px 12px; border-radius: 6px;
-    font-size: 13px; color: #4b5563; background: #f9fafb;
+    font-size: 13px; color: var(--hf-text-muted); background: var(--hf-zebra);
   }
   .pcard-actions {
     margin-top: 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
   }
-  .pcard-actions a { color: #1d4ed8; text-decoration: none; font-size: 13px; }
+  .pcard-actions a { color: var(--hf-brand-500); text-decoration: none; font-size: 13px; }
   .pcard-actions a:hover { text-decoration: underline; }
-  .pcard-actions a.spacer { color: #d1d5db; }
+  .pcard-actions a.spacer { color: var(--hf-border-strong); }
   .pcard-actions button {
-    font: inherit; padding: 7px 14px; border-radius: 6px; border: 1px solid #d1d5db;
-    background: #fff; cursor: pointer;
+    font: inherit; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--hf-border-strong);
+    background: var(--hf-panel); cursor: pointer;
   }
-  .pcard-actions button.primary { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
-  .pcard-actions button.primary:hover { background: #1e40af; }
-  .pcard-actions button.danger { color: #b91c1c; border-color: #fca5a5; }
-  .pcard-actions button.danger:hover { background: #fef2f2; }
+  .pcard-actions button.primary { background: var(--hf-brand-500); color: var(--hf-panel); border-color: var(--hf-brand-500); }
+  .pcard-actions button.primary:hover { background: var(--hf-brand-600); }
+  .pcard-actions button.danger { color: var(--hf-error); border-color: color-mix(in srgb, var(--hf-error) 45%, white); }
+  .pcard-actions button.danger:hover { background: color-mix(in srgb, var(--hf-error) 6%, white); }
   .pcard-recipients { margin-top: 16px; }
   .pcard-recipients summary {
-    cursor: pointer; user-select: none; color: #1d4ed8; font-size: 13px;
+    cursor: pointer; user-select: none; color: var(--hf-brand-500); font-size: 13px;
   }
   .pcard-recipients[open] summary { margin-bottom: 10px; }
   .pcard-recipients table { width: 100%; border-collapse: collapse; font-size: 13px; }
   .pcard-recipients th, .pcard-recipients td {
-    padding: 6px 10px; text-align: left; border-bottom: 1px solid #f1f5f9;
+    padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--hf-border);
   }
-  .pcard-recipients th { background: #f9fafb; font-weight: 500; color: #6b7280; }
+  .pcard-recipients th { background: var(--hf-zebra); font-weight: 500; color: var(--hf-text-muted); }
   .pcard-recipients td.num { text-align: right; font-variant-numeric: tabular-nums; }
-  .pcard-recipients td.acct { font-variant-numeric: tabular-nums; color: #374151; }
+  .pcard-recipients td.acct { font-variant-numeric: tabular-nums; color: var(--hf-text); }
   .pcard-recipients tfoot td {
-    font-weight: 600; border-top: 2px solid #d1d5db; border-bottom: none;
-    color: #1d4ed8;
+    font-weight: 600; border-top: 2px solid var(--hf-border-strong); border-bottom: none;
+    color: var(--hf-brand-500);
   }
-  .pcard-audit { margin-top: 12px; font-size: 12px; color: #9ca3af; }
-  .pcard-audit code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; color: #6b7280; }
+  .pcard-audit { margin-top: 12px; font-size: 12px; color: var(--hf-text-muted); }
+  .pcard-audit code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; color: var(--hf-text-muted); }
 
   /* Pills */
   .pill { display: inline-block; padding: 4px 12px; border-radius: 10px; font-size: 13px; font-weight: 600; }
-  .pill.p-pending { background: #fef3c7; color: #92400e; }
-  .pill.p-approved { background: #dbeafe; color: #1d4ed8; }
-  .pill.p-running { background: #ede9fe; color: #6d28d9; }
-  .pill.p-done { background: #d1fae5; color: #047857; }
-  .pill.p-failed { background: #fee2e2; color: #b91c1c; }
-  .pill.p-rejected { background: #fee2e2; color: #b91c1c; }
+  .pill.p-pending { background: color-mix(in srgb, var(--hf-warning) 18%, white); color: var(--hf-warning); }
+  .pill.p-approved { background: var(--hf-brand-50); color: var(--hf-brand-500); }
+  .pill.p-running { background: color-mix(in srgb, var(--hf-info) 15%, white); color: var(--hf-info); }
+  .pill.p-done { background: color-mix(in srgb, var(--hf-success) 15%, white); color: var(--hf-success); }
+  .pill.p-failed { background: color-mix(in srgb, var(--hf-error) 15%, white); color: var(--hf-error); }
+  .pill.p-rejected { background: color-mix(in srgb, var(--hf-error) 15%, white); color: var(--hf-error); }
 
   /* History rows — single line, muted. Mirrors /status. */
   .row {
@@ -88,49 +117,49 @@ export const APPROVALS_HTML = `<!doctype html>
     grid-template-columns: 90px 70px 1fr auto auto auto;
     gap: 14px; align-items: center;
     padding: 10px 14px; font-size: 14px;
-    border: 1px solid #f0f0f0; border-radius: 6px; background: #fff;
+    border: 1px solid var(--hf-border); border-radius: 6px; background: var(--hf-panel);
     margin-bottom: 6px;
   }
-  .row.s-failed, .row.s-rejected { border-left: 3px solid #fca5a5; }
+  .row.s-failed, .row.s-rejected { border-left: 3px solid color-mix(in srgb, var(--hf-error) 45%, white); }
   .row .pill { padding: 2px 8px; font-size: 11px; font-weight: 600; }
-  .row .when { color: #6b7280; font-size: 12px; font-variant-numeric: tabular-nums; }
-  .row .label { color: #1f2937; }
-  .row .figures { color: #6b7280; font-variant-numeric: tabular-nums; font-size: 13px; }
-  .row .ref { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: #6b7280; }
+  .row .when { color: var(--hf-text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .row .label { color: var(--hf-text); }
+  .row .figures { color: var(--hf-text-muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+  .row .ref { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: var(--hf-text-muted); }
   .row .links { display: flex; gap: 10px; }
-  .row .links a { color: #1d4ed8; text-decoration: none; font-size: 12px; }
+  .row .links a { color: var(--hf-brand-500); text-decoration: none; font-size: 12px; }
   .row .links a:hover { text-decoration: underline; }
 
-  .empty { color: #9ca3af; padding: 28px; text-align: center; border: 1px dashed #e5e7eb; border-radius: 8px; }
+  .empty { color: var(--hf-text-muted); padding: 28px; text-align: center; border: 1px dashed var(--hf-border-strong); border-radius: 8px; }
 
   .filters {
     display: flex; gap: 10px; align-items: center; margin: 8px 0 16px;
-    font-size: 13px; color: #6b7280;
+    font-size: 13px; color: var(--hf-text-muted);
   }
   .filters select {
-    font: inherit; padding: 4px 8px; border: 1px solid #d1d5db;
-    border-radius: 4px; background: #fff; color: #374151;
+    font: inherit; padding: 4px 8px; border: 1px solid var(--hf-border-strong);
+    border-radius: 4px; background: var(--hf-panel); color: var(--hf-text);
   }
 
   /* OTP dialog */
   dialog {
     border: 0; border-radius: 8px; padding: 22px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.15); min-width: 340px;
+    box-shadow: 0 8px 24px rgb(38 34 30 / 0.15); min-width: 340px;
   }
-  dialog::backdrop { background: rgba(0,0,0,0.4); }
+  dialog::backdrop { background: rgba(38,34,30,0.4); }
   dialog h3 { margin: 0 0 8px; font-size: 18px; }
-  dialog p { margin: 0 0 14px; color: #4b5563; font-size: 14px; }
+  dialog p { margin: 0 0 14px; color: var(--hf-text-muted); font-size: 14px; }
   dialog input {
     font: 24px/1.2 monospace; padding: 10px 14px; width: 100%; box-sizing: border-box;
-    letter-spacing: 4px; text-align: center; border: 1px solid #ccc; border-radius: 6px;
+    letter-spacing: 4px; text-align: center; border: 1px solid var(--hf-border-strong); border-radius: 6px;
   }
   dialog .actions { margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end; }
   dialog .actions button {
-    font: inherit; padding: 8px 14px; border: 1px solid #d1d5db; background: #fff;
+    font: inherit; padding: 8px 14px; border: 1px solid var(--hf-border-strong); background: var(--hf-panel);
     border-radius: 4px; cursor: pointer;
   }
-  dialog .actions button.primary { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
-  dialog .err { color: #b91c1c; margin-top: 8px; font-size: 13px; min-height: 18px; }
+  dialog .actions button.primary { background: var(--hf-brand-500); color: var(--hf-panel); border-color: var(--hf-brand-500); }
+  dialog .err { color: var(--hf-error); margin-top: 8px; font-size: 13px; min-height: 18px; }
 </style>
 </head>
 <body>
@@ -476,5 +505,6 @@ refresh();
 setInterval(refresh, 5000);
 setInterval(() => { tickUpdatedLabel(); repaintRelativeTimes(); }, 1000);
 </script>
+<script defer src="https://erp.thehfhotel.org/shell/hf-bar.js" data-app="Payroll" data-module="finance"></script>
 </body>
 </html>`;

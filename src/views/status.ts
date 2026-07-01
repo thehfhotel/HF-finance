@@ -14,66 +14,95 @@ export const STATUS_HTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>สถานะคำขอ - KBIZ Payroll</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root { font: 16px/1.5 "Noto Sans Thai", system-ui, sans-serif; }
-  body { max-width: 880px; margin: 24px auto; padding: 0 20px; color: #1a1a1a; }
+  :root {
+    font: 16px/1.5 "Sarabun", "Noto Sans Thai", system-ui, sans-serif;
+    --hf-brand-50: #FBEAEA;
+    --hf-brand-100: #F5C9C9;
+    --hf-brand-300: #C76060;
+    --hf-brand-500: #8B0000;
+    --hf-brand-600: #7A0000;
+    --hf-brand-700: #6B1212;
+    --hf-brand-800: #4F0E0E;
+    --hf-gold-100: #F6EACB;
+    --hf-gold-300: #E7C97F;
+    --hf-gold-500: #D9A441;
+    --hf-gold-600: #B98730;
+    --hf-gold-700: #93691F;
+    --hf-shell: #FAF9F7;
+    --hf-panel: #FFFFFF;
+    --hf-panel-tint: #F4F1ED;
+    --hf-zebra: #FAFAFB;
+    --hf-border: #E8E4DF;
+    --hf-border-strong: #CFC9C1;
+    --hf-text: #26221E;
+    --hf-text-muted: #7A7268;
+    --hf-success: #2F855A;
+    --hf-warning: #B7791F;
+    --hf-error: #C53030;
+    --hf-info: #2C5282;
+  }
+  body { max-width: 880px; margin: 24px auto; padding: 0 20px; color: var(--hf-text); }
   header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
   h1 { font-size: 22px; margin: 0; flex: 1; font-weight: 600; }
-  nav a { color: #1d4ed8; text-decoration: none; margin-left: 14px; font-size: 15px; }
+  nav a { color: var(--hf-brand-500); text-decoration: none; margin-left: 14px; font-size: 15px; }
   nav a.active { font-weight: 600; }
-  h2 { font-size: 14px; font-weight: 500; color: #6b7280; margin: 32px 0 10px; letter-spacing: 0.02em; }
+  h2 { font-size: 14px; font-weight: 500; color: var(--hf-text-muted); margin: 32px 0 10px; letter-spacing: 0.02em; }
 
   .updated {
-    font-size: 12px; color: #9ca3af; margin-bottom: 12px; transition: color 0.4s;
+    font-size: 12px; color: var(--hf-text-muted); margin-bottom: 12px; transition: color 0.4s;
   }
-  .updated.pulse { color: #047857; }
+  .updated.pulse { color: var(--hf-success); }
 
   /* Hero card — latest request gets the focal weight. */
   .hero {
-    border: 1px solid #e5e7eb; border-radius: 10px; padding: 22px 26px;
-    background: #fff; border-left-width: 4px;
+    border: 1px solid var(--hf-border-strong); border-radius: 10px; padding: 22px 26px;
+    background: var(--hf-panel); border-left-width: 4px;
   }
-  .hero.s-pending  { border-left-color: #f59e0b; }
-  .hero.s-approved { border-left-color: #1d4ed8; }
-  .hero.s-running  { border-left-color: #6d28d9; }
-  .hero.s-done     { border-left-color: #047857; }
-  .hero.s-failed   { border-left-color: #b91c1c; }
-  .hero.s-rejected { border-left-color: #b91c1c; }
+  .hero.s-pending  { border-left-color: var(--hf-warning); }
+  .hero.s-approved { border-left-color: var(--hf-brand-500); }
+  .hero.s-running  { border-left-color: var(--hf-info); }
+  .hero.s-done     { border-left-color: var(--hf-success); }
+  .hero.s-failed   { border-left-color: var(--hf-error); }
+  .hero.s-rejected { border-left-color: var(--hf-error); }
   .hero-row1 { display: flex; align-items: baseline; gap: 12px; }
-  .hero-row1 .ago { color: #6b7280; font-size: 14px; }
+  .hero-row1 .ago { color: var(--hf-text-muted); font-size: 14px; }
   .hero-headline { font-size: 18px; font-weight: 600; margin-top: 8px; }
   .hero-figures {
-    margin-top: 4px; color: #4b5563; font-size: 14px; font-variant-numeric: tabular-nums;
+    margin-top: 4px; color: var(--hf-text-muted); font-size: 14px; font-variant-numeric: tabular-nums;
   }
   .hero-figures .amount {
-    color: #0f172a; font-weight: 600; font-size: 18px;
+    color: var(--hf-text); font-weight: 600; font-size: 18px;
   }
   .hero-state {
     margin-top: 16px; padding: 10px 14px; border-radius: 6px;
-    font-size: 14px; color: #374151; background: #f9fafb;
+    font-size: 14px; color: var(--hf-text); background: var(--hf-zebra);
     border-left: 3px solid transparent;
   }
-  .hero-state.success { background: transparent; border-left-color: #047857; padding-left: 12px; padding-right: 0; }
-  .hero-state.failure { background: #fef2f2; border-left-color: #b91c1c; color: #991b1b; }
-  .hero-state .ref { font-family: ui-monospace, SFMono-Regular, monospace; color: #111827; }
-  .hero-state .label { color: #6b7280; margin-right: 6px; }
+  .hero-state.success { background: transparent; border-left-color: var(--hf-success); padding-left: 12px; padding-right: 0; }
+  .hero-state.failure { background: color-mix(in srgb, var(--hf-error) 6%, white); border-left-color: var(--hf-error); color: var(--hf-error); }
+  .hero-state .ref { font-family: ui-monospace, SFMono-Regular, monospace; color: var(--hf-text); }
+  .hero-state .label { color: var(--hf-text-muted); margin-right: 6px; }
   .hero-actions {
     margin-top: 16px; display: flex; gap: 14px; align-items: center;
   }
-  .hero-actions a { color: #1d4ed8; text-decoration: none; font-size: 13px; }
+  .hero-actions a { color: var(--hf-brand-500); text-decoration: none; font-size: 13px; }
   .hero-actions a:hover { text-decoration: underline; }
-  .hero-actions .spacer { color: #d1d5db; }
+  .hero-actions .spacer { color: var(--hf-border-strong); }
 
   .hero-details {
-    margin-top: 12px; font-size: 13px; color: #6b7280;
+    margin-top: 12px; font-size: 13px; color: var(--hf-text-muted);
   }
-  .hero-details summary { cursor: pointer; user-select: none; color: #1d4ed8; font-size: 13px; }
+  .hero-details summary { cursor: pointer; user-select: none; color: var(--hf-brand-500); font-size: 13px; }
   .hero-details[open] summary { margin-bottom: 8px; }
   .hero-details .kv {
     display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin-top: 8px;
   }
-  .hero-details .kv dt { color: #6b7280; }
-  .hero-details .kv dd { margin: 0; font-variant-numeric: tabular-nums; color: #374151; }
+  .hero-details .kv dt { color: var(--hf-text-muted); }
+  .hero-details .kv dd { margin: 0; font-variant-numeric: tabular-nums; color: var(--hf-text); }
   .hero-details .kv dd code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
 
   /* History rows — single line, muted, scannable. */
@@ -82,41 +111,41 @@ export const STATUS_HTML = `<!doctype html>
     grid-template-columns: 90px 70px 1fr auto auto auto;
     gap: 14px; align-items: center;
     padding: 10px 14px; font-size: 14px;
-    border: 1px solid #f0f0f0; border-radius: 6px; background: #fff;
+    border: 1px solid var(--hf-border); border-radius: 6px; background: var(--hf-panel);
     margin-bottom: 6px;
   }
-  .row.s-failed, .row.s-rejected { border-left: 3px solid #fca5a5; }
+  .row.s-failed, .row.s-rejected { border-left: 3px solid color-mix(in srgb, var(--hf-error) 45%, white); }
   .row .pill {
     display: inline-block; padding: 2px 8px; border-radius: 10px;
     font-size: 11px; font-weight: 600; text-align: center;
   }
-  .row .when { color: #6b7280; font-size: 12px; font-variant-numeric: tabular-nums; }
-  .row .label { color: #1f2937; }
-  .row .figures { color: #6b7280; font-variant-numeric: tabular-nums; font-size: 13px; }
-  .row .ref { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: #6b7280; }
+  .row .when { color: var(--hf-text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .row .label { color: var(--hf-text); }
+  .row .figures { color: var(--hf-text-muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+  .row .ref { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: var(--hf-text-muted); }
   .row .links { display: flex; gap: 10px; }
-  .row .links a { color: #1d4ed8; text-decoration: none; font-size: 12px; }
+  .row .links a { color: var(--hf-brand-500); text-decoration: none; font-size: 12px; }
   .row .links a:hover { text-decoration: underline; }
 
   /* Pills (shared with hero + rows). Color tokens match /approvals. */
-  .pill.p-pending  { background: #fef3c7; color: #92400e; }
-  .pill.p-approved { background: #dbeafe; color: #1d4ed8; }
-  .pill.p-running  { background: #ede9fe; color: #6d28d9; }
-  .pill.p-done     { background: #d1fae5; color: #047857; }
-  .pill.p-failed   { background: #fee2e2; color: #b91c1c; }
-  .pill.p-rejected { background: #fee2e2; color: #b91c1c; }
+  .pill.p-pending  { background: color-mix(in srgb, var(--hf-warning) 18%, white); color: var(--hf-warning); }
+  .pill.p-approved { background: var(--hf-brand-50); color: var(--hf-brand-500); }
+  .pill.p-running  { background: color-mix(in srgb, var(--hf-info) 15%, white); color: var(--hf-info); }
+  .pill.p-done     { background: color-mix(in srgb, var(--hf-success) 15%, white); color: var(--hf-success); }
+  .pill.p-failed   { background: color-mix(in srgb, var(--hf-error) 15%, white); color: var(--hf-error); }
+  .pill.p-rejected { background: color-mix(in srgb, var(--hf-error) 15%, white); color: var(--hf-error); }
   .hero-row1 .pill { padding: 4px 12px; font-size: 13px; }
 
-  .empty { color: #9ca3af; padding: 28px; text-align: center; border: 1px dashed #e5e7eb; border-radius: 8px; }
+  .empty { color: var(--hf-text-muted); padding: 28px; text-align: center; border: 1px dashed var(--hf-border-strong); border-radius: 8px; }
 
   /* Filter row — only mounted when cache exceeds threshold. */
   .filters {
     display: flex; gap: 10px; align-items: center; margin: 8px 0 16px;
-    font-size: 13px; color: #6b7280;
+    font-size: 13px; color: var(--hf-text-muted);
   }
   .filters select {
-    font: inherit; padding: 4px 8px; border: 1px solid #d1d5db;
-    border-radius: 4px; background: #fff; color: #374151;
+    font: inherit; padding: 4px 8px; border: 1px solid var(--hf-border-strong);
+    border-radius: 4px; background: var(--hf-panel); color: var(--hf-text);
   }
 </style>
 </head>
@@ -396,5 +425,6 @@ refresh();
 setInterval(refresh, 5000);
 setInterval(() => { tickUpdatedLabel(); repaintRelativeTimes(); }, 1000);
 </script>
+<script defer src="https://erp.thehfhotel.org/shell/hf-bar.js" data-app="Payroll" data-module="finance"></script>
 </body>
 </html>`;

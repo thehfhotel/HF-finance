@@ -7,43 +7,72 @@ export const WORKSHEET_HTML = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>คำนวณเงินเดือน</title>
 <link rel="stylesheet" href="/static/flatpickr.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root { font: 16px/1.5 "Noto Sans Thai", system-ui, sans-serif; }
-  body { max-width: 1900px; margin: 20px auto; padding: 0 16px; color: #1a1a1a; }
+  :root {
+    font: 16px/1.5 "Sarabun", "Noto Sans Thai", system-ui, sans-serif;
+    --hf-brand-50: #FBEAEA;
+    --hf-brand-100: #F5C9C9;
+    --hf-brand-300: #C76060;
+    --hf-brand-500: #8B0000;
+    --hf-brand-600: #7A0000;
+    --hf-brand-700: #6B1212;
+    --hf-brand-800: #4F0E0E;
+    --hf-gold-100: #F6EACB;
+    --hf-gold-300: #E7C97F;
+    --hf-gold-500: #D9A441;
+    --hf-gold-600: #B98730;
+    --hf-gold-700: #93691F;
+    --hf-shell: #FAF9F7;
+    --hf-panel: #FFFFFF;
+    --hf-panel-tint: #F4F1ED;
+    --hf-zebra: #FAFAFB;
+    --hf-border: #E8E4DF;
+    --hf-border-strong: #CFC9C1;
+    --hf-text: #26221E;
+    --hf-text-muted: #7A7268;
+    --hf-success: #2F855A;
+    --hf-warning: #B7791F;
+    --hf-error: #C53030;
+    --hf-info: #2C5282;
+  }
+  body { max-width: 1900px; margin: 20px auto; padding: 0 16px; color: var(--hf-text); }
   header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
   h1 { font-size: 22px; margin: 0; flex: 1; }
-  nav a { color: #1d4ed8; text-decoration: none; margin-left: 14px; font-size: 15px; }
+  nav a { color: var(--hf-brand-500); text-decoration: none; margin-left: 14px; font-size: 15px; }
   nav a.active { font-weight: 600; }
-  fieldset { border: 1px solid #d1d5db; padding: 14px 16px; margin: 0 0 16px; border-radius: 6px; }
-  legend { padding: 4px 12px; color: #111827; background: #fff; font-size: 16px; font-weight: 700; border-radius: 4px; }
-  label { font-size: 14px; color: #374151; }
-  input, select, button, textarea { font: inherit; padding: 6px 9px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; background: #fff; }
+  fieldset { border: 1px solid var(--hf-border-strong); padding: 14px 16px; margin: 0 0 16px; border-radius: 6px; }
+  legend { padding: 4px 12px; color: var(--hf-text); background: var(--hf-panel); font-size: 16px; font-weight: 700; border-radius: 4px; }
+  label { font-size: 14px; color: var(--hf-text); }
+  input, select, button, textarea { font: inherit; padding: 6px 9px; box-sizing: border-box; border: 1px solid var(--hf-border-strong); border-radius: 4px; background: var(--hf-panel); }
   textarea { width: 100%; min-height: 90px; resize: vertical; }
   button { cursor: pointer; }
-  button.primary { background: #1d4ed8; color: #fff; border-color: #1d4ed8; padding: 8px 16px; }
-  button.primary:disabled { background: #9ca3af; border-color: #9ca3af; cursor: not-allowed; }
+  button.primary { background: var(--hf-brand-500); color: var(--hf-panel); border-color: var(--hf-brand-500); padding: 8px 16px; }
+  button.primary:disabled { background: var(--hf-text-muted); border-color: var(--hf-text-muted); cursor: not-allowed; }
   .top-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
   .top-row > div { display: flex; align-items: center; gap: 8px; }
   #effectiveDate { width: 200px; font-variant-numeric: tabular-nums; }
   #periodSelect { font-variant-numeric: tabular-nums; }
-  .top-total { font-size: 18px; font-weight: 600; color: #111827; }
-  .top-total strong { color: #1d4ed8; font-variant-numeric: tabular-nums; }
-  .save-state { font-size: 13px; color: #6b7280; min-width: 120px; }
-  .save-state.saving { color: #b45309; }
-  .save-state.saved { color: #047857; }
-  .save-state.failed { color: #b91c1c; }
+  .top-total { font-size: 18px; font-weight: 600; color: var(--hf-text); }
+  .top-total strong { color: var(--hf-brand-500); font-variant-numeric: tabular-nums; }
+  .save-state { font-size: 13px; color: var(--hf-text-muted); min-width: 120px; }
+  .save-state.saving { color: var(--hf-warning); }
+  .save-state.saved { color: var(--hf-success); }
+  .save-state.failed { color: var(--hf-error); }
 
   .table-zone { position: relative; }
-  .table-wrap { overflow-x: auto; border: 1px solid #e5e7eb; border-radius: 6px; scroll-behavior: smooth; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--hf-border-strong); border-radius: 6px; scroll-behavior: smooth; }
   .scroll-btn { position: absolute; top: 50%; transform: translateY(-50%); z-index: 5;
-    width: 48px; height: 68px; border-radius: 6px; border: 1px solid #d1d5db;
+    width: 48px; height: 68px; border-radius: 6px; border: 1px solid var(--hf-border-strong);
     background: rgba(255,255,255,0.96);
-    box-shadow: 0 2px 12px rgba(0,0,0,0.18); cursor: pointer;
-    font-size: 28px; line-height: 1; color: #1f2937; user-select: none;
+    box-shadow: 0 2px 12px rgb(38 34 30 / 0.18); cursor: pointer;
+    font-size: 28px; line-height: 1; color: var(--hf-text); user-select: none;
     padding: 0; transition: opacity 0.15s; }
-  .scroll-btn:hover:not(:disabled) { background: #f3f4f6; }
+  .scroll-btn:hover:not(:disabled) { background: var(--hf-panel-tint); }
   .scroll-btn:disabled { opacity: 0.2; cursor: default; pointer-events: none; }
-  .scroll-btn .lbl { display: block; font-size: 10px; font-weight: 600; color: #6b7280; margin-top: 2px; }
+  .scroll-btn .lbl { display: block; font-size: 10px; font-weight: 600; color: var(--hf-text-muted); margin-top: 2px; }
   .scroll-btn.left { left: var(--pinned-w, 220px); }
   .scroll-btn.right { right: 6px; }
 
@@ -52,13 +81,13 @@ export const WORKSHEET_HTML = `<!doctype html>
   table.sheet th.sticky-l, table.sheet td.sticky-l {
     position: sticky; z-index: 1;
   }
-  table.sheet thead th.sticky-l { z-index: 3; background: #f3f4f6; }
-  table.sheet tbody td.sticky-l { background: #fff; }
-  table.sheet tfoot td.sticky-l { background: #f9fafb; }
-  table.sheet tbody tr:hover td.sticky-l { background: #fafafa; }
+  table.sheet thead th.sticky-l { z-index: 3; background: var(--hf-panel-tint); }
+  table.sheet tbody td.sticky-l { background: var(--hf-panel); }
+  table.sheet tfoot td.sticky-l { background: var(--hf-zebra); }
+  table.sheet tbody tr:hover td.sticky-l { background: var(--hf-shell); }
   /* Visual separator on the last pinned column */
   table.sheet th.sticky-l-last, table.sheet td.sticky-l-last {
-    box-shadow: 4px 0 6px -3px rgba(0,0,0,0.12);
+    box-shadow: 4px 0 6px -3px rgb(38 34 30 / 0.12);
   }
 
   /* Account-cell badges. Verified shows inline at the end (green ✓);
@@ -70,31 +99,31 @@ export const WORKSHEET_HTML = `<!doctype html>
     pointer-events: none; white-space: nowrap;
     font-weight: 600;
   }
-  .row-badge.warn { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
-  .row-badge.bank-ok { background: #dcfce7; color: #065f46; border: 1px solid #86efac; cursor: help; pointer-events: auto; }
-  .acct-check { color: #047857; font-weight: 700; font-size: 14px; margin-left: 6px; }
+  .row-badge.warn { background: color-mix(in srgb, var(--hf-warning) 18%, white); color: var(--hf-warning); border: 1px solid color-mix(in srgb, var(--hf-warning) 45%, white); }
+  .row-badge.bank-ok { background: color-mix(in srgb, var(--hf-success) 18%, white); color: var(--hf-success); border: 1px solid color-mix(in srgb, var(--hf-success) 45%, white); cursor: help; pointer-events: auto; }
+  .acct-check { color: var(--hf-success); font-weight: 700; font-size: 14px; margin-left: 6px; }
   .acct-edit-wrap { display: flex; align-items: center; gap: 4px; }
   .acct-edit-wrap input { flex: 1; min-width: 0; }
   .acct-edit-wrap input.bank-input { flex: 0 0 70px; text-transform: uppercase; }
 
   /* Inline delete button + drag handle in the idx cell (unlocked mode only) */
   .idx-del { width: 22px; height: 22px; padding: 0; font-size: 12px; line-height: 1;
-    margin-left: 4px; border: 1px solid #fca5a5; background: #fff; color: #b91c1c;
+    margin-left: 4px; border: 1px solid color-mix(in srgb, var(--hf-error) 45%, white); background: var(--hf-panel); color: var(--hf-error);
     border-radius: 3px; cursor: pointer; vertical-align: middle; }
-  .idx-del:hover { background: #fee2e2; }
-  .drag-handle { display: inline-block; cursor: grab; color: #9ca3af; padding: 0 3px; user-select: none; vertical-align: middle; font-size: 14px; }
-  .drag-handle:hover { color: #1f2937; }
+  .idx-del:hover { background: color-mix(in srgb, var(--hf-error) 15%, white); }
+  .drag-handle { display: inline-block; cursor: grab; color: var(--hf-text-muted); padding: 0 3px; user-select: none; vertical-align: middle; font-size: 14px; }
+  .drag-handle:hover { color: var(--hf-text); }
   .drag-handle:active { cursor: grabbing; }
   table.sheet tbody tr.dragging > td { opacity: 0.4; }
-  table.sheet tbody tr.drop-above > td { box-shadow: inset 0 2px 0 #1d4ed8; }
-  table.sheet tbody tr.drop-below > td { box-shadow: inset 0 -2px 0 #1d4ed8; }
+  table.sheet tbody tr.drop-above > td { box-shadow: inset 0 2px 0 var(--hf-brand-500); }
+  table.sheet tbody tr.drop-below > td { box-shadow: inset 0 -2px 0 var(--hf-brand-500); }
   table.sheet { border-collapse: separate; border-spacing: 0; min-width: 2200px; font-size: 14px; }
-  table.sheet th, table.sheet td { padding: 4px 6px; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb; vertical-align: middle; white-space: nowrap; }
-  table.sheet thead th { background: #f3f4f6; font-weight: 600; border-bottom: 1px solid #d1d5db; position: sticky; top: 0; z-index: 2; font-size: 12px; }
-  table.sheet thead th .hint { display: block; color: #9ca3af; font-weight: 400; font-size: 11px; }
-  table.sheet th.deduct, table.sheet td.deduct { background: #fff7ed; }
-  table.sheet th.add, table.sheet td.add { background: #ecfdf5; }
-  table.sheet th.calc, table.sheet td.calc { background: #eff6ff; font-weight: 600; }
+  table.sheet th, table.sheet td { padding: 4px 6px; border-bottom: 1px solid var(--hf-border-strong); border-right: 1px solid var(--hf-border-strong); vertical-align: middle; white-space: nowrap; }
+  table.sheet thead th { background: var(--hf-panel-tint); font-weight: 600; border-bottom: 1px solid var(--hf-border-strong); position: sticky; top: 0; z-index: 2; font-size: 12px; }
+  table.sheet thead th .hint { display: block; color: var(--hf-text-muted); font-weight: 400; font-size: 11px; }
+  table.sheet th.deduct, table.sheet td.deduct { background: color-mix(in srgb, var(--hf-warning) 8%, white); }
+  table.sheet th.add, table.sheet td.add { background: color-mix(in srgb, var(--hf-success) 8%, white); }
+  table.sheet th.calc, table.sheet td.calc { background: var(--hf-brand-50); font-weight: 600; }
   table.sheet td input.num { width: 100px; text-align: right; font-variant-numeric: tabular-nums; padding: 4px 6px; }
   table.sheet td input[type="text"].note { width: 220px; }
   table.sheet td input.sm-text { width: 100%; padding: 4px 6px; min-width: 50px; }
@@ -109,40 +138,40 @@ export const WORKSHEET_HTML = `<!doctype html>
   }
   table.sheet td input.num:hover,
   table.sheet td input.sm-text:hover,
-  table.sheet td input.note:hover { background: rgba(255,255,255,0.6); border-color: #e5e7eb; }
+  table.sheet td input.note:hover { background: rgba(255,255,255,0.6); border-color: var(--hf-border-strong); }
   table.sheet td input.num:focus,
   table.sheet td input.sm-text:focus,
   table.sheet td input.note:focus {
-    border-color: #93c5fd;
-    background: #fff;
+    border-color: var(--hf-brand-500);
+    background: var(--hf-panel);
     outline: none;
-    box-shadow: 0 0 0 2px rgba(147,197,253,0.45);
+    box-shadow: 0 0 0 2px rgba(139,0,0,0.4);
   }
   table.sheet td.calc { font-variant-numeric: tabular-nums; text-align: right; padding-right: 10px; }
-  table.sheet td.idx { text-align: center; color: #6b7280; }
+  table.sheet td.idx { text-align: center; color: var(--hf-text-muted); }
   table.sheet td.name { font-weight: 500; min-width: 180px; }
-  table.sheet td.acct { font-variant-numeric: tabular-nums; color: #6b7280; font-size: 12px; }
-  table.sheet tbody tr:hover td:not(.calc) { background: #fafafa; }
-  table.sheet tbody tr:hover td.deduct { background: #fff1e0; }
-  table.sheet tbody tr:hover td.add { background: #defcef; }
-  table.sheet tfoot td { background: #f9fafb; font-weight: 700; border-top: 2px solid #d1d5db; padding-top: 8px; padding-bottom: 8px; text-align: right; font-variant-numeric: tabular-nums; }
-  table.sheet tfoot td.label { text-align: right; color: #374151; }
+  table.sheet td.acct { font-variant-numeric: tabular-nums; color: var(--hf-text-muted); font-size: 12px; }
+  table.sheet tbody tr:hover td:not(.calc) { background: var(--hf-shell); }
+  table.sheet tbody tr:hover td.deduct { background: color-mix(in srgb, var(--hf-warning) 14%, white); }
+  table.sheet tbody tr:hover td.add { background: color-mix(in srgb, var(--hf-success) 14%, white); }
+  table.sheet tfoot td { background: var(--hf-zebra); font-weight: 700; border-top: 2px solid var(--hf-border-strong); padding-top: 8px; padding-bottom: 8px; text-align: right; font-variant-numeric: tabular-nums; }
+  table.sheet tfoot td.label { text-align: right; color: var(--hf-text); }
 
   /* Hide number spinners */
   input[type="number"]::-webkit-outer-spin-button,
   input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
   input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 
-  .err { color: #b91c1c; margin-top: 8px; white-space: pre-wrap; }
-  .ok { color: #047857; margin-top: 8px; }
+  .err { color: var(--hf-error); margin-top: 8px; white-space: pre-wrap; }
+  .ok { color: var(--hf-success); margin-top: 8px; }
   .actions { margin-top: 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .flatpickr-current-month .cur-year { font-weight: 600; }
 
   /* Lock-mode controls */
-  #lockToggle { font-size: 16px; line-height: 1; padding: 7px 9px; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; cursor: pointer; }
-  #lockToggle.unlocked { background: #fef3c7; border-color: #f59e0b; }
-  #lockToggle:hover { background: #f3f4f6; }
-  #lockToggle.unlocked:hover { background: #fde68a; }
+  #lockToggle { font-size: 16px; line-height: 1; padding: 7px 9px; border: 1px solid var(--hf-border-strong); border-radius: 4px; background: var(--hf-panel); cursor: pointer; }
+  #lockToggle.unlocked { background: color-mix(in srgb, var(--hf-warning) 18%, white); border-color: var(--hf-warning); }
+  #lockToggle:hover { background: var(--hf-panel-tint); }
+  #lockToggle.unlocked:hover { background: color-mix(in srgb, var(--hf-warning) 35%, white); }
 
   /* Add-row button (visible only when unlocked) */
   #addRowBox { margin-top: 10px; }
@@ -152,35 +181,35 @@ export const WORKSHEET_HTML = `<!doctype html>
 
   /* Column-visibility menu */
   #colsBox { position: relative; display: inline-block; }
-  #colsBtn { font-size: 13px; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; cursor: pointer; white-space: nowrap; }
-  #colsBtn:hover { background: #f3f4f6; }
-  #colsMenu { position: absolute; top: calc(100% + 4px); right: 0; min-width: 200px; background: #fff; border: 1px solid #d1d5db; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.12); padding: 8px 4px; z-index: 20; }
+  #colsBtn { font-size: 13px; padding: 6px 10px; border: 1px solid var(--hf-border-strong); border-radius: 4px; background: var(--hf-panel); cursor: pointer; white-space: nowrap; }
+  #colsBtn:hover { background: var(--hf-panel-tint); }
+  #colsMenu { position: absolute; top: calc(100% + 4px); right: 0; min-width: 200px; background: var(--hf-panel); border: 1px solid var(--hf-border-strong); border-radius: 6px; box-shadow: 0 4px 12px rgb(38 34 30 / 0.12); padding: 8px 4px; z-index: 20; }
   #colsMenu label { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; font-size: 14px; border-radius: 3px; }
-  #colsMenu label:hover { background: #f3f4f6; }
+  #colsMenu label:hover { background: var(--hf-panel-tint); }
   #colsMenu input[type="checkbox"] { margin: 0; }
-  #colsMenu .menu-title { font-size: 11px; color: #6b7280; padding: 2px 10px 6px; border-bottom: 1px solid #e5e7eb; margin-bottom: 4px; }
+  #colsMenu .menu-title { font-size: 11px; color: var(--hf-text-muted); padding: 2px 10px 6px; border-bottom: 1px solid var(--hf-border-strong); margin-bottom: 4px; }
 
   /* Export dropdown — mirrors #colsBox/#colsMenu pattern. */
   #exportBox { position: relative; display: inline-block; }
-  #exportBtn { font-size: 13px; padding: 6px 12px; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; cursor: pointer; white-space: nowrap; }
-  #exportBtn:hover { background: #f3f4f6; }
-  #exportMenu { position: absolute; top: calc(100% + 4px); right: 0; min-width: 220px; background: #fff; border: 1px solid #d1d5db; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.12); padding: 8px 4px; z-index: 20; }
-  #exportMenu .menu-title { font-size: 11px; color: #6b7280; padding: 6px 12px 4px; text-transform: none; letter-spacing: 0.02em; }
-  #exportMenu .menu-title + .menu-title { border-top: 1px solid #e5e7eb; margin-top: 4px; }
-  #exportMenu .menu-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 12px; font-size: 14px; border: 0; background: transparent; color: #111827; text-align: left; cursor: pointer; border-radius: 3px; }
-  #exportMenu .menu-item:hover { background: #f3f4f6; }
+  #exportBtn { font-size: 13px; padding: 6px 12px; border: 1px solid var(--hf-border-strong); border-radius: 4px; background: var(--hf-panel); cursor: pointer; white-space: nowrap; }
+  #exportBtn:hover { background: var(--hf-panel-tint); }
+  #exportMenu { position: absolute; top: calc(100% + 4px); right: 0; min-width: 220px; background: var(--hf-panel); border: 1px solid var(--hf-border-strong); border-radius: 6px; box-shadow: 0 4px 12px rgb(38 34 30 / 0.12); padding: 8px 4px; z-index: 20; }
+  #exportMenu .menu-title { font-size: 11px; color: var(--hf-text-muted); padding: 6px 12px 4px; text-transform: none; letter-spacing: 0.02em; }
+  #exportMenu .menu-title + .menu-title { border-top: 1px solid var(--hf-border-strong); margin-top: 4px; }
+  #exportMenu .menu-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 12px; font-size: 14px; border: 0; background: transparent; color: var(--hf-text); text-align: left; cursor: pointer; border-radius: 3px; }
+  #exportMenu .menu-item:hover { background: var(--hf-panel-tint); }
   #exportMenu .menu-item .ico { font-size: 14px; line-height: 1; width: 16px; text-align: center; }
-  #addRow { padding: 8px 14px; border: 1px dashed #9ca3af; background: #fff; border-radius: 4px; cursor: pointer; color: #374151; font-size: 14px; }
-  #addRow:hover { background: #f3f4f6; border-color: #6b7280; }
+  #addRow { padding: 8px 14px; border: 1px dashed var(--hf-text-muted); background: var(--hf-panel); border-radius: 4px; cursor: pointer; color: var(--hf-text); font-size: 14px; }
+  #addRow:hover { background: var(--hf-panel-tint); border-color: var(--hf-text-muted); }
 
   /* History panel — small one-liner above the worksheet showing how many
      queue submissions exist for the currently-selected period. */
   #historyPanel {
     display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
-    background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px;
-    font-size: 13px; color: #78350f;
+    background: color-mix(in srgb, var(--hf-warning) 18%, white); border: 1px solid var(--hf-warning); border-radius: 4px;
+    font-size: 13px; color: var(--hf-warning);
   }
-  #historyPanel a { color: #1d4ed8; text-decoration: none; font-weight: 600; }
+  #historyPanel a { color: var(--hf-brand-500); text-decoration: none; font-weight: 600; }
   #historyPanel a:hover { text-decoration: underline; }
 
   /* Report (PDF) view. Built on demand into #reportRoot, hidden on screen,
@@ -192,24 +221,24 @@ export const WORKSHEET_HTML = `<!doctype html>
      in JS (display:block + visibility:hidden) get the same layout the
      print engine will use. The screen render is hidden via #reportRoot
      { display:none }; @media print flips that on plus adds @page rules. */
-  #reportRoot { display: none; font: 9pt/1.4 "Noto Sans Thai", sans-serif; color: #0a0a0a; }
+  #reportRoot { display: none; font: 9pt/1.4 "Sarabun", "Noto Sans Thai", sans-serif; color: var(--hf-text); }
 
   #reportRoot .report-header {
     margin-bottom: 5mm; padding-bottom: 2.5mm;
-    border-bottom: 0.5pt solid #404040;
+    border-bottom: 0.5pt solid var(--hf-text);
   }
-  #reportRoot .report-header h1 { font-size: 14pt; font-weight: 600; margin: 0 0 1mm; color: #0a0a0a; }
-  #reportRoot .report-meta { font-size: 8.5pt; color: #404040; }
-  #reportRoot .report-meta strong { color: #0a0a0a; font-weight: 500; margin-right: 1.5mm; }
+  #reportRoot .report-header h1 { font-size: 14pt; font-weight: 600; margin: 0 0 1mm; color: var(--hf-text); }
+  #reportRoot .report-meta { font-size: 8.5pt; color: var(--hf-text); }
+  #reportRoot .report-meta strong { color: var(--hf-text); font-weight: 500; margin-right: 1.5mm; }
 
   /* ── Pay-slip mode (A4 portrait, bilingual TH/EN) ───────────────────── */
   /* Mirrors the company's official สลิปเงินเดือน / Pay Slip Excel layout:
      header band → employee info → two-column earnings/deductions table →
      net-pay strip → signature lines. Each slip is page-break-inside:avoid
      and has a tuned min-height so two slips fit per A4 portrait page. */
-  #reportRoot.mode-cards { font: 9pt/1.35 "Noto Sans Thai", sans-serif; color: #0a0a0a; }
+  #reportRoot.mode-cards { font: 9pt/1.35 "Sarabun", "Noto Sans Thai", sans-serif; color: var(--hf-text); }
   #reportRoot .pay-slip {
-    border: 0.6pt solid #404040;
+    border: 0.6pt solid var(--hf-text);
     padding: 4mm 5mm 3mm;
     margin-bottom: 4mm;
     page-break-inside: avoid; break-inside: avoid;
@@ -220,72 +249,72 @@ export const WORKSHEET_HTML = `<!doctype html>
   #reportRoot .slip-header {
     display: flex; align-items: flex-start; justify-content: space-between;
     gap: 6mm; padding-bottom: 2mm; margin-bottom: 2.5mm;
-    border-bottom: 0.4pt solid #404040;
+    border-bottom: 0.4pt solid var(--hf-text);
   }
-  #reportRoot .slip-company .name-th { font-size: 12pt; font-weight: 700; color: #0a0a0a; }
-  #reportRoot .slip-company .name-en { font-size: 9pt; font-weight: 600; color: #404040; letter-spacing: 0.03em; }
-  #reportRoot .slip-company .addr { font-size: 8pt; color: #525252; margin-top: 0.5mm; }
-  #reportRoot .slip-company .tax { font-size: 8pt; color: #525252; }
+  #reportRoot .slip-company .name-th { font-size: 12pt; font-weight: 700; color: var(--hf-text); }
+  #reportRoot .slip-company .name-en { font-size: 9pt; font-weight: 600; color: var(--hf-text); letter-spacing: 0.03em; }
+  #reportRoot .slip-company .addr { font-size: 8pt; color: var(--hf-text-muted); margin-top: 0.5mm; }
+  #reportRoot .slip-company .tax { font-size: 8pt; color: var(--hf-text-muted); }
   #reportRoot .slip-title { text-align: right; flex-shrink: 0; }
-  #reportRoot .slip-title .th { font-size: 13pt; font-weight: 700; color: #0a0a0a; letter-spacing: 0.04em; }
-  #reportRoot .slip-title .en { font-size: 9.5pt; font-weight: 600; color: #404040; letter-spacing: 0.06em; }
+  #reportRoot .slip-title .th { font-size: 13pt; font-weight: 700; color: var(--hf-text); letter-spacing: 0.04em; }
+  #reportRoot .slip-title .en { font-size: 9.5pt; font-weight: 600; color: var(--hf-text); letter-spacing: 0.06em; }
 
   #reportRoot .slip-emp {
     display: grid; grid-template-columns: 1fr 1fr;
     gap: 0.8mm 6mm; margin-bottom: 2.5mm;
   }
   #reportRoot .slip-emp .field { display: flex; gap: 2mm; font-size: 8.5pt; align-items: baseline; }
-  #reportRoot .slip-emp .lbl { color: #525252; min-width: 26mm; }
-  #reportRoot .slip-emp .lbl .en { color: #737373; font-size: 7.5pt; }
-  #reportRoot .slip-emp .val { color: #0a0a0a; font-weight: 500; flex: 1;
-    border-bottom: 0.25pt solid #d4d4d4; padding-bottom: 0.3mm;
+  #reportRoot .slip-emp .lbl { color: var(--hf-text-muted); min-width: 26mm; }
+  #reportRoot .slip-emp .lbl .en { color: var(--hf-text-muted); font-size: 7.5pt; }
+  #reportRoot .slip-emp .val { color: var(--hf-text); font-weight: 500; flex: 1;
+    border-bottom: 0.25pt solid var(--hf-border); padding-bottom: 0.3mm;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   #reportRoot .slip-emp .val.acct { font-variant-numeric: tabular-nums; }
 
   #reportRoot .slip-table { width: 100%; border-collapse: collapse; margin-bottom: 2mm; }
   #reportRoot .slip-table th, #reportRoot .slip-table td {
-    border: 0.3pt solid #a3a3a3; padding: 0.8mm 2mm;
+    border: 0.3pt solid var(--hf-border-strong); padding: 0.8mm 2mm;
     font-size: 8.5pt; vertical-align: middle;
   }
   #reportRoot .slip-table thead th {
-    background: #f3f4f6; font-weight: 700; color: #0a0a0a; text-align: left;
+    background: var(--hf-panel-tint); font-weight: 700; color: var(--hf-text); text-align: left;
     font-size: 8.7pt;
   }
-  #reportRoot .slip-table thead th .en { color: #525252; font-weight: 500; font-size: 7.5pt; margin-left: 1.5mm; }
+  #reportRoot .slip-table thead th .en { color: var(--hf-text-muted); font-weight: 500; font-size: 7.5pt; margin-left: 1.5mm; }
   #reportRoot .slip-table thead th.amt-col { width: 22mm; text-align: right; }
-  #reportRoot .slip-table td.lbl { color: #404040; }
-  #reportRoot .slip-table td.lbl .en { color: #737373; font-size: 7.5pt; margin-left: 1mm; }
+  #reportRoot .slip-table td.lbl { color: var(--hf-text); }
+  #reportRoot .slip-table td.lbl .en { color: var(--hf-text-muted); font-size: 7.5pt; margin-left: 1mm; }
   #reportRoot .slip-table td.amt {
-    text-align: right; font-variant-numeric: tabular-nums; color: #0a0a0a;
+    text-align: right; font-variant-numeric: tabular-nums; color: var(--hf-text);
     width: 22mm;
   }
-  #reportRoot .slip-table td.amt.zero { color: #cbd5e1; }
+  #reportRoot .slip-table td.amt.zero { color: var(--hf-text-muted); }
   #reportRoot .slip-table tfoot td {
-    background: #f9fafb; font-weight: 700; color: #0a0a0a;
-    border-top: 0.6pt solid #404040;
+    background: var(--hf-zebra); font-weight: 700; color: var(--hf-text);
+    border-top: 0.6pt solid var(--hf-text);
   }
 
   #reportRoot .slip-savings {
     display: flex; align-items: baseline; gap: 2mm;
     padding: 1.2mm 3mm; margin: 1mm 0;
-    background: #f5f5f5; border: 0.3pt solid #525252;
+    background: var(--hf-panel-tint); border: 0.3pt solid var(--hf-text-muted);
     border-radius: 0.5mm;
     font-size: 9pt;
   }
-  #reportRoot .slip-savings .label { color: #0a0a0a; font-weight: 600; }
-  #reportRoot .slip-savings .label .en { color: #525252; font-weight: 500; font-size: 7.8pt; margin-left: 1mm; }
+  #reportRoot .slip-savings .label { color: var(--hf-text); font-weight: 600; }
+  #reportRoot .slip-savings .label .en { color: var(--hf-text-muted); font-weight: 500; font-size: 7.8pt; margin-left: 1mm; }
   #reportRoot .slip-savings .amt {
-    margin-left: auto; color: #0a0a0a; font-weight: 700;
+    margin-left: auto; color: var(--hf-text); font-weight: 700;
     font-size: 11pt; font-variant-numeric: tabular-nums;
   }
-  #reportRoot .slip-savings .amt .baht { font-size: 8pt; font-weight: 500; color: #525252; margin-left: 1mm; }
-  #reportRoot .slip-savings .asof { color: #737373; font-size: 7.5pt; font-style: italic; }
+  #reportRoot .slip-savings .amt .baht { font-size: 8pt; font-weight: 500; color: var(--hf-text-muted); margin-left: 1mm; }
+  #reportRoot .slip-savings .asof { color: var(--hf-text-muted); font-size: 7.5pt; font-style: italic; }
 
   #reportRoot .slip-net {
     display: flex; justify-content: space-between; align-items: baseline;
     padding: 1.5mm 3mm; margin: 1mm 0 2.5mm;
-    background: #262626; color: #fff;
+    background: var(--hf-brand-800); color: #fff;
     border-radius: 0.5mm;
   }
   #reportRoot .slip-net .label { font-size: 10pt; font-weight: 700; letter-spacing: 0.04em; }
@@ -294,11 +323,11 @@ export const WORKSHEET_HTML = `<!doctype html>
   #reportRoot .slip-net .amt .baht { font-size: 9pt; font-weight: 500; opacity: 0.85; margin-left: 1mm; }
 
   #reportRoot .slip-note {
-    font-size: 7.8pt; color: #525252; padding: 1mm 1mm 1.5mm;
-    border-bottom: 0.2pt dashed #d4d4d4; margin-bottom: 2mm;
+    font-size: 7.8pt; color: var(--hf-text-muted); padding: 1mm 1mm 1.5mm;
+    border-bottom: 0.2pt dashed var(--hf-border); margin-bottom: 2mm;
     white-space: pre-wrap; word-break: break-word;
   }
-  #reportRoot .slip-note strong { color: #0a0a0a; font-weight: 600; }
+  #reportRoot .slip-note strong { color: var(--hf-text); font-weight: 600; }
 
   #reportRoot .slip-sigs {
     display: flex; gap: 8mm; margin-top: auto; padding-top: 4mm;
@@ -306,56 +335,56 @@ export const WORKSHEET_HTML = `<!doctype html>
   }
   #reportRoot .slip-sigs .sig { flex: 1; max-width: 60mm; text-align: center; }
   #reportRoot .slip-sigs .sig .line {
-    border-top: 0.3pt solid #404040;
+    border-top: 0.3pt solid var(--hf-text);
     padding-top: 1mm; margin-top: 6mm;
-    font-size: 8.5pt; color: #404040; font-weight: 600;
+    font-size: 8.5pt; color: var(--hf-text); font-weight: 600;
   }
-  #reportRoot .slip-sigs .sig .line .en { color: #737373; font-weight: 500; font-size: 7.5pt; margin-left: 1.5mm; }
-  #reportRoot .slip-sigs .sig .name { font-size: 8pt; color: #525252; margin-top: 0.5mm; }
+  #reportRoot .slip-sigs .sig .line .en { color: var(--hf-text-muted); font-weight: 500; font-size: 7.5pt; margin-left: 1.5mm; }
+  #reportRoot .slip-sigs .sig .name { font-size: 8pt; color: var(--hf-text-muted); margin-top: 0.5mm; }
 
   /* ── Table mode (A4 landscape, fit-on-one-page summary) ─────────────── */
   /* Visual structure mirrors the editable worksheet — 3-row header with
      grouped columns and the same color-coded backgrounds. */
-  #reportRoot.mode-table { font: 7.5pt/1.2 "Noto Sans Thai", sans-serif; }
-  #reportRoot.mode-table .report-header { margin-bottom: 2mm; padding-bottom: 1.5mm; border-bottom: 0.5pt solid #404040; }
+  #reportRoot.mode-table { font: 7.5pt/1.2 "Sarabun", "Noto Sans Thai", sans-serif; }
+  #reportRoot.mode-table .report-header { margin-bottom: 2mm; padding-bottom: 1.5mm; border-bottom: 0.5pt solid var(--hf-text); }
   #reportRoot.mode-table .report-header h1 { font-size: 11pt; margin: 0 0 0.5mm; font-weight: 600; }
-  #reportRoot.mode-table .report-meta { font-size: 7pt; color: #404040; }
-  #reportRoot.mode-table .report-meta strong { color: #0a0a0a; font-weight: 500; margin-right: 1mm; }
+  #reportRoot.mode-table .report-meta { font-size: 7pt; color: var(--hf-text); }
+  #reportRoot.mode-table .report-meta strong { color: var(--hf-text); font-weight: 500; margin-right: 1mm; }
   #reportRoot.mode-table table { width: 100%; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
   #reportRoot.mode-table th,
   #reportRoot.mode-table td {
-    border: 0.25pt solid #d4d4d4;
+    border: 0.25pt solid var(--hf-border);
     padding: 0.6mm 1mm; text-align: right;
     vertical-align: middle;
   }
   #reportRoot.mode-table thead th {
-    background: #f3f4f6; font-weight: 600; color: #1f2937;
+    background: var(--hf-panel-tint); font-weight: 600; color: var(--hf-text);
     font-size: 6.4pt; line-height: 1.1; text-align: center;
   }
-  #reportRoot.mode-table thead th .hint { display: block; color: #9ca3af; font-weight: 400; font-size: 5.8pt; }
+  #reportRoot.mode-table thead th .hint { display: block; color: var(--hf-text-muted); font-weight: 400; font-size: 5.8pt; }
   /* Column-group backgrounds — match the worksheet palette. */
-  #reportRoot.mode-table th.deduct, #reportRoot.mode-table td.deduct { background: #fff7ed; }
-  #reportRoot.mode-table th.add,    #reportRoot.mode-table td.add    { background: #ecfdf5; }
-  #reportRoot.mode-table th.calc,   #reportRoot.mode-table td.calc   { background: #eff6ff; font-weight: 600; }
-  #reportRoot.mode-table thead th.frozen { background: #f3f4f6; }
-  #reportRoot.mode-table tbody td.frozen { background: #ffffff; }
-  #reportRoot.mode-table tfoot td.frozen { background: #f9fafb; }
+  #reportRoot.mode-table th.deduct, #reportRoot.mode-table td.deduct { background: color-mix(in srgb, var(--hf-warning) 8%, white); }
+  #reportRoot.mode-table th.add,    #reportRoot.mode-table td.add    { background: color-mix(in srgb, var(--hf-success) 8%, white); }
+  #reportRoot.mode-table th.calc,   #reportRoot.mode-table td.calc   { background: var(--hf-brand-50); font-weight: 600; }
+  #reportRoot.mode-table thead th.frozen { background: var(--hf-panel-tint); }
+  #reportRoot.mode-table tbody td.frozen { background: var(--hf-panel); }
+  #reportRoot.mode-table tfoot td.frozen { background: var(--hf-zebra); }
   #reportRoot.mode-table td.text { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #reportRoot.mode-table td.idx { text-align: center; color: #737373; font-size: 6.5pt; }
+  #reportRoot.mode-table td.idx { text-align: center; color: var(--hf-text-muted); font-size: 6.5pt; }
   #reportRoot.mode-table td.acct {
     text-align: left; font-family: ui-monospace, SFMono-Regular, monospace;
-    font-size: 6.6pt; color: #404040;
+    font-size: 6.6pt; color: var(--hf-text);
   }
-  #reportRoot.mode-table td.zero { color: #cbd5e1; }
-  #reportRoot.mode-table tfoot td { font-weight: 700; border-top: 0.6pt solid #404040; }
+  #reportRoot.mode-table td.zero { color: var(--hf-text-muted); }
+  #reportRoot.mode-table tfoot td { font-weight: 700; border-top: 0.6pt solid var(--hf-text); }
   #reportRoot.mode-table .table-summary {
-    margin-top: 3mm; padding-top: 2mm; border-top: 0.5pt solid #d4d4d4;
-    display: flex; gap: 8mm; font-size: 8pt; color: #404040; align-items: baseline;
+    margin-top: 3mm; padding-top: 2mm; border-top: 0.5pt solid var(--hf-border);
+    display: flex; gap: 8mm; font-size: 8pt; color: var(--hf-text); align-items: baseline;
   }
-  #reportRoot.mode-table .table-summary strong { color: #0a0a0a; font-weight: 600; margin-right: 1mm; }
-  #reportRoot.mode-table .table-summary .grand { margin-left: auto; font-size: 12pt; font-weight: 700; color: #0a0a0a; }
-  #reportRoot.mode-table .table-notes { margin-top: 2mm; font-size: 7.5pt; color: #404040; white-space: pre-wrap; }
-  #reportRoot.mode-table .table-notes strong { font-weight: 600; color: #0a0a0a; }
+  #reportRoot.mode-table .table-summary strong { color: var(--hf-text); font-weight: 600; margin-right: 1mm; }
+  #reportRoot.mode-table .table-summary .grand { margin-left: auto; font-size: 12pt; font-weight: 700; color: var(--hf-text); }
+  #reportRoot.mode-table .table-notes { margin-top: 2mm; font-size: 7.5pt; color: var(--hf-text); white-space: pre-wrap; }
+  #reportRoot.mode-table .table-notes strong { font-weight: 600; color: var(--hf-text); }
 
   @media print {
     /* Print backgrounds + tints regardless of "Background graphics" toggle. */
@@ -365,16 +394,19 @@ export const WORKSHEET_HTML = `<!doctype html>
       color-adjust: exact !important;
     }
 
-    @page portrait-page { size: A4 portrait; margin: 14mm 14mm 16mm 14mm; @bottom-right { content: counter(page) " / " counter(pages); font: 8pt "Noto Sans Thai", sans-serif; color: #737373; } }
+    @page portrait-page { size: A4 portrait; margin: 14mm 14mm 16mm 14mm; @bottom-right { content: counter(page) " / " counter(pages); font: 8pt "Sarabun", "Noto Sans Thai", sans-serif; color: var(--hf-text-muted); } }
     /* Landscape: minimal CSS margin — let the printer's own non-printable
        area act as the white border. This buys back ~10mm of vertical
        space which keeps the summary band from spilling onto a 2nd page. */
     @page landscape-page { size: A4 landscape; margin: 3mm; }
     body.print-cards { page: portrait-page; }
     body.print-table { page: landscape-page; }
-    body { page: portrait-page; max-width: none; margin: 0; padding: 0; color: #0a0a0a; background: #fff; }
+    body { page: portrait-page; max-width: none; margin: 0; padding: 0; color: var(--hf-text); background: var(--hf-panel); }
     body > * { display: none !important; }
     body > #reportRoot { display: block !important; }
+    /* Defensive: body > * above already hides #hf-bar-host (it's the first
+       child of body), this is just an explicit backstop. */
+    #hf-bar-host { display: none !important; }
 
     /* Optional uniform shrink for overflow case (table mode). JS sets
        --print-scale; default 1. Width matches the new usable area
@@ -395,21 +427,21 @@ export const WORKSHEET_HTML = `<!doctype html>
     font-size: 14px;
   }
   .past-banner[hidden] { display: none; }
-  .past-banner.locked { background: #f3f4f6; border: 1px solid #d1d5db; color: #374151; }
-  .past-banner.unlocked { background: #fef3c7; border: 1px solid #f59e0b; color: #78350f; }
-  .past-banner .hint { color: #6b7280; font-size: 12px; }
+  .past-banner.locked { background: var(--hf-panel-tint); border: 1px solid var(--hf-border-strong); color: var(--hf-text); }
+  .past-banner.unlocked { background: color-mix(in srgb, var(--hf-warning) 18%, white); border: 1px solid var(--hf-warning); color: var(--hf-warning); }
+  .past-banner .hint { color: var(--hf-text-muted); font-size: 12px; }
   .past-banner button {
-    margin-left: auto; padding: 6px 14px; border: 1px solid #1d4ed8;
-    background: #1d4ed8; color: #fff; border-radius: 4px; cursor: pointer; font: inherit;
+    margin-left: auto; padding: 6px 14px; border: 1px solid var(--hf-brand-500);
+    background: var(--hf-brand-500); color: #fff; border-radius: 4px; cursor: pointer; font: inherit;
   }
-  .past-banner button:hover { background: #1e40af; }
+  .past-banner button:hover { background: var(--hf-brand-600); }
 
   /* When past-month is locked: inputs read-only, write-side controls hidden.
      #periodSelect is excluded so the operator can still navigate periods. */
   body.past-locked input,
   body.past-locked textarea,
   body.past-locked select:not(#periodSelect) {
-    pointer-events: none; background: #f9fafb !important; color: #374151;
+    pointer-events: none; background: var(--hf-zebra) !important; color: var(--hf-text);
   }
   body.past-locked #submit,
   body.past-locked #lockToggle,
@@ -423,7 +455,7 @@ export const WORKSHEET_HTML = `<!doctype html>
 
   /* Snapshot (read-only) mode: shown when /worksheet?snapshot=:requestId. */
   body.snap input, body.snap textarea, body.snap select {
-    pointer-events: none; background: #f9fafb !important; color: #374151;
+    pointer-events: none; background: var(--hf-zebra) !important; color: var(--hf-text);
   }
   body.snap #periodSelect { pointer-events: none; opacity: 0.7; }
   body.snap #submit, body.snap #lockToggle, body.snap #addRowBox, body.snap #addRow,
@@ -431,11 +463,11 @@ export const WORKSHEET_HTML = `<!doctype html>
   body.snap #historyPanel, body.snap .row-handle { display: none !important; }
   body.snap .snap-banner {
     display: flex; align-items: center; gap: 12px; padding: 8px 14px;
-    background: #dbeafe; border: 1px solid #1d4ed8; border-radius: 6px;
-    margin-bottom: 12px; color: #1e3a8a; font-size: 14px;
+    background: var(--hf-brand-50); border: 1px solid var(--hf-brand-500); border-radius: 6px;
+    margin-bottom: 12px; color: var(--hf-brand-700); font-size: 14px;
   }
-  body.snap .snap-banner strong { color: #1d4ed8; }
-  body.snap .snap-banner a { color: #1d4ed8; margin-left: auto; }
+  body.snap .snap-banner strong { color: var(--hf-brand-500); }
+  body.snap .snap-banner a { color: var(--hf-brand-500); margin-left: auto; }
   .snap-banner { display: none; }
 </style>
 </head>
@@ -508,7 +540,7 @@ export const WORKSHEET_HTML = `<!doctype html>
       <button type="button" id="submit" class="primary">ส่งให้อนุมัติ</button>
     </div>
   </div>
-  <div class="hint" style="font-size:13px; color:#6b7280; margin-top:6px;">บันทึกอัตโนมัติทุกครั้งที่แก้ไข &middot; รหัสธนาคาร 004 (กสิกรไทย)</div>
+  <div class="hint" style="font-size:13px; color:var(--hf-text-muted); margin-top:6px;">บันทึกอัตโนมัติทุกครั้งที่แก้ไข &middot; รหัสธนาคาร 004 (กสิกรไทย)</div>
 </fieldset>
 
 <div class="table-zone">
@@ -558,7 +590,7 @@ export const WORKSHEET_HTML = `<!doctype html>
 
 <div id="addRowBox" hidden>
   <button type="button" id="addRow">+ เพิ่มแถวใหม่ (กรอกชื่อ/บัญชี/เงินเดือน เอง)</button>
-  <button type="button" id="restoreAll" hidden style="margin-left:10px; padding:8px 14px; border:1px dashed #9ca3af; background:#fff; border-radius:4px; cursor:pointer; color:#374151; font-size:14px;">ดึงพนักงานจากระบบเงินเดือน KBANK (<span id="restoreCount">0</span>)</button>
+  <button type="button" id="restoreAll" hidden style="margin-left:10px; padding:8px 14px; border:1px dashed var(--hf-text-muted); background:var(--hf-panel); border-radius:4px; cursor:pointer; color:var(--hf-text); font-size:14px;">ดึงพนักงานจากระบบเงินเดือน KBANK (<span id="restoreCount">0</span>)</button>
 </div>
 
 <fieldset style="margin-top:18px">
@@ -776,7 +808,7 @@ function frontCells(r, locked) {
       \`<td class="sticky-l" data-col="position">\${escapeHtml(r.position || "")}</td>\`;
   }
   return \`<td class="sticky-l" data-col="name"><input type="text" class="sm-text" data-field="accountName" value="\${escapeHtml(r.accountName || "")}" placeholder="ชื่อ - สกุล"></td>\` +
-    \`<td class="sticky-l" data-col="account"><div class="acct-edit-wrap"><input type="text" class="sm-text bank-input" data-field="bank" value="\${escapeHtml(r.bank || "KBANK")}" placeholder="ธนาคาร"><span style="color:#9ca3af; padding:0 2px;">-</span><input type="text" class="sm-text" data-field="accountNumber" value="\${escapeHtml(r.accountNumber || "")}" placeholder="เลขบัญชี">\${checkInline}</div>\${warnBadge}</td>\` +
+    \`<td class="sticky-l" data-col="account"><div class="acct-edit-wrap"><input type="text" class="sm-text bank-input" data-field="bank" value="\${escapeHtml(r.bank || "KBANK")}" placeholder="ธนาคาร"><span style="color:var(--hf-text-muted); padding:0 2px;">-</span><input type="text" class="sm-text" data-field="accountNumber" value="\${escapeHtml(r.accountNumber || "")}" placeholder="เลขบัญชี">\${checkInline}</div>\${warnBadge}</td>\` +
     \`<td class="sticky-l" data-col="nickname"><input type="text" class="sm-text" data-field="nickname" value="\${escapeHtml(r.nickname || "")}" placeholder="ชื่อเล่น"></td>\` +
     \`<td class="sticky-l" data-col="position"><input type="text" class="sm-text" data-field="position" value="\${escapeHtml(r.position || "")}" placeholder="ตำแหน่ง"></td>\`;
 }
@@ -1324,7 +1356,7 @@ async function loadSnapshot(id) {
     const banner = document.querySelector(".snap-banner");
     if (banner) {
       const warn = document.createElement("div");
-      warn.style.cssText = "margin-top:6px;color:#92400e;font-size:13px;";
+      warn.style.cssText = "margin-top:6px;color:#B7791F;font-size:13px;";
       warn.textContent =
         "⚠️ ไม่มี snapshot ของช่วงที่ส่งคำขอ — กำลังแสดง worksheet ปัจจุบัน (อาจถูกแก้ไขหลังส่งคำขอ)";
       banner.appendChild(warn);
@@ -1925,7 +1957,7 @@ async function buildReport(sheet) {
   const asOf = since.size ? (formatLongBE(sheet.effectiveDate) || periodLabel) : SAVINGS_AS_OF;
   const slips = rows.map((r, i) =>
     buildPaySlip(r, i, periodLabel, sheet.effectiveDate || "", since.get(r.accountId) || 0, asOf)).join("");
-  return slips || \`<div style="padding:20mm;text-align:center;color:#737373;font-size:10pt">ยังไม่มีข้อมูลพนักงานสำหรับเดือน\${escapeHtml(periodLabel)}</div>\`;
+  return slips || \`<div style="padding:20mm;text-align:center;color:#7A7268;font-size:10pt">ยังไม่มีข้อมูลพนักงานสำหรับเดือน\${escapeHtml(periodLabel)}</div>\`;
 }
 
 // Cell helper for the table report. cls is the column-group class
@@ -2197,7 +2229,7 @@ async function saveAsImage(mode) {
   host.id = "reportRoot";
   host.classList.add(\`mode-\${mode}\`);
   host.style.cssText =
-    \`display:block!important;position:absolute;left:0;top:0;width:\${widthMM}mm;background:#fff;z-index:99999;\`;
+    \`display:block!important;position:absolute;left:0;top:0;width:\${widthMM}mm;background:var(--hf-panel);z-index:99999;\`;
   host.innerHTML = mode === "table" ? buildTableReport(currentSheet) : await buildReport(currentSheet);
   document.body.appendChild(host);
 
@@ -2297,5 +2329,6 @@ if (readonly) {
   loadPeriod(periodSelect.value).then(() => { refreshHistory(); maybeAutoPrint(); });
 }
 </script>
+<script defer src="https://erp.thehfhotel.org/shell/hf-bar.js" data-app="Payroll" data-module="finance"></script>
 </body>
 </html>`;

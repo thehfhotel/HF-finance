@@ -27,30 +27,30 @@ export const ADMIN_MODAL_HTML = `
   /* Inline-link button style so the admin entry/lock controls sit flush
      with the nav <a>'s without giving away that they're <button>. */
   .nav-btn {
-    color: #1d4ed8; background: none; border: 0; padding: 0;
+    color: var(--hf-brand-500); background: none; border: 0; padding: 0;
     margin-left: 14px; font: inherit; font-size: 15px; cursor: pointer;
   }
   .nav-btn:hover { text-decoration: underline; }
-  #adminLock { font-size: 18px; line-height: 1; color: #6b7280; }
+  #adminLock { font-size: 18px; line-height: 1; color: var(--hf-text-muted); }
 
   #adminDialog {
     border: 0; border-radius: 8px; padding: 20px; min-width: 320px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    box-shadow: 0 8px 24px rgb(38 34 30 / 0.15);
   }
-  #adminDialog::backdrop { background: rgba(0,0,0,0.4); }
+  #adminDialog::backdrop { background: rgba(38,34,30,0.4); }
   #adminDialog h3 { margin: 0 0 8px; }
-  #adminDialog p { margin: 0 0 12px; color: #4b5563; font-size: 14px; }
+  #adminDialog p { margin: 0 0 12px; color: var(--hf-text-muted); font-size: 14px; }
   #adminDialog input {
     width: 100%; padding: 8px 10px; font-size: 16px;
-    border: 1px solid #d1d5db; border-radius: 4px; box-sizing: border-box;
+    border: 1px solid var(--hf-border-strong); border-radius: 4px; box-sizing: border-box;
   }
-  #adminDialog .err { color: #b91c1c; font-size: 13px; min-height: 18px; margin-top: 6px; }
+  #adminDialog .err { color: var(--hf-error); font-size: 13px; min-height: 18px; margin-top: 6px; }
   #adminDialog .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
   #adminDialog button {
-    padding: 8px 14px; border: 1px solid #d1d5db; background: #fff;
+    padding: 8px 14px; border: 1px solid var(--hf-border-strong); background: var(--hf-panel);
     border-radius: 4px; cursor: pointer; font-size: 14px;
   }
-  #adminDialog button.primary { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+  #adminDialog button.primary { background: var(--hf-brand-500); color: #fff; border-color: var(--hf-brand-500); }
   #adminDialog button:disabled { opacity: 0.6; cursor: wait; }
 </style>
 <dialog id="adminDialog">
