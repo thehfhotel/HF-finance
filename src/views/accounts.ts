@@ -6,36 +6,65 @@ export const ACCOUNTS_HTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>จัดการบัญชี - KBIZ Payroll</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root { font: 14px/1.5 "Noto Sans Thai", system-ui, sans-serif; }
-  body { max-width: 1000px; margin: 24px auto; padding: 0 16px; color: #1a1a1a; }
+  :root {
+    font: 14px/1.5 "Sarabun", "Noto Sans Thai", system-ui, sans-serif;
+    --hf-brand-50: #FBEAEA;
+    --hf-brand-100: #F5C9C9;
+    --hf-brand-300: #C76060;
+    --hf-brand-500: #8B0000;
+    --hf-brand-600: #7A0000;
+    --hf-brand-700: #6B1212;
+    --hf-brand-800: #4F0E0E;
+    --hf-gold-100: #F6EACB;
+    --hf-gold-300: #E7C97F;
+    --hf-gold-500: #D9A441;
+    --hf-gold-600: #B98730;
+    --hf-gold-700: #93691F;
+    --hf-shell: #FAF9F7;
+    --hf-panel: #FFFFFF;
+    --hf-panel-tint: #F4F1ED;
+    --hf-zebra: #FAFAFB;
+    --hf-border: #E8E4DF;
+    --hf-border-strong: #CFC9C1;
+    --hf-text: #26221E;
+    --hf-text-muted: #7A7268;
+    --hf-success: #2F855A;
+    --hf-warning: #B7791F;
+    --hf-error: #C53030;
+    --hf-info: #2C5282;
+  }
+  body { max-width: 1000px; margin: 24px auto; padding: 0 16px; color: var(--hf-text); }
   header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
   h1 { font-size: 18px; margin: 0; flex: 1; }
-  nav a { color: #1d4ed8; text-decoration: none; margin-left: 12px; }
+  nav a { color: var(--hf-brand-500); text-decoration: none; margin-left: 12px; }
   nav a.active { font-weight: 600; }
-  fieldset { border: 1px solid #ddd; padding: 12px 16px; margin: 0 0 16px; border-radius: 6px; }
-  legend { padding: 0 6px; color: #555; }
+  fieldset { border: 1px solid var(--hf-border); padding: 12px 16px; margin: 0 0 16px; border-radius: 6px; }
+  legend { padding: 0 6px; color: var(--hf-text-muted); }
   input, button { font: inherit; padding: 6px 8px; box-sizing: border-box; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 6px 6px; text-align: left; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
-  th { background: #f3f4f6; font-weight: 600; border-bottom: 1px solid #ddd; }
-  td input { width: 100%; border: 1px solid #ccc; border-radius: 4px; }
-  button { cursor: pointer; border: 1px solid #888; background: #fff; border-radius: 4px; }
-  button.primary { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
-  button.danger { color: #b91c1c; border-color: #ddd; }
-  .err { color: #b91c1c; margin-top: 8px; }
-  .ok { color: #047857; margin-top: 8px; }
-  .acct { font-variant-numeric: tabular-nums; color: #374151; }
+  th, td { padding: 6px 6px; text-align: left; border-bottom: 1px solid var(--hf-border); vertical-align: middle; }
+  th { background: var(--hf-panel-tint); font-weight: 600; border-bottom: 1px solid var(--hf-border); }
+  td input { width: 100%; border: 1px solid var(--hf-border-strong); border-radius: 4px; }
+  button { cursor: pointer; border: 1px solid var(--hf-border-strong); background: var(--hf-panel); border-radius: 4px; }
+  button.primary { background: var(--hf-brand-500); color: var(--hf-panel); border-color: var(--hf-brand-500); }
+  button.danger { color: var(--hf-error); border-color: var(--hf-border); }
+  .err { color: var(--hf-error); margin-top: 8px; }
+  .ok { color: var(--hf-success); margin-top: 8px; }
+  .acct { font-variant-numeric: tabular-nums; color: var(--hf-text); }
   .row-actions { white-space: nowrap; display: flex; gap: 6px; }
   .add-form { display: flex; gap: 8px; align-items: center; }
   .add-form input { padding: 6px 8px; }
-  .empty { color: #9ca3af; padding: 8px; text-align: center; }
+  .empty { color: var(--hf-text-muted); padding: 8px; text-align: center; }
   .actions { margin-top: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-  .hint { color: #6b7280; font-size: 13px; }
+  .hint { color: var(--hf-text-muted); font-size: 13px; }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
-  .badge-ok { background: #d1fae5; color: #047857; }
-  .badge-pending { background: #fef3c7; color: #92400e; }
-  tr.registered td { color: #6b7280; }
+  .badge-ok { background: color-mix(in srgb, var(--hf-success) 15%, white); color: var(--hf-success); }
+  .badge-pending { background: color-mix(in srgb, var(--hf-warning) 18%, white); color: var(--hf-warning); }
+  tr.registered td { color: var(--hf-text-muted); }
   tr.registered td input.select { opacity: 0.4; }
 </style>
 </head>
@@ -252,5 +281,6 @@ document.getElementById("submitAddPayroll").addEventListener("click", async () =
 
 refresh();
 </script>
+<script defer src="https://erp.thehfhotel.org/shell/hf-bar.js" data-app="Payroll" data-module="finance"></script>
 </body>
 </html>`;

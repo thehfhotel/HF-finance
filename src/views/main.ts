@@ -7,21 +7,50 @@ export const MAIN_HTML = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>สร้างไฟล์โอนเงินเดือน KBIZ</title>
 <link rel="stylesheet" href="/static/flatpickr.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root { font: 16px/1.5 "Noto Sans Thai", system-ui, sans-serif; }
-  body { max-width: 1500px; margin: 20px auto; padding: 0 20px; color: #1a1a1a; }
+  :root {
+    font: 16px/1.5 "Sarabun", "Noto Sans Thai", system-ui, sans-serif;
+    --hf-brand-50: #FBEAEA;
+    --hf-brand-100: #F5C9C9;
+    --hf-brand-300: #C76060;
+    --hf-brand-500: #8B0000;
+    --hf-brand-600: #7A0000;
+    --hf-brand-700: #6B1212;
+    --hf-brand-800: #4F0E0E;
+    --hf-gold-100: #F6EACB;
+    --hf-gold-300: #E7C97F;
+    --hf-gold-500: #D9A441;
+    --hf-gold-600: #B98730;
+    --hf-gold-700: #93691F;
+    --hf-shell: #FAF9F7;
+    --hf-panel: #FFFFFF;
+    --hf-panel-tint: #F4F1ED;
+    --hf-zebra: #FAFAFB;
+    --hf-border: #E8E4DF;
+    --hf-border-strong: #CFC9C1;
+    --hf-text: #26221E;
+    --hf-text-muted: #7A7268;
+    --hf-success: #2F855A;
+    --hf-warning: #B7791F;
+    --hf-error: #C53030;
+    --hf-info: #2C5282;
+  }
+  body { max-width: 1500px; margin: 20px auto; padding: 0 20px; color: var(--hf-text); }
   header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
   h1 { font-size: 22px; margin: 0; flex: 1; }
-  nav a { color: #1d4ed8; text-decoration: none; margin-left: 14px; font-size: 15px; }
+  nav a { color: var(--hf-brand-500); text-decoration: none; margin-left: 14px; font-size: 15px; }
   nav a.active { font-weight: 600; }
-  fieldset { border: 1px solid #d1d5db; padding: 16px 18px; margin: 0 0 16px; border-radius: 6px; }
-  legend { padding: 4px 12px; color: #111827; background: #fff; font-size: 16px; font-weight: 700; border-radius: 4px; }
+  fieldset { border: 1px solid var(--hf-border-strong); padding: 16px 18px; margin: 0 0 16px; border-radius: 6px; }
+  legend { padding: 4px 12px; color: var(--hf-text); background: var(--hf-panel); font-size: 16px; font-weight: 700; border-radius: 4px; }
   label { display: inline-block; min-width: 170px; }
   input, button { font: inherit; padding: 7px 10px; box-sizing: border-box; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
-  th { background: #f3f4f6; font-weight: 600; border-bottom: 1px solid #ddd; font-size: 14px; }
-  td input { width: 100%; border: 1px solid #ccc; border-radius: 4px; }
+  th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--hf-border); vertical-align: middle; }
+  th { background: var(--hf-panel-tint); font-weight: 600; border-bottom: 1px solid var(--hf-border-strong); font-size: 14px; }
+  td input { width: 100%; border: 1px solid var(--hf-border-strong); border-radius: 4px; }
   td.num input { text-align: right; }
   /* Two-column desktop layout: roster on left, skipped + ad-hoc stacked on right */
   .grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; align-items: start; }
@@ -36,26 +65,30 @@ export const MAIN_HTML = `<!doctype html>
   }
   input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
   .actions { margin-top: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  button { cursor: pointer; border: 1px solid #888; background: #fff; border-radius: 4px; white-space: nowrap; }
-  button.primary { background: #1d4ed8; color: #fff; border-color: #1d4ed8; padding: 8px 16px; }
-  button.danger { color: #b91c1c; border-color: #ddd; }
-  button.warn { color: #92400e; border-color: #ddd; }
+  button { cursor: pointer; border: 1px solid var(--hf-border-strong); background: var(--hf-panel); border-radius: 4px; white-space: nowrap; }
+  button.primary { background: var(--hf-brand-500); color: var(--hf-panel); border-color: var(--hf-brand-500); padding: 8px 16px; }
+  button.danger { color: var(--hf-error); border-color: var(--hf-border-strong); }
+  button.warn { color: var(--hf-warning); border-color: var(--hf-border-strong); }
   .total { margin-left: auto; font-weight: 600; }
-  .err { color: #b91c1c; margin-top: 8px; white-space: pre-wrap; }
-  .ok { color: #047857; margin-top: 8px; }
-  .hint { color: #6b7280; font-size: 13px; }
-  .acct { font-variant-numeric: tabular-nums; color: #374151; }
-  .idx { color: #6b7280; text-align: center; font-variant-numeric: tabular-nums; width: 36px; }
-  .empty { color: #9ca3af; padding: 10px; text-align: center; }
-  .skipped td { color: #9ca3af; }
+  .err { color: var(--hf-error); margin-top: 8px; white-space: pre-wrap; }
+  .ok { color: var(--hf-success); margin-top: 8px; }
+  .hint { color: var(--hf-text-muted); font-size: 13px; }
+  .acct { font-variant-numeric: tabular-nums; color: var(--hf-text); }
+  .idx { color: var(--hf-text-muted); text-align: center; font-variant-numeric: tabular-nums; width: 36px; }
+  .empty { color: var(--hf-text-muted); padding: 10px; text-align: center; }
+  .skipped td { color: var(--hf-text-muted); }
   .skipped .name { text-decoration: line-through; }
   #effectiveDate { width: 220px; font-variant-numeric: tabular-nums; font-size: 16px; }
   .top-row { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; margin-bottom: 8px; }
   .top-date { display: flex; align-items: center; gap: 12px; }
-  .top-total { font-size: 18px; font-weight: 600; color: #111827; }
+  .top-total { font-size: 18px; font-weight: 600; color: var(--hf-text); }
   .top-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   /* Force flatpickr month/year display in calendar to be readable */
   .flatpickr-current-month .cur-year { font-weight: 600; }
+  /* Defensive: the hf-bar band is a sibling of the detached report div that
+     html2canvas captures, so it's already excluded from the .jpg export —
+     this just also keeps it out of a real browser print (Ctrl+P). */
+  @media print { #hf-bar-host { display: none; } }
 </style>
 </head>
 <body>
@@ -315,7 +348,7 @@ function buildReportElement() {
 
   const div = document.createElement("div");
   div.id = "report-render";
-  div.style.cssText = "position:absolute; left:-10000px; top:0; width:900px; padding:32px; background:#fff; color:#111827; font:14px/1.5 'Noto Sans Thai', system-ui, sans-serif;";
+  div.style.cssText = "position:absolute; left:-10000px; top:0; width:900px; padding:32px; background:var(--hf-panel); color:var(--hf-text); font:14px/1.5 'Sarabun', 'Noto Sans Thai', system-ui, sans-serif;";
 
   const paidRows = paid.map((r, i) => \`
     <tr>
@@ -326,72 +359,72 @@ function buildReportElement() {
     </tr>\`).join("");
 
   const skippedSection = skipped.length === 0 ? "" : \`
-    <h2 style="font-size:16px; margin:24px 0 8px; color:#6b7280;">ไม่จ่ายรอบนี้ (\${skipped.length} รายการ)</h2>
-    <table style="width:100%; border-collapse:collapse; font-size:13px; color:#6b7280;">
+    <h2 style="font-size:16px; margin:24px 0 8px; color:var(--hf-text-muted);">ไม่จ่ายรอบนี้ (\${skipped.length} รายการ)</h2>
+    <table style="width:100%; border-collapse:collapse; font-size:13px; color:var(--hf-text-muted);">
       <thead>
-        <tr style="background:#f9fafb;">
-          <th style="padding:6px 8px; text-align:center; border-bottom:1px solid #e5e7eb; width:48px;">#</th>
-          <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #e5e7eb;">ชื่อบัญชี</th>
-          <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #e5e7eb;">เลขบัญชี</th>
+        <tr style="background:var(--hf-zebra);">
+          <th style="padding:6px 8px; text-align:center; border-bottom:1px solid var(--hf-border-strong); width:48px;">#</th>
+          <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--hf-border-strong);">ชื่อบัญชี</th>
+          <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--hf-border-strong);">เลขบัญชี</th>
         </tr>
       </thead>
       <tbody>
         \${skipped.map((r, i) => \`
           <tr>
-            <td style="padding:5px 8px; text-align:center; border-bottom:1px solid #f3f4f6;">\${i + 1}</td>
-            <td style="padding:5px 8px; border-bottom:1px solid #f3f4f6; text-decoration:line-through;">\${escapeHtml(r.accountName)}</td>
-            <td style="padding:5px 8px; border-bottom:1px solid #f3f4f6; font-variant-numeric:tabular-nums;">\${escapeHtml(formatAccount(r.accountNumber))}</td>
+            <td style="padding:5px 8px; text-align:center; border-bottom:1px solid var(--hf-panel-tint);">\${i + 1}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid var(--hf-panel-tint); text-decoration:line-through;">\${escapeHtml(r.accountName)}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid var(--hf-panel-tint); font-variant-numeric:tabular-nums;">\${escapeHtml(formatAccount(r.accountNumber))}</td>
           </tr>\`).join("")}
       </tbody>
     </table>\`;
 
   div.innerHTML = \`
-    <div style="border-bottom:2px solid #1d4ed8; padding-bottom:12px; margin-bottom:20px;">
-      <h1 style="font-size:22px; margin:0; color:#111827;">รายงานการโอนเงินเดือน KBIZ</h1>
-      <div style="font-size:13px; color:#6b7280; margin-top:4px;">ธนาคารกสิกรไทย (รหัสธนาคาร 004)</div>
+    <div style="border-bottom:2px solid var(--hf-brand-500); padding-bottom:12px; margin-bottom:20px;">
+      <h1 style="font-size:22px; margin:0; color:var(--hf-text);">รายงานการโอนเงินเดือน KBIZ</h1>
+      <div style="font-size:13px; color:var(--hf-text-muted); margin-top:4px;">ธนาคารกสิกรไทย (รหัสธนาคาร 004)</div>
     </div>
 
     <table style="width:100%; margin-bottom:20px; font-size:14px;">
       <tr>
-        <td style="color:#6b7280; padding:2px 0; width:30%;">วันที่เงินเข้าบัญชี</td>
+        <td style="color:var(--hf-text-muted); padding:2px 0; width:30%;">วันที่เงินเข้าบัญชี</td>
         <td style="font-weight:600;">\${effective}</td>
       </tr>
       <tr>
-        <td style="color:#6b7280; padding:2px 0;">จำนวนรายการที่จ่าย</td>
+        <td style="color:var(--hf-text-muted); padding:2px 0;">จำนวนรายการที่จ่าย</td>
         <td style="font-weight:600;">\${paid.length} รายการ</td>
       </tr>
       <tr>
-        <td style="color:#6b7280; padding:2px 0;">ยอดรวมทั้งสิ้น</td>
-        <td style="font-weight:600; font-size:18px; color:#1d4ed8; font-variant-numeric:tabular-nums;">\${fmtAmount(total)} บาท</td>
+        <td style="color:var(--hf-text-muted); padding:2px 0;">ยอดรวมทั้งสิ้น</td>
+        <td style="font-weight:600; font-size:18px; color:var(--hf-brand-500); font-variant-numeric:tabular-nums;">\${fmtAmount(total)} บาท</td>
       </tr>
       <tr>
-        <td style="color:#6b7280; padding:2px 0;">สร้างเมื่อ</td>
+        <td style="color:var(--hf-text-muted); padding:2px 0;">สร้างเมื่อ</td>
         <td>\${generatedAt}</td>
       </tr>
     </table>
 
-    <h2 style="font-size:16px; margin:0 0 8px; color:#111827;">รายการจ่ายเงินเดือน (\${paid.length} รายการ)</h2>
+    <h2 style="font-size:16px; margin:0 0 8px; color:var(--hf-text);">รายการจ่ายเงินเดือน (\${paid.length} รายการ)</h2>
     <table style="width:100%; border-collapse:collapse; font-size:14px;">
       <thead>
-        <tr style="background:#f3f4f6;">
-          <th style="padding:8px; text-align:center; border-bottom:2px solid #d1d5db; width:48px;">ลำดับ</th>
-          <th style="padding:8px; text-align:left; border-bottom:2px solid #d1d5db;">ชื่อบัญชี</th>
-          <th style="padding:8px; text-align:left; border-bottom:2px solid #d1d5db; width:170px;">เลขบัญชี</th>
-          <th style="padding:8px; text-align:right; border-bottom:2px solid #d1d5db; width:140px;">จำนวนเงิน (บาท)</th>
+        <tr style="background:var(--hf-panel-tint);">
+          <th style="padding:8px; text-align:center; border-bottom:2px solid var(--hf-border-strong); width:48px;">ลำดับ</th>
+          <th style="padding:8px; text-align:left; border-bottom:2px solid var(--hf-border-strong);">ชื่อบัญชี</th>
+          <th style="padding:8px; text-align:left; border-bottom:2px solid var(--hf-border-strong); width:170px;">เลขบัญชี</th>
+          <th style="padding:8px; text-align:right; border-bottom:2px solid var(--hf-border-strong); width:140px;">จำนวนเงิน (บาท)</th>
         </tr>
       </thead>
-      <tbody>\${paidRows || \`<tr><td colspan="4" style="padding:16px; text-align:center; color:#9ca3af;">ไม่มีรายการ</td></tr>\`}</tbody>
+      <tbody>\${paidRows || \`<tr><td colspan="4" style="padding:16px; text-align:center; color:var(--hf-text-muted);">ไม่มีรายการ</td></tr>\`}</tbody>
       <tfoot>
         <tr>
-          <td colspan="3" style="padding:8px; text-align:right; font-weight:700; border-top:2px solid #1d4ed8;">รวมทั้งสิ้น</td>
-          <td style="padding:8px; text-align:right; font-weight:700; border-top:2px solid #1d4ed8; font-variant-numeric:tabular-nums; color:#1d4ed8;">\${fmtAmount(total)}</td>
+          <td colspan="3" style="padding:8px; text-align:right; font-weight:700; border-top:2px solid var(--hf-brand-500);">รวมทั้งสิ้น</td>
+          <td style="padding:8px; text-align:right; font-weight:700; border-top:2px solid var(--hf-brand-500); font-variant-numeric:tabular-nums; color:var(--hf-brand-500);">\${fmtAmount(total)}</td>
         </tr>
       </tfoot>
     </table>
 
     \${skippedSection}
 
-    <div style="margin-top:24px; padding-top:12px; border-top:1px solid #e5e7eb; font-size:11px; color:#9ca3af; text-align:center;">
+    <div style="margin-top:24px; padding-top:12px; border-top:1px solid var(--hf-border); font-size:11px; color:var(--hf-text-muted); text-align:center;">
       สร้างโดยระบบ payroll-form &middot; \${generatedAt}
     </div>
   \`;
@@ -466,5 +499,6 @@ document.getElementById("submit").addEventListener("click", async () => {
 
 loadRoster();
 </script>
+<script defer src="https://erp.thehfhotel.org/shell/hf-bar.js" data-app="Payroll" data-module="finance"></script>
 </body>
 </html>`;
