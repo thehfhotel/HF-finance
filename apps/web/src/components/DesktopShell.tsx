@@ -14,13 +14,21 @@ interface DesktopShellProps {
  * `body` (a backdrop meant only for the dev phone-mockup preview), which would
  * otherwise shrink-wrap the desktop layout and leave dark margins on wide
  * screens. Each panel scrolls independently via its own overflow.
+ *
+ * `top` reads `--hf-band-offset` (set in index.html via the `body:has(>
+ * #hf-bar-host)` gotcha pattern) instead of using the `inset: 0` shorthand,
+ * so this fixed chrome drops 46px when the HF One band below loads, and
+ * sits flush at 0 if it doesn't.
  */
 export function DesktopShell({ theme, sidebar, children }: DesktopShellProps) {
   return (
     <div
       style={{
         position: 'fixed',
-        inset: 0,
+        top: 'var(--hf-band-offset, 0px)',
+        right: 0,
+        bottom: 0,
+        left: 0,
         background: theme.paper,
         color: theme.ink,
         display: 'flex',

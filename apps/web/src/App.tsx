@@ -252,7 +252,26 @@ export function App() {
     }
 
     return (
-      <div style={{ position: 'fixed', inset: 0, background: theme.paper, overflow: 'auto' }}>
+      <div
+        style={{
+          position: 'fixed',
+          top: 'var(--hf-band-offset, 0px)',
+          right: 0,
+          bottom: 0,
+          left: 0,
+          background: theme.paper,
+          overflow: 'auto',
+        }}
+      >
+        {/* HF One shell band, portal-only mode — real mobile flow, not the
+            dev-only IOSDevice preview (this branch never uses that frame). */}
+        <script
+          defer
+          src="https://erp.thehfhotel.org/shell/hf-bar.js"
+          data-app="Reimbursement"
+          data-module="finance"
+          data-portal-only="1"
+        />
         {inner}
       </div>
     );
@@ -305,7 +324,26 @@ export function App() {
             {adminMobileShell}
           </IOSDevice>
         ) : (
-          <div style={{ position: 'fixed', inset: 0, background: theme.paper, overflow: 'hidden' }}>
+          <div
+            style={{
+              position: 'fixed',
+              top: 'var(--hf-band-offset, 0px)',
+              right: 0,
+              bottom: 0,
+              left: 0,
+              background: theme.paper,
+              overflow: 'hidden',
+            }}
+          >
+            {/* HF One shell band, portal-only mode — real mobile flow, not
+                the dev-only IOSDevice preview. */}
+            <script
+              defer
+              src="https://erp.thehfhotel.org/shell/hf-bar.js"
+              data-app="Reimbursement"
+              data-module="finance"
+              data-portal-only="1"
+            />
             {adminMobileShell}
           </div>
         )}
@@ -445,11 +483,23 @@ export function App() {
         <div
           style={{
             position: 'fixed',
-            inset: 0,
+            top: 'var(--hf-band-offset, 0px)',
+            right: 0,
+            bottom: 0,
+            left: 0,
             background: theme.paper,
             overflow: 'hidden',
           }}
         >
+          {/* HF One shell band, portal-only mode — real mobile flow, not the
+              dev-only IOSDevice preview above. */}
+          <script
+            defer
+            src="https://erp.thehfhotel.org/shell/hf-bar.js"
+            data-app="Reimbursement"
+            data-module="finance"
+            data-portal-only="1"
+          />
           {mobileShell}
         </div>
       )}
