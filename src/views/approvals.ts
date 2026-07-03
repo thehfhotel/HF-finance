@@ -282,6 +282,9 @@ function headlineFor(req) {
   if (req.type === "add-payroll") {
     return "เพิ่มผู้รับเงินใหม่ (KBIZ)";
   }
+  if (req.type === "list-registered") {
+    return "ซิงค์สถานะบัญชี KBIZ";
+  }
   return req.type;
 }
 function figuresFor(req) {
