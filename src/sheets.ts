@@ -164,8 +164,11 @@ async function latestPriorSheet(period: string): Promise<Sheet | null> {
 }
 
 // A fresh row for a NEW cycle, seeded from the same account's prior-cycle row:
-// carry the salary forward and recompute ประกันสังคม 3% / เงินสะสม 5%; all
+// carry the salary forward and recompute ประกันสังคม 5% / เงินสะสม 5%; all
 // one-time fields (advance, loan, OT, …) and the note start at 0/blank.
+// ประกันสังคม was 3% through the 2026-06 cycle; 5% from 2026-07 on. No 15,000฿
+// wage-base cap is applied (all salaries are below it — revisit if that changes).
+// Keep in sync with LINKED_RATES in views/worksheet.ts.
 function seededRow(a: { id: string; accountNumber: string; accountName: string }, prior: SheetRow): SheetRow {
   const base = emptyRow(a); // identity + EMPLOYEE_DEFAULTS fallback for new accounts
   const salary = Number(prior.salary) || 0;
@@ -175,7 +178,7 @@ function seededRow(a: { id: string; accountNumber: string; accountName: string }
     nickname: prior.nickname || base.nickname,
     position: prior.position || base.position,
     salary,
-    socialSecurity: Math.round(salary * 0.03 * 100) / 100,
+    socialSecurity: Math.round(salary * 0.05 * 100) / 100,
     savings: Math.round(salary * 0.05 * 100) / 100,
   };
 }
@@ -199,7 +202,7 @@ export async function loadSheet(period: string): Promise<Sheet> {
   const have = new Set(sheet.rows.map((r) => r.accountId));
   const dismissed = new Set(sheet.dismissed);
   // For a brand-new sheet, seed each fresh row from the most recent prior cycle
-  // (carry salary + recompute 3%/5%). Existing sheets are never reseeded, so a
+  // (carry salary + recompute 5%/5%). Existing sheets are never reseeded, so a
   // value the user cleared stays cleared.
   const seed = existing ? null : new Map((await latestPriorSheet(period))?.rows.map((r) => [r.accountId, r]) ?? []);
   for (const a of accounts) {
