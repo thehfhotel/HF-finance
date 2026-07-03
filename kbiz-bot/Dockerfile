@@ -1,3 +1,7 @@
+# The playwright version in kbiz-bot/package.json MUST be pinned exactly to
+# this base image tag — the image ships that version's browsers, and a newer
+# library refuses to launch them (bot crashloops with "Executable doesn't
+# exist"). Bump both together.
 FROM mcr.microsoft.com/playwright:v1.59.1-noble
 
 # kbiz-bot lives at /app/kbiz-bot so resolve("..", "data", ...) hits /app/data,
