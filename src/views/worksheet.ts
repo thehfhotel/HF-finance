@@ -565,7 +565,7 @@ export const WORKSHEET_HTML = `<!doctype html>
       <th rowspan="3">หมายเหตุ</th>
     </tr>
     <tr>
-      <th rowspan="2" class="deduct">ประกันสังคม<span class="hint">3%</span></th>
+      <th rowspan="2" class="deduct">ประกันสังคม<span class="hint">5%</span></th>
       <th rowspan="2" class="deduct">เงินสะสม<span class="hint">5%</span></th>
       <th rowspan="2" class="deduct">เบิกล่วงหน้า</th>
       <th colspan="4" class="deduct">อื่นๆ</th>
@@ -939,11 +939,12 @@ function updateScrollBtns() {
   right.disabled = wrap.scrollLeft >= wrap.scrollWidth - wrap.clientWidth - 2;
 }
 
-// Linked-fields rule: ประกันสังคม=3% and เงินสะสม=5% of salary auto-fill
-// only while their current value matches the OLD salary's 3%/5%. Once the
+// Linked-fields rule: ประกันสังคม=5% and เงินสะสม=5% of salary auto-fill
+// only while their current value matches the OLD salary's 5%/5%. Once the
 // user manually overrides, the link breaks and salary changes no longer
 // touch that field.
-const LINKED_RATES = { socialSecurity: 0.03, savings: 0.05 };
+// ประกันสังคม 3% → 5% from the 2026-07 cycle. Keep in sync with seededRow in sheets.ts.
+const LINKED_RATES = { socialSecurity: 0.05, savings: 0.05 };
 
 function setRowField(tr, row, field, value) {
   row[field] = value;
@@ -962,7 +963,7 @@ function onInput(e) {
       const newSalary = num(e.target.value);
       row.salary = newSalary;
       // Linked rates follow salary ONLY while still untouched — i.e. the field
-      // still equals the OLD salary's 3%/5%. Any manual override (including an
+      // still equals the OLD salary's 5%/5%. Any manual override (including an
       // intentional 0 the user cleared) breaks the link and is left alone.
       for (const k of Object.keys(LINKED_RATES)) {
         const linkedToOld = Math.round(oldSalary * LINKED_RATES[k] * 100) / 100;
@@ -1219,7 +1220,7 @@ async function loadPeriod(period) {
   applyPastLockState(period);
   // NOTE: we deliberately do NOT backfill ประกันสังคม/เงินสะสม on load. A stored
   // 0 is an intentional value (the user cleared it), not "needs filling" — the
-  // 3%/5% link is applied live while editing salary (see onInput), never here.
+  // 5%/5% link is applied live while editing salary (see onInput), never here.
   let filledAny = false;
   generalNotesEl.value = sheet.generalNotes || "";
   // Default a blank payout date to this period's own payout (5th of the next
@@ -1712,7 +1713,7 @@ refreshAccountsIndex().then(() => {
 const REPORT_DEDUCT_ORDER = ["socialSecurity","savings","advance","loan","interest","roomCost","leave","otherDeduction"];
 const REPORT_ADD_ORDER = ["commission","breakfast","ot","otherAddition"];
 const REPORT_FIELD_LABEL = {
-  socialSecurity: "ประกันสังคม 3%",
+  socialSecurity: "ประกันสังคม 5%",
   savings: "เงินสะสม 5%",
   advance: "เบิกล่วงหน้า",
   loan: "เงินยืม",
@@ -2063,7 +2064,7 @@ function buildTableReport(sheet) {
           <th rowspan="3">หมายเหตุ</th>
         </tr>
         <tr>
-          <th rowspan="2" class="deduct">ประกันสังคม<span class="hint">3%</span></th>
+          <th rowspan="2" class="deduct">ประกันสังคม<span class="hint">5%</span></th>
           <th rowspan="2" class="deduct">เงินสะสม<span class="hint">5%</span></th>
           <th rowspan="2" class="deduct">เบิก<br>ล่วงหน้า</th>
           <th colspan="4" class="deduct">อื่นๆ</th>
