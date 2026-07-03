@@ -93,7 +93,10 @@ export const ACCOUNTS_HTML = `<!doctype html>
 
 <fieldset>
   <legend>บัญชีทั้งหมด</legend>
-  <div class="hint" id="syncMeta" style="margin-bottom:8px;"></div>
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
+    <div class="hint" id="syncMeta"></div>
+    <button type="button" id="syncBtn" style="padding:3px 10px; font-size:0.85em;">⟳ ซิงค์สถานะ KBIZ</button>
+  </div>
   <table>
     <thead>
       <tr>
@@ -209,7 +212,7 @@ async function refresh() {
     const stamp = \`\${String(d.getDate()).padStart(2,"0")}/\${String(d.getMonth()+1).padStart(2,"0")}/\${d.getFullYear()+543} \${String(d.getHours()).padStart(2,"0")}:\${String(d.getMinutes()).padStart(2,"0")}\`;
     meta.textContent = \`อัปเดตสถานะ KBIZ ล่าสุด: \${stamp} · ลงทะเบียนแล้ว \${reg.count} บัญชี\`;
   } else {
-    meta.textContent = "ยังไม่เคยซิงค์สถานะ KBIZ — รัน 'npm run list' ใน kbiz-bot เพื่อดึงรายการบัญชีที่ลงทะเบียนแล้ว";
+    meta.textContent = "ยังไม่เคยซิงค์สถานะ KBIZ — กดปุ่มซิงค์เพื่อดึงรายการบัญชีที่ลงทะเบียนแล้ว";
   }
   tbody.innerHTML = "";
   if (list.length === 0) {
@@ -218,6 +221,44 @@ async function refresh() {
   }
   list.forEach((a, i) => tbody.appendChild(viewRow(a, i)));
 }
+
+// Sync = enqueue a read-only "list-registered" job (born approved, no OTP),
+// then poll the open single-item GET until the bot finishes. The bot polls
+// the queue every 30s and the scrape takes ~1min, so allow a few minutes.
+const syncBtn = document.getElementById("syncBtn");
+syncBtn.addEventListener("click", async () => {
+  syncBtn.disabled = true;
+  const orig = syncBtn.textContent;
+  syncBtn.textContent = "กำลังซิงค์…";
+  setMsg(listMsg, "");
+  try {
+    const res = await fetch("/api/queue/sync-registered", { method: "POST" });
+    if (!res.ok) throw new Error(await res.text());
+    const req = await res.json();
+    const deadline = Date.now() + 5 * 60_000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 5000));
+      const qr = await fetch(\`/api/queue/\${req.id}\`);
+      if (!qr.ok) continue;
+      const q = await qr.json();
+      if (q.status === "done") {
+        setMsg(listMsg, "ซิงค์สถานะ KBIZ สำเร็จ", "ok");
+        await refresh();
+        return;
+      }
+      if (q.status === "failed") {
+        setMsg(listMsg, "ซิงค์ไม่สำเร็จ: " + ((q.result && q.result.error) || "ไม่ทราบสาเหตุ"), "err");
+        return;
+      }
+    }
+    setMsg(listMsg, "ซิงค์ยังไม่เสร็จ — ดูความคืบหน้าได้ที่หน้า สถานะ", "err");
+  } catch (e) {
+    setMsg(listMsg, "ซิงค์ไม่สำเร็จ: " + e.message, "err");
+  } finally {
+    syncBtn.disabled = false;
+    syncBtn.textContent = orig;
+  }
+});
 
 document.getElementById("addBtn").addEventListener("click", async () => {
   setMsg(addMsg, "");

@@ -4,12 +4,18 @@ import type { Sheet } from "./sheets";
 
 const QUEUE_DIR = process.env.QUEUE_DIR ?? "data/queue";
 
-export type RequestType = "add-payroll" | "transfer-payroll";
+export type RequestType = "add-payroll" | "transfer-payroll" | "list-registered";
 export type Status = "pending" | "approved" | "rejected" | "running" | "done" | "failed";
 
 export type AddPayrollSummary = {
   type: "add-payroll";
   accounts: { accountNumber: string; accountName: string }[];
+};
+
+// Refresh data/kbiz-registered.json from KBIZ (read-only scrape — no money
+// moves, so it skips the approval/OTP step and is born "approved").
+export type ListRegisteredSummary = {
+  type: "list-registered";
 };
 
 export type TransferSummary = {
@@ -26,7 +32,7 @@ export type TransferSummary = {
   sheet?: Sheet;
 };
 
-export type Summary = AddPayrollSummary | TransferSummary;
+export type Summary = AddPayrollSummary | TransferSummary | ListRegisteredSummary;
 
 export type QueueResult = {
   success: boolean;
@@ -84,6 +90,31 @@ export async function submitRequest(input: {
     xlsxPath,
     createdAt: now,
     updatedAt: now,
+  };
+  await writeFile(metaPath(id), JSON.stringify(req, null, 2), "utf8");
+  return req;
+}
+
+// Enqueue a KBIZ registered-accounts sync, already approved (read-only —
+// see ListRegisteredSummary). Idempotent: an in-flight sync is returned
+// as-is instead of stacking duplicates behind the bot's poll interval.
+export async function submitSyncRequest(): Promise<QueueRequest> {
+  const inFlight = (await listRequests()).find(
+    (r) => r.type === "list-registered" && ["pending", "approved", "running"].includes(r.status)
+  );
+  if (inFlight) return inFlight;
+  await ensureDir();
+  const id = newId();
+  const now = new Date().toISOString();
+  const req: QueueRequest = {
+    id,
+    type: "list-registered",
+    status: "approved",
+    summary: { type: "list-registered" },
+    xlsxPath: "", // no workbook — the bot skips xlsx resolution for this type
+    createdAt: now,
+    updatedAt: now,
+    approvedAt: now,
   };
   await writeFile(metaPath(id), JSON.stringify(req, null, 2), "utf8");
   return req;

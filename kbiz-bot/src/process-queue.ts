@@ -1,15 +1,21 @@
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
-import { withSession } from "./lib/session";
+import type { Page } from "playwright";
+import { withSession, gotoAuthenticated } from "./lib/session";
 import { runAddPayrollFlow } from "./flows/add-payroll-flow";
 import { runTransferPayrollFlow } from "./flows/transfer-payroll-flow";
+import { scrapeRegisteredAccounts } from "./lib/scrape-registered";
+
+// Same page list-payroll-accounts.ts scrapes; a "list-registered" queue item
+// is the button-triggered version of that manual script.
+const LIST_URL = "https://kbiz.kasikornbank.com/menu/setting/account-list/account-payroll";
 
 const QUEUE_DIR = resolve("..", "data", "queue");
 const SLACK = process.env.SLACK_WEBHOOK_URL;
 
 type QueueRequest = {
   id: string;
-  type: "add-payroll" | "transfer-payroll";
+  type: "add-payroll" | "transfer-payroll" | "list-registered";
   status: string;
   xlsxPath: string;
   summary: any;
@@ -50,6 +56,13 @@ async function patchRequest(id: string, patch: Partial<QueueRequest>): Promise<v
   await writeFile(path, JSON.stringify(req, null, 2), "utf8");
 }
 
+async function runListRegistered(page: Page): Promise<{ success: boolean; finalUrl?: string; error?: string }> {
+  await gotoAuthenticated(page, LIST_URL);
+  const reg = await scrapeRegisteredAccounts(page); // writes data/kbiz-registered.json
+  console.log(`✓ ${reg.count} registered accounts written to data/kbiz-registered.json`);
+  return { success: true, finalUrl: LIST_URL };
+}
+
 async function processBatch(): Promise<number> {
   const approved = await listApproved();
   if (approved.length === 0) return 0;
@@ -59,6 +72,7 @@ async function processBatch(): Promise<number> {
   await withSession(async (_ctx, page) => {
     for (const req of approved) {
       console.log(`\n=== ${req.id}  (${req.type}) ===`);
+      // list-registered has no workbook (xlsxPath is "")
       const xlsxAbs = req.xlsxPath.startsWith("data/")
         ? resolve("..", req.xlsxPath)
         : resolve(req.xlsxPath);
@@ -68,9 +82,11 @@ async function processBatch(): Promise<number> {
 
       try {
         const result =
-          req.type === "transfer-payroll"
-            ? await runTransferPayrollFlow(page, xlsxAbs)
-            : await runAddPayrollFlow(page, xlsxAbs);
+          req.type === "list-registered"
+            ? await runListRegistered(page)
+            : req.type === "transfer-payroll"
+              ? await runTransferPayrollFlow(page, xlsxAbs)
+              : await runAddPayrollFlow(page, xlsxAbs);
 
         if (result.success) {
           await patchRequest(req.id, {

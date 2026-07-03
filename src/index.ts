@@ -10,7 +10,7 @@ import { STATUS_HTML } from "./views/status";
 import { ADMIN_MODAL_HTML, adminNavHtml } from "./views/admin";
 import { addAccount, deleteAccount, listAccounts, updateAccount } from "./store";
 import { loadRegistered, registeredSet } from "./registered";
-import { getRequest, listRequests, submitRequest, updateRequest } from "./queue";
+import { getRequest, listRequests, submitRequest, submitSyncRequest, updateRequest } from "./queue";
 import { notifySlack } from "./slack";
 import { isValidPeriod, loadSheet, saveSheet } from "./sheets";
 
@@ -397,6 +397,11 @@ const app = new Elysia()
       }),
     }
   )
+
+  // Open like the other queue POSTs (the app itself is Cloudflare-gated).
+  // Read-only sync — born approved, no OTP; the bot picks it up on its next
+  // poll. Returns the in-flight request if one is already queued/running.
+  .post("/api/queue/sync-registered", () => submitSyncRequest())
 
   // Bulk listing stays admin-gated — /status uses the sanitised
   // /api/queue/status feed for HR. Single-item GET + xlsx are open so
