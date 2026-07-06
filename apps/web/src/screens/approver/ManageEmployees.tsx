@@ -1198,6 +1198,7 @@ function UserFormModal({
   const [name, setName] = useState(initial?.name ?? '');
   const [initials, setInitials] = useState(initial?.initials ?? '');
   const [role, setRole] = useState<Role>(initial?.role ?? 'employee');
+  const [badge, setBadge] = useState(initial?.badge ?? '');
 
   const canSubmit = name.trim().length > 0;
 
@@ -1216,6 +1217,7 @@ function UserFormModal({
       name: name.trim(),
       initials: resolvedInitials,
       role,
+      badge: badge.trim() === '' ? null : badge.trim(),
     });
   };
 
@@ -1261,6 +1263,15 @@ function UserFormModal({
             onClick={() => setRole('approver')}
           />
         </div>
+      </ModalField>
+
+      <ModalField theme={theme} label="รหัสบัตร (badge — ไม่บังคับ, สำหรับแตะบัตรเข้าสู่ระบบ)">
+        <ModalInput
+          theme={theme}
+          value={badge}
+          onChange={setBadge}
+          placeholder="เช่น 1188 หรือ Q1001"
+        />
       </ModalField>
 
       <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>

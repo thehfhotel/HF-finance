@@ -224,6 +224,16 @@ export interface AuthMeResponse {
   pictureUrl?: string;
 }
 
+/**
+ * Result of a successful `GET /api/auth/card-login/wait` (HTTP 200). A 204 is
+ * surfaced as `null` by the request helper (keep polling); a 4xx throws.
+ */
+export interface CardLoginResult {
+  token: string;
+  linked: boolean;
+  redirect: string;
+}
+
 // ─── Endpoints ───────────────────────────────────────────────────
 
 export const api = {
@@ -233,6 +243,15 @@ export const api = {
     me: (): Promise<AuthMeResponse> => request<AuthMeResponse>('/api/auth/me'),
     linkAccount: (payload: { code: string }): Promise<AuthResponse> =>
       request<AuthResponse>('/api/auth/link-account', jsonBody(payload)),
+    // ── NFC staff-card login ──
+    // start opens a claim against the central HF-ID service for this terminal;
+    // the claim_token is kept server-side in an HttpOnly cookie, so wait() takes
+    // no argument. wait() resolves to a CardLoginResult on 200, or `null` on 204
+    // (no tap yet — poll again). A 403 (card not allowed / unlinked) throws.
+    cardLoginStart: (readerId: string): Promise<{ ok: boolean }> =>
+      request<{ ok: boolean }>('/api/auth/card-login/start', jsonBody({ reader_id: readerId })),
+    cardLoginWait: (): Promise<CardLoginResult | null> =>
+      request<CardLoginResult | null>('/api/auth/card-login/wait').then((r) => r ?? null),
   },
 
   receipts: {

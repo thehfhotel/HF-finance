@@ -53,6 +53,7 @@ export function serializeUser(user: PrismaUser): SharedUser {
     name: user.name,
     role: roleToShared(user.role),
     initials: user.initials,
+    badge: user.badge,
     lineId: user.lineId,
     lineDisplayName: user.lineDisplayName,
     linePictureUrl: user.linePictureUrl,
