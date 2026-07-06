@@ -165,26 +165,39 @@ jobs:
           KBIZ_USERNAME:     ${{ secrets.KBIZ_USERNAME }}
           KBIZ_PASSWORD:     ${{ secrets.KBIZ_PASSWORD }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          # Card login (HF ID central service). READER_RESOLVE_SECRET is the
+          # real secret — unset ⇒ card login stays dark (503). The other two are
+          # non-secret defaults; `|| '<default>'` keeps an unset GH secret from
+          # writing an empty value that would override the app's code default.
+          READER_RESOLVE_SECRET: ${{ secrets.READER_RESOLVE_SECRET }}
+          HF_ID_BASE_URL:        ${{ secrets.HF_ID_BASE_URL || 'http://192.168.100.228:5000' }}
+          HF_ID_ISSUER:          ${{ secrets.HF_ID_ISSUER || 'https://id.thehfhotel.org/oidc' }}
         run: |
           set -euo pipefail
           tar -czf /tmp/deploy.tar.gz docker-compose.yml
 
           jq -n \
-            --arg commit_sha         "$GITHUB_SHA" \
-            --arg deploy_payload_b64 "$(base64 -w0 < /tmp/deploy.tar.gz)" \
-            --arg ghcr_user          "$GHCR_USER" \
-            --arg ghcr_token         "$GHCR_TOKEN" \
-            --arg KBIZ_USERNAME      "$KBIZ_USERNAME" \
-            --arg KBIZ_PASSWORD      "$KBIZ_PASSWORD" \
-            --arg SLACK_WEBHOOK_URL  "${SLACK_WEBHOOK_URL:-}" \
+            --arg commit_sha            "$GITHUB_SHA" \
+            --arg deploy_payload_b64    "$(base64 -w0 < /tmp/deploy.tar.gz)" \
+            --arg ghcr_user             "$GHCR_USER" \
+            --arg ghcr_token            "$GHCR_TOKEN" \
+            --arg KBIZ_USERNAME         "$KBIZ_USERNAME" \
+            --arg KBIZ_PASSWORD         "$KBIZ_PASSWORD" \
+            --arg SLACK_WEBHOOK_URL     "${SLACK_WEBHOOK_URL:-}" \
+            --arg READER_RESOLVE_SECRET "${READER_RESOLVE_SECRET:-}" \
+            --arg HF_ID_BASE_URL        "$HF_ID_BASE_URL" \
+            --arg HF_ID_ISSUER          "$HF_ID_ISSUER" \
             '{
               commit_sha: $commit_sha,
               deploy_payload_b64: $deploy_payload_b64,
               ghcr: { user: $ghcr_user, token: $ghcr_token },
               env: {
-                KBIZ_USERNAME:     $KBIZ_USERNAME,
-                KBIZ_PASSWORD:     $KBIZ_PASSWORD,
-                SLACK_WEBHOOK_URL: $SLACK_WEBHOOK_URL,
+                KBIZ_USERNAME:         $KBIZ_USERNAME,
+                KBIZ_PASSWORD:         $KBIZ_PASSWORD,
+                SLACK_WEBHOOK_URL:     $SLACK_WEBHOOK_URL,
+                READER_RESOLVE_SECRET: $READER_RESOLVE_SECRET,
+                HF_ID_BASE_URL:        $HF_ID_BASE_URL,
+                HF_ID_ISSUER:          $HF_ID_ISSUER,
               }
             }' \
           | ssh -i ~/.ssh/deploy_key \
