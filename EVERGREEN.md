@@ -89,6 +89,9 @@ echo '{"commit_sha":"test","deploy_payload_b64":"<b64 tarball>","ghcr":{...},"en
 | `KBIZ_USERNAME`             | KBIZ login (passed into `.env` on evergreen)  |
 | `KBIZ_PASSWORD`             | KBIZ login                                    |
 | `SLACK_WEBHOOK_URL`         | webhook for queue notifications (optional)    |
+| `READER_RESOLVE_SECRET`     | app↔central HF ID card-login secret (`X-Reader-Secret`); unset ⇒ card login dark (503) |
+| `HF_ID_BASE_URL`            | central HF ID base URL (optional; default `http://192.168.100.228:5000`) |
+| `HF_ID_ISSUER`              | expected card-assertion issuer (optional; default `https://id.thehfhotel.org/oidc`) |
 | `EVERGREEN_DEPLOY_SSH_KEY`  | ed25519 private key for `deploy@evergreen`    |
 | `EVERGREEN_HOST_KEY`        | evergreen's SSH host key (`known_hosts` pin)  |
 

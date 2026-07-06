@@ -13,6 +13,7 @@ import { loadRegistered, registeredSet } from "./registered";
 import { getRequest, listRequests, submitRequest, submitSyncRequest, updateRequest } from "./queue";
 import { notifySlack } from "./slack";
 import { isValidPeriod, loadSheet, saveSheet } from "./sheets";
+import { CardAssertionError, HF_ID_BASE_URL, cardAssertionJwks, verifyCardAssertion } from "./card";
 
 const staticFile = async (path: string, mime: string) => {
   const buf = await readFile(path);
@@ -38,7 +39,11 @@ const newOtp = () => String(randomInt(100000, 1_000_000));
 //   POST /api/admin/unlock       → { token, otp } → sets admin_session cookie
 // Sessions and pending OTPs are in-memory; restart logs everyone out.
 const ADMIN_SESSION_TTL_MS = 4 * 60 * 60_000; // 4h
-const adminSessions = new Map<string, number>(); // sessionId → expiresAt
+// sessionId → session. Started life as a bare `number` (expiresAt); widened to
+// an object so card-login (NFC staff tap) can record WHO unlocked (badge/name)
+// alongside the expiry. OTP unlocks leave badge/name undefined.
+type AdminSession = { expiresAt: number; badge?: string; name?: string };
+const adminSessions = new Map<string, AdminSession>();
 const adminOtpChallenges = new Map<string, { otp: string; expiresAt: number; attempts: number }>(); // pre-unlock token → challenge
 
 function parseCookies(header: string | undefined | null): Record<string, string> {
@@ -57,13 +62,21 @@ function parseCookies(header: string | undefined | null): Record<string, string>
 function isAdminUnlocked(headers: Record<string, string | undefined>): boolean {
   const sid = parseCookies(headers.cookie)["admin_session"];
   if (!sid) return false;
-  const expiresAt = adminSessions.get(sid);
-  if (!expiresAt) return false;
-  if (Date.now() > expiresAt) {
+  const session = adminSessions.get(sid);
+  if (!session) return false;
+  if (Date.now() > session.expiresAt) {
     adminSessions.delete(sid);
     return false;
   }
   return true;
+}
+
+// The app sits behind Cloudflare, which terminates TLS and forwards the
+// original scheme in X-Forwarded-Proto. Add `; Secure` to cookies when the
+// edge saw https so the session/claim cookies never travel over plain http.
+function secureCookieSuffix(headers: Record<string, string | undefined>): string {
+  const proto = (headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+  return proto === "https" ? "; Secure" : "";
 }
 
 function renderHTML(template: string, currentPath: string, isAdmin: boolean): Response {
@@ -179,7 +192,7 @@ const app = new Elysia()
       adminOtpChallenges.delete(body.token);
       const sid = randomBytes(24).toString("hex");
       const expiresAt = Date.now() + ADMIN_SESSION_TTL_MS;
-      adminSessions.set(sid, expiresAt);
+      adminSessions.set(sid, { expiresAt });
       set.headers["set-cookie"] = `admin_session=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${ADMIN_SESSION_TTL_MS / 1000}`;
       return { unlocked: true, expiresAt };
     },
@@ -190,6 +203,88 @@ const app = new Elysia()
     if (sid) adminSessions.delete(sid);
     set.headers["set-cookie"] = `admin_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
     return { unlocked: false };
+  })
+
+  // ── Card login — "tap your NFC staff card to unlock" ──────────────────────
+  // A per-terminal browser pairs to a `reader_id`, then this backend talks
+  // server-to-server to the central HF ID service (browsers never reach HF ID
+  // directly). HF ID mints a signed card assertion on a tap; we verify it and
+  // mint payroll's normal `admin_session`. The whole surface ships DARK: with
+  // READER_RESOLVE_SECRET unset both routes return 503 and the UI shows
+  // "card login not configured".
+  //
+  // 1) /card-login/start — claim a reader→app binding, stash the claim token
+  //    in a short-lived HttpOnly cookie the wait poll reads back.
+  .post(
+    "/card-login/start",
+    async ({ body, headers, set }) => {
+      const secret = process.env.READER_RESOLVE_SECRET;
+      if (!secret) { set.status = 503; return { error: "not_configured" }; }
+      let res: globalThis.Response;
+      try {
+        res = await fetch(`${HF_ID_BASE_URL}/api/private/reader/claim`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "X-Reader-Secret": secret },
+          body: JSON.stringify({ reader_id: body.reader_id, app: "payroll" }),
+        });
+      } catch {
+        set.status = 502; return { error: "central_unreachable" };
+      }
+      if (!res.ok) { set.status = 502; return { error: "claim_failed" }; }
+      const data = (await res.json().catch(() => null)) as { claim_token?: string } | null;
+      if (!data?.claim_token) { set.status = 502; return { error: "claim_failed" }; }
+      set.headers["set-cookie"] =
+        `card_claim=${data.claim_token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600${secureCookieSuffix(headers)}`;
+      return { ok: true };
+    },
+    { body: t.Object({ reader_id: t.String({ minLength: 1, maxLength: 128 }) }) }
+  )
+  // 2) /card-login/wait — long-poll the central /wait with the stashed claim.
+  //    204 → no tap yet (client re-polls). 200 → verify the assertion and mint
+  //    the payroll session. 403 → tapped employee lacks the payroll grant.
+  //    401 → assertion failed verification.
+  .get("/card-login/wait", async ({ headers, set }) => {
+    const secret = process.env.READER_RESOLVE_SECRET;
+    if (!secret) { set.status = 503; return { error: "not_configured" }; }
+    const claimToken = parseCookies(headers.cookie)["card_claim"];
+    if (!claimToken) { set.status = 400; return { error: "no_claim" }; }
+
+    let res: globalThis.Response;
+    try {
+      res = await fetch(`${HF_ID_BASE_URL}/api/private/reader/wait`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "X-Reader-Secret": secret },
+        body: JSON.stringify({ claim_token: claimToken }),
+      });
+    } catch {
+      set.status = 502; return { error: "central_unreachable" };
+    }
+
+    if (res.status === 204) { set.status = 204; return ""; }              // no tap yet
+    if (res.status === 403) { set.status = 403; return { error: "not_authorized" }; }
+    if (!res.ok) { set.status = 502; return { error: "wait_failed" }; }
+
+    const data = (await res.json().catch(() => null)) as { assertion?: string } | null;
+    if (!data?.assertion) { set.status = 502; return { error: "wait_failed" }; }
+
+    let identity;
+    try {
+      identity = await verifyCardAssertion(data.assertion, cardAssertionJwks);
+    } catch (e) {
+      if (e instanceof CardAssertionError && e.reason === "not_authorized") {
+        set.status = 403; return { error: "not_authorized" };
+      }
+      set.status = 401; return { error: "invalid_assertion" };
+    }
+
+    // Success → mint the payroll session (same shape as the OTP unlock block),
+    // tagging it with the tapped employee's badge/name.
+    const sid = randomBytes(24).toString("hex");
+    const expiresAt = Date.now() + ADMIN_SESSION_TTL_MS;
+    adminSessions.set(sid, { expiresAt, badge: identity.badge || undefined, name: identity.name });
+    set.headers["set-cookie"] =
+      `admin_session=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${ADMIN_SESSION_TTL_MS / 1000}${secureCookieSuffix(headers)}`;
+    return { ok: true, name: identity.name };
   })
 
   .get("/static/flatpickr.css", () => staticFile("node_modules/flatpickr/dist/flatpickr.min.css", "text/css; charset=utf-8"))
