@@ -6,6 +6,7 @@ import { meRoutes } from './routes/me';
 import { receiptRoutes } from './routes/receipts';
 import { bundleRoutes } from './routes/bundles';
 import { authLineRoutes } from './routes/auth_line';
+import { authCardRoutes } from './routes/auth_card';
 import { adminRoutes } from './routes/admin';
 
 const PORT = Number(process.env.API_PORT ?? 3001);
@@ -49,6 +50,7 @@ const app = new Elysia()
       .use(receiptRoutes)
       .use(bundleRoutes)
       .use(authLineRoutes)
+      .use(authCardRoutes)
       .use(adminRoutes),
   )
   .listen(PORT);

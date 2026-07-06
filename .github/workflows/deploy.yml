@@ -218,6 +218,12 @@ jobs:
           LINE_CHANNEL_ID: ${{ secrets.LINE_CHANNEL_ID }}
           LINE_CHANNEL_SECRET: ${{ secrets.LINE_CHANNEL_SECRET }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          # NFC staff-card login → central HF-ID service. The secret is optional:
+          # if unset, card login stays disabled (503) and nothing else breaks.
+          # Base URL + issuer fall back to the evergreen-LAN defaults.
+          READER_RESOLVE_SECRET: ${{ secrets.READER_RESOLVE_SECRET }}
+          HF_ID_BASE_URL: ${{ secrets.HF_ID_BASE_URL || 'http://192.168.100.228:5000' }}
+          HF_ID_ISSUER: ${{ secrets.HF_ID_ISSUER || 'https://id.thehfhotel.org/oidc' }}
           IMAGE_TAG: sha-${{ github.sha }}
         run: |
           set -euo pipefail
@@ -248,6 +254,11 @@ jobs:
           LINE_CHANNEL_SECRET=${LINE_CHANNEL_SECRET}
           LINE_REDIRECT_URI=https://reimbursement.thehfhotel.org/api/auth/callback/line
           WEB_BASE_URL=https://reimbursement.thehfhotel.org
+
+          # NFC staff-card login (central HF-ID service)
+          READER_RESOLVE_SECRET=${READER_RESOLVE_SECRET}
+          HF_ID_BASE_URL=${HF_ID_BASE_URL}
+          HF_ID_ISSUER=${HF_ID_ISSUER}
           EOF
 
       - name: Log in to GHCR (on remote host)

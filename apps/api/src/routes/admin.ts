@@ -10,6 +10,28 @@ const LINE_CODE_EXPIRY_HOURS = 24;
 const HOUR_IN_MILLISECONDS = 60 * 60 * 1000;
 
 /**
+ * Normalize an optional badge input: trim, and collapse empty string to null so
+ * the unique index never sees "" (which would collide across badge-less rows).
+ */
+function normalizeBadge(badge: string | null | undefined): string | null | undefined {
+  if (badge === undefined) return undefined;
+  if (badge === null) return null;
+  const trimmed = badge.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}
+
+/** True when a Prisma error is a unique-constraint violation on `badge`. */
+function isBadgeConflict(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: unknown }).code === 'P2002' &&
+    String((err as { meta?: { target?: unknown } }).meta?.target ?? '').includes('badge')
+  );
+}
+
+/**
  * Generates a random 6-digit numeric code (e.g. "402913"). The code is
  * always exactly 6 digits — no leading-zero pitfalls because we offset
  * into the [100000, 999999] inclusive range.
@@ -71,26 +93,35 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
 
   .post(
     '/users',
-    async ({ body }) => {
-      const created = await prisma.user.create({
-        data: {
-          name: body.name,
-          initials: body.initials,
-          role: body.role === 'approver' ? 'APPROVER' : 'EMPLOYEE',
-          lineId: null,
-          lineDisplayName: null,
-          linePictureUrl: null,
-          lineLinkingCode: null,
-          lineLinkingCodeGeneratedAt: null,
-        },
-      });
-      return serializeAdminUser(created);
+    async ({ body, status }) => {
+      try {
+        const created = await prisma.user.create({
+          data: {
+            name: body.name,
+            initials: body.initials,
+            role: body.role === 'approver' ? 'APPROVER' : 'EMPLOYEE',
+            badge: normalizeBadge(body.badge) ?? null,
+            lineId: null,
+            lineDisplayName: null,
+            linePictureUrl: null,
+            lineLinkingCode: null,
+            lineLinkingCodeGeneratedAt: null,
+          },
+        });
+        return serializeAdminUser(created);
+      } catch (err) {
+        if (isBadgeConflict(err)) {
+          return status(409, { message: 'รหัสบัตร (badge) นี้ถูกใช้กับพนักงานคนอื่นแล้ว' });
+        }
+        throw err;
+      }
     },
     {
       body: t.Object({
         name: t.String({ minLength: 1 }),
         initials: t.String({ minLength: 1, maxLength: 4 }),
         role: t.Union([t.Literal('employee'), t.Literal('approver')]),
+        badge: t.Optional(t.Union([t.String(), t.Null()])),
       }),
     },
   )
@@ -107,24 +138,35 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
         name?: string;
         initials?: string;
         role?: 'EMPLOYEE' | 'APPROVER';
+        badge?: string | null;
       } = {};
       if (body.name !== undefined) updates.name = body.name;
       if (body.initials !== undefined) updates.initials = body.initials;
       if (body.role !== undefined) {
         updates.role = body.role === 'approver' ? 'APPROVER' : 'EMPLOYEE';
       }
+      const normalizedBadge = normalizeBadge(body.badge);
+      if (normalizedBadge !== undefined) updates.badge = normalizedBadge;
 
-      const updated = await prisma.user.update({
-        where: { id: params.id },
-        data: updates,
-      });
-      return serializeAdminUser(updated);
+      try {
+        const updated = await prisma.user.update({
+          where: { id: params.id },
+          data: updates,
+        });
+        return serializeAdminUser(updated);
+      } catch (err) {
+        if (isBadgeConflict(err)) {
+          return status(409, { message: 'รหัสบัตร (badge) นี้ถูกใช้กับพนักงานคนอื่นแล้ว' });
+        }
+        throw err;
+      }
     },
     {
       body: t.Object({
         name: t.Optional(t.String({ minLength: 1 })),
         initials: t.Optional(t.String({ minLength: 1, maxLength: 4 })),
         role: t.Optional(t.Union([t.Literal('employee'), t.Literal('approver')])),
+        badge: t.Optional(t.Union([t.String(), t.Null()])),
       }),
     },
   )

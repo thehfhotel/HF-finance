@@ -69,6 +69,13 @@ services:
       LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET}
       LINE_REDIRECT_URI: ${LINE_REDIRECT_URI}
       WEB_BASE_URL: ${WEB_BASE_URL}
+      # NFC staff-card login → central HF-ID service. Compose only forwards
+      # vars listed here, so these MUST be enumerated (they come from .env,
+      # materialized by the deploy job). READER_RESOLVE_SECRET absent → card
+      # login fails closed (503); LINE login is unaffected.
+      READER_RESOLVE_SECRET: ${READER_RESOLVE_SECRET:-}
+      HF_ID_BASE_URL: ${HF_ID_BASE_URL:-http://192.168.100.228:5000}
+      HF_ID_ISSUER: ${HF_ID_ISSUER:-https://id.thehfhotel.org/oidc}
     volumes:
       # Persistent storage for receipt photos and transfer screenshots.
       # Mount path matches the apps/api/uploads directory inside the image.
