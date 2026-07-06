@@ -8,6 +8,8 @@ import { bundleRoutes } from './routes/bundles';
 import { authLineRoutes } from './routes/auth_line';
 import { authCardRoutes } from './routes/auth_card';
 import { adminRoutes } from './routes/admin';
+import { expenseRoutes } from './routes/expenses';
+import { plRoutes } from './routes/pl';
 
 const PORT = Number(process.env.API_PORT ?? 3001);
 const UPLOADS_DIR = resolve(process.cwd(), 'uploads');
@@ -51,7 +53,9 @@ const app = new Elysia()
       .use(bundleRoutes)
       .use(authLineRoutes)
       .use(authCardRoutes)
-      .use(adminRoutes),
+      .use(adminRoutes)
+      .use(expenseRoutes)
+      .use(plRoutes),
   )
   .listen(PORT);
 

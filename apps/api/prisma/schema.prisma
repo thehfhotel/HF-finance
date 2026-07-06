@@ -13,6 +13,8 @@ datasource db {
 enum Role {
   EMPLOYEE
   APPROVER
+  /// Office admin: enters company expenses (paper invoices) into the ledger.
+  ADMIN
 }
 
 enum BundleStatus {
@@ -44,8 +46,63 @@ model User {
   bundlesOwned    Bundle[]  @relation("submitter")
   bundlesApproved Bundle[]  @relation("approver")
   auditEvents     AuditEvent[]
+  expensesEntered Expense[]
 
   @@map("users")
+}
+
+/// A company expense entered by the office admin from a (usually paper)
+/// invoice — the ledger side of the P&L. Reimbursed staff purchases stay
+/// in `Receipt`; the monthly rollup merges both via the shared
+/// category → P&L-line mapping.
+model Expense {
+  id          String   @id @default(cuid())
+  enteredById String
+  /// Restrict (not Cascade): ledger rows are financial history and must
+  /// survive user-account cleanup.
+  enteredBy   User     @relation(fields: [enteredById], references: [id], onDelete: Restrict)
+  /// P&L line code from the shared PL_LINES list (e.g. "elec_saichon").
+  /// Plain string so new lines don't need a migration.
+  plLine      String
+  /// Accrual month this expense belongs to on the P&L: "YYYY-MM".
+  expenseMonth String
+  /// Date printed on the invoice, "YYYY-MM-DD"; null when unreadable/absent.
+  invoiceDate String?
+  /// Free-text billing-period annotation for utility bills (e.g. "มี.ค. 69").
+  billingPeriod String?
+  vendor      String   @default("")
+  amount      Decimal  @db.Decimal(12, 2)
+  /// "cash" | "transfer" — how the company paid. Staff-paid invoices become
+  /// Receipts (reimbursement flow) instead of Expense rows.
+  paymentMethod String @default("transfer")
+  /// False = invoice received but not yet paid (accounts payable).
+  paid        Boolean  @default(true)
+  /// Payment due date for unpaid invoices, "YYYY-MM-DD".
+  dueDate     String?
+  note        String?
+  /// URL path to the uploaded invoice photo (e.g. "/uploads/abc.jpg").
+  photoPath   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([expenseMonth])
+  @@index([plLine])
+  @@map("expenses")
+}
+
+/// Monthly revenue figures for the P&L report (one row per month) —
+/// admin-entered from the front-desk numbers until an analytics feed exists.
+model RevenueEntry {
+  id        String   @id @default(cuid())
+  /// "YYYY-MM"
+  month     String   @unique
+  rooms     Decimal  @default(0) @db.Decimal(12, 2)
+  waterBar  Decimal  @default(0) @db.Decimal(12, 2)
+  other     Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("revenue_entries")
 }
 
 model Receipt {

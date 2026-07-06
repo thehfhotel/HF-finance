@@ -648,7 +648,7 @@ function EmployeeCard({
   onGenerate,
   onShowCode,
 }: EmployeeCardProps): JSX.Element {
-  const roleLabel = user.role === 'approver' ? 'ผู้อนุมัติ' : 'พนักงาน';
+  const roleLabel = user.role === 'approver' ? 'ผู้อนุมัติ' : user.role === 'admin' ? 'แอดมิน' : 'พนักงาน';
 
   return (
     <div
@@ -824,7 +824,7 @@ function UserRow({
   onGenerate,
   onShowCode,
 }: UserRowProps): JSX.Element {
-  const roleLabel = user.role === 'approver' ? 'ผู้อนุมัติ' : 'พนักงาน';
+  const roleLabel = user.role === 'approver' ? 'ผู้อนุมัติ' : user.role === 'admin' ? 'แอดมิน' : 'พนักงาน';
   return (
     <div
       style={{
@@ -1261,6 +1261,12 @@ function UserFormModal({
             label="ผู้อนุมัติ"
             active={role === 'approver'}
             onClick={() => setRole('approver')}
+          />
+          <RoleToggle
+            theme={theme}
+            label="แอดมิน"
+            active={role === 'admin'}
+            onClick={() => setRole('admin')}
           />
         </div>
       </ModalField>

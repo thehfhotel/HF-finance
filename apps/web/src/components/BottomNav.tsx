@@ -2,7 +2,15 @@ import type { Theme } from '../lib/types';
 import { Icon } from './icons';
 
 /** Routes the bottom nav can navigate to — all are parameter-free. */
-export type BottomNavRoute = 'home' | 'upload' | 'approver-home' | 'my-requests' | 'admin-employees';
+export type BottomNavRoute =
+  | 'home'
+  | 'upload'
+  | 'approver-home'
+  | 'my-requests'
+  | 'admin-employees'
+  | 'ledger'
+  | 'ledger-entry'
+  | 'ledger-report';
 
 interface NavItem {
   label: string;
@@ -21,15 +29,21 @@ const APPROVER_ITEMS: NavItem[] = [
   { label: 'พนักงาน', route: 'admin-employees', icon: Icon.user },
 ];
 
+const ADMIN_ITEMS: NavItem[] = [
+  { label: 'รายจ่าย', route: 'ledger', icon: Icon.receipt },
+  { label: 'บันทึกบิล', route: 'ledger-entry', icon: Icon.plus },
+  { label: 'งบเดือน', route: 'ledger-report', icon: Icon.bank },
+];
+
 interface BottomNavProps {
-  role: 'employee' | 'approver';
+  role: 'employee' | 'approver' | 'admin';
   activeRoute: BottomNavRoute;
   theme: Theme;
   onNavigate: (route: BottomNavRoute) => void;
 }
 
 export function BottomNav({ role, activeRoute, theme, onNavigate }: BottomNavProps) {
-  const items = role === 'approver' ? APPROVER_ITEMS : EMPLOYEE_ITEMS;
+  const items = role === 'admin' ? ADMIN_ITEMS : role === 'approver' ? APPROVER_ITEMS : EMPLOYEE_ITEMS;
 
   return (
     <div

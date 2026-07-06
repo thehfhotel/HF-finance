@@ -30,6 +30,9 @@ import { Login } from './screens/auth/Login';
 import { Callback } from './screens/auth/Callback';
 import { LinkAccount } from './screens/auth/LinkAccount';
 import { ManageEmployees } from './screens/approver/ManageEmployees';
+import { LedgerDashboard } from './screens/admin/LedgerDashboard';
+import { ExpenseWizard } from './screens/admin/ExpenseWizard';
+import { PlReportScreen } from './screens/admin/PlReportScreen';
 import { BottomNav } from './components/BottomNav';
 import type { BottomNavRoute } from './components/BottomNav';
 
@@ -51,6 +54,9 @@ function initialRouteFromUrl(): Route {
   if (path === '/link-account') return { name: 'link-account' };
   if (path === '/admin/employees') return { name: 'admin-employees' };
   if (path === '/my-requests') return { name: 'my-requests' };
+  if (path === '/ledger/entry') return { name: 'ledger-entry' };
+  if (path === '/ledger/report') return { name: 'ledger-report' };
+  if (path === '/ledger') return { name: 'ledger' };
   return { name: 'home' };
 }
 
@@ -174,7 +180,13 @@ export function App() {
       setDevUserId(DEV_USER_ID_BY_ROLE[tweaks.role]);
       // Force a re-bootstrap by nudging the route — same name, new identity.
       setLoading(true);
-      setRoute(tweaks.role === 'employee' ? { name: 'home' } : { name: 'approver-home' });
+      setRoute(
+        tweaks.role === 'employee'
+          ? { name: 'home' }
+          : tweaks.role === 'admin'
+            ? { name: 'ledger' }
+            : { name: 'approver-home' },
+      );
     }
   }, [tweaks.role]);
 
@@ -194,6 +206,9 @@ export function App() {
     else if (name === 'approver-pay' && id) setRoute({ name: 'approver-pay', id });
     else if (name === 'admin-employees') setRoute({ name: 'admin-employees' });
     else if (name === 'my-requests') setRoute({ name: 'my-requests' });
+    else if (name === 'ledger') setRoute({ name: 'ledger' });
+    else if (name === 'ledger-entry') setRoute({ name: 'ledger-entry' });
+    else if (name === 'ledger-report') setRoute({ name: 'ledger-report' });
     else if (name === 'logout') handleLogout();
   };
 
@@ -381,8 +396,11 @@ export function App() {
   const screen = renderScreen({ route, theme, state, setState, reqState, reqSetState, nav, role, currentUser });
 
   // Bottom nav is visible on top-level screens only (not sub-screens or auth).
-  const BOTTOM_NAV_ROUTES = new Set<Route['name']>(['home', 'approver-home', 'my-requests']);
-  const showBottomNav = platform === 'mobile' && BOTTOM_NAV_ROUTES.has(route.name);
+  // Admins get it on desktop too — their screens render in the phone-width
+  // column shell regardless of platform.
+  const BOTTOM_NAV_ROUTES = new Set<Route['name']>(['home', 'approver-home', 'my-requests', 'ledger', 'ledger-report']);
+  const showBottomNav =
+    (platform === 'mobile' || role === 'admin') && BOTTOM_NAV_ROUTES.has(route.name);
   const handleBottomNav = (r: BottomNavRoute) => setRoute({ name: r } as Route);
 
   // FAB is mobile-only; desktop home has the explicit + button in the AppBar.
@@ -392,6 +410,60 @@ export function App() {
     !showBottomNav &&
     inRequestorMode &&
     (route.name === 'home' || route.name === 'my-requests' || route.name === 'record');
+
+  // Admin (expense ledger) — no dedicated desktop layout; the kiosk-style
+  // screens render in a centered phone-width column on desktop viewports.
+  if (platform === 'desktop' && role === 'admin') {
+    return (
+      <>
+        <div style={{ position: 'fixed', inset: 0, background: theme.paper }} />
+        <div
+          style={{
+            position: 'fixed',
+            top: 'var(--hf-band-offset, 0px)',
+            bottom: 0,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 'min(480px, 100vw)',
+            background: theme.paper,
+            overflow: 'hidden',
+            borderLeft: `0.5px solid ${theme.hairline}`,
+            borderRight: `0.5px solid ${theme.hairline}`,
+          }}
+        >
+          {!IS_DEV && (
+            <script
+              defer
+              src="https://erp.thehfhotel.org/shell/hf-bar.js"
+              data-app="Reimbursement"
+              data-module="finance"
+              data-portal-only="1"
+            />
+          )}
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: theme.paper,
+              overflow: 'auto',
+              paddingBottom: showBottomNav ? 56 : 0,
+            }}
+          >
+            {screen}
+          </div>
+          {showBottomNav && (
+            <BottomNav
+              role={role}
+              activeRoute={route.name as BottomNavRoute}
+              theme={theme}
+              onNavigate={handleBottomNav}
+            />
+          )}
+        </div>
+        {IS_DEV && <TweaksPanel tweaks={tweaks} onChange={setTweak} onJump={onJump} />}
+      </>
+    );
+  }
 
   if (platform === 'desktop') {
     return (
@@ -539,8 +611,14 @@ function renderScreen({ route, theme, state, setState, reqState, reqSetState, na
   if (route.name === 'approver-home')
     return <Inbox theme={theme} state={state} nav={nav} currentUser={currentUser} />;
 
-  // 'home': employee → requestor Home; approver → inbox
+  // Company expense ledger (admin, also reachable by approvers)
+  if (route.name === 'ledger') return <LedgerDashboard theme={theme} nav={nav} initialMonth={route.month} />;
+  if (route.name === 'ledger-entry') return <ExpenseWizard theme={theme} nav={nav} edit={route.edit} />;
+  if (route.name === 'ledger-report') return <PlReportScreen theme={theme} nav={nav} initialMonth={route.month} />;
+
+  // 'home': employee → requestor Home; admin → ledger; approver → inbox
   if (role === 'employee') return <Home theme={theme} state={reqState} nav={nav} currentUser={currentUser} />;
+  if (role === 'admin') return <LedgerDashboard theme={theme} nav={nav} />;
   return <Inbox theme={theme} state={state} nav={nav} currentUser={currentUser} />;
 }
 
@@ -556,6 +634,12 @@ function pathForRoute(route: Route): string {
       return '/admin/employees';
     case 'my-requests':
       return '/my-requests';
+    case 'ledger':
+      return '/ledger';
+    case 'ledger-entry':
+      return '/ledger/entry';
+    case 'ledger-report':
+      return '/ledger/report';
     default:
       return '/';
   }
