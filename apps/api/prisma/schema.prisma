@@ -28,6 +28,10 @@ model User {
   name                       String
   role                       Role     @default(EMPLOYEE)
   initials                   String
+  /// Central HF-ID badge (the OIDC `sub`). Lets a signed card assertion from the
+  /// HF-ID service resolve to this app's internal User. Optional + unique: a badge
+  /// maps to at most one employee, and rows without a badge simply can't card-login.
+  badge                      String?  @unique
   lineId                     String?  @unique
   lineDisplayName            String?
   linePictureUrl             String?

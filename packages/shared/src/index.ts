@@ -87,6 +87,13 @@ export interface User {
   role: Role;
   /** Initials for avatar (e.g. "มย"). */
   initials: string;
+  /**
+   * Central HF-ID badge (the OIDC `sub`). When set, the employee can log in by
+   * tapping their NFC staff card at a terminal — the HF-ID service issues a
+   * signed assertion whose `sub` we resolve back to this row. Null = card login
+   * not available for this user (LINE login still works).
+   */
+  badge: string | null;
   lineId: string | null;
   lineDisplayName: string | null;
   linePictureUrl: string | null;
@@ -106,6 +113,8 @@ export interface CreateUserRequest {
   name: string;
   role: Role;
   initials: string;
+  /** Optional HF-ID badge to enable NFC card login for this employee. */
+  badge?: string | null;
 }
 
 export interface UpdateUserRequest extends Partial<CreateUserRequest> {}
