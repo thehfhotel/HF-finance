@@ -1,6 +1,9 @@
 // Shared types between apps/web (frontend) and apps/api (backend).
 // Treat this file as the API contract — both sides import from here.
 
+export * from './pl';
+export * from './pl-history';
+
 export type ReceiptItem = readonly [label: string, value: string];
 
 /** The two HF properties that share this app. */
@@ -79,7 +82,7 @@ export interface Bundle {
   createdAt: string;
 }
 
-export type Role = 'employee' | 'approver';
+export type Role = 'employee' | 'approver' | 'admin';
 
 export interface User {
   id: string;

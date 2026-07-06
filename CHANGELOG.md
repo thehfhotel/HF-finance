@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-07-06
+
+### Added
+- **Company expense ledger (บัญชีรายจ่ายบริษัท).** New ADMIN role for the office admin, with a
+  kiosk-style one-question-per-screen wizard (บันทึกบิล) for entering paper invoices: photo → amount →
+  P&L category (with per-building variants: สายชล / Hop inn 47 / HF Ville) → payment method → confirm.
+  "พนักงานจ่ายไปก่อน" creates a reimbursement Receipt for the chosen employee, so staff-paid invoices
+  enter the normal bundle → approve → pay flow and still roll up into the ledger.
+- **Month dashboard** (รายจ่ายบริษัท): per-line totals combining admin bills + reimbursement receipts
+  (mapped via the shared category → P&L-line table), a recurring-bill completeness checklist
+  (missing ไฟฟ้า/น้ำ/โทรศัพท์/ประกันสังคม… flagged per month), and the raw entry list with unpaid
+  (ค้างจ่าย) badges.
+- **Monthly งบกำไรขาดทุน report** in the accountant's paper-sheet layout with print/PDF. Months up to
+  2026-06 render the static transcription of the accountant's sheets (30 months, arithmetic-verified);
+  later months compute live from the ledger with admin-editable revenue figures.
+- Schema: `expenses` + `revenue_entries` tables, `Role.ADMIN` (additive migration applied on deploy).
+
 ## [0.10.0] - 2026-06-17
 
 ### Added

@@ -3,15 +3,20 @@ import type {
   Bundle as SharedBundle,
   BundleStatus,
   BundleWithDetails,
+  Expense as SharedExpense,
+  PaymentMethod,
   Receipt as SharedReceipt,
   ReceiptItem,
+  RevenueEntry as SharedRevenueEntry,
   Role,
   User as SharedUser,
 } from '@reimbursement/shared';
 import type {
   Bundle as PrismaBundle,
   BundleStatus as PrismaBundleStatus,
+  Expense as PrismaExpense,
   Receipt as PrismaReceipt,
+  RevenueEntry as PrismaRevenueEntry,
   Role as PrismaRole,
   User as PrismaUser,
 } from './generated/prisma';
@@ -33,6 +38,7 @@ const BUNDLE_STATUS_MAP: Record<PrismaBundleStatus, BundleStatus> = {
 const ROLE_MAP: Record<PrismaRole, Role> = {
   EMPLOYEE: 'employee',
   APPROVER: 'approver',
+  ADMIN: 'admin',
 };
 
 export function bundleStatusToShared(status: PrismaBundleStatus): BundleStatus {
@@ -114,6 +120,35 @@ export function serializeBundleWithDetails(
     approver: bundle.approver
       ? { name: bundle.approver.name, initials: bundle.approver.initials }
       : null,
+  };
+}
+
+export function serializeExpense(expense: PrismaExpense): SharedExpense {
+  return {
+    id: expense.id,
+    enteredById: expense.enteredById,
+    plLine: expense.plLine,
+    expenseMonth: expense.expenseMonth,
+    invoiceDate: expense.invoiceDate,
+    billingPeriod: expense.billingPeriod,
+    vendor: expense.vendor,
+    amount: Number(expense.amount),
+    paymentMethod: expense.paymentMethod === 'cash' ? 'cash' : ('transfer' as PaymentMethod),
+    paid: expense.paid,
+    dueDate: expense.dueDate,
+    note: expense.note,
+    photoPath: expense.photoPath,
+    createdAt: expense.createdAt.toISOString(),
+  };
+}
+
+export function serializeRevenueEntry(entry: PrismaRevenueEntry): SharedRevenueEntry {
+  return {
+    month: entry.month,
+    rooms: Number(entry.rooms),
+    waterBar: Number(entry.waterBar),
+    other: Number(entry.other),
+    updatedAt: entry.updatedAt.toISOString(),
   };
 }
 

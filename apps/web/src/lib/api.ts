@@ -6,8 +6,14 @@ import type {
   BundleWithDetails,
   CreateBundleRequest,
   CreateUserRequest,
+  Expense,
+  ExpenseFormFields,
+  MonthLedgerSummary,
+  PlReport,
   Receipt,
   ReceiptItem,
+  RevenueEntry,
+  RevenueFigures,
   UpdateUserRequest,
   User,
 } from '@reimbursement/shared';
@@ -87,6 +93,7 @@ export function getDevUserId(): string | null {
 export const DEV_USER_ID_BY_ROLE = {
   employee: 'user_niran',
   approver: 'user_kpol',
+  admin: 'user_admin',
 } as const;
 
 // ─── Core fetch helper ───────────────────────────────────────────
@@ -209,6 +216,50 @@ export function payFormFromFields(transferRef: string, proof: File): FormData {
   return form;
 }
 
+export function expenseFormFromFields(fields: ExpenseFormFields, photo?: File): FormData {
+  const form = new FormData();
+  form.append('plLine', fields.plLine);
+  form.append('expenseMonth', fields.expenseMonth);
+  form.append('amount', String(fields.amount));
+  if (fields.vendor !== undefined) form.append('vendor', fields.vendor);
+  if (fields.invoiceDate !== undefined) form.append('invoiceDate', fields.invoiceDate);
+  if (fields.billingPeriod !== undefined) form.append('billingPeriod', fields.billingPeriod);
+  if (fields.paymentMethod !== undefined) form.append('paymentMethod', fields.paymentMethod);
+  if (fields.paid !== undefined) form.append('paid', String(fields.paid));
+  if (fields.dueDate !== undefined) form.append('dueDate', fields.dueDate);
+  if (fields.note !== undefined) form.append('note', fields.note);
+  if (photo) form.append('photo', photo);
+  return form;
+}
+
+export interface StaffReceiptFields {
+  employeeId: string;
+  plLine: string;
+  amount: number;
+  date: string;
+  vendor?: string;
+  note?: string;
+}
+
+export function staffReceiptFormFromFields(fields: StaffReceiptFields, photo?: File): FormData {
+  const form = new FormData();
+  form.append('employeeId', fields.employeeId);
+  form.append('plLine', fields.plLine);
+  form.append('amount', String(fields.amount));
+  form.append('date', fields.date);
+  if (fields.vendor !== undefined) form.append('vendor', fields.vendor);
+  if (fields.note !== undefined) form.append('note', fields.note);
+  if (photo) form.append('photo', photo);
+  return form;
+}
+
+/** Minimal user row for the "employee paid" picker. */
+export interface EmployeeOption {
+  id: string;
+  name: string;
+  initials: string;
+}
+
 // ─── Auth response shapes ────────────────────────────────────────
 
 /**
@@ -291,6 +342,33 @@ export const api = {
       request<BundleWithDetails>(`/api/bundles/${encodeURIComponent(id)}/pay`, {
         method: 'POST',
         body: form,
+      }),
+  },
+
+  expenses: {
+    list: (month?: string): Promise<Expense[]> =>
+      request<Expense[]>(month ? `/api/expenses?month=${encodeURIComponent(month)}` : '/api/expenses'),
+    create: (form: FormData): Promise<Expense> =>
+      request<Expense>('/api/expenses', { method: 'POST', body: form }),
+    update: (id: string, form: FormData): Promise<Expense> =>
+      request<Expense>(`/api/expenses/${encodeURIComponent(id)}`, { method: 'PATCH', body: form }),
+    delete: (id: string): Promise<void> =>
+      request<void>(`/api/expenses/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    employees: (): Promise<EmployeeOption[]> => request<EmployeeOption[]>('/api/expenses/employees'),
+    staffReceipt: (form: FormData): Promise<Receipt> =>
+      request<Receipt>('/api/expenses/staff-receipt', { method: 'POST', body: form }),
+  },
+
+  pl: {
+    summary: (month: string): Promise<MonthLedgerSummary> =>
+      request<MonthLedgerSummary>(`/api/pl/summary?month=${encodeURIComponent(month)}`),
+    report: (month: string): Promise<PlReport> =>
+      request<PlReport>(`/api/pl/report?month=${encodeURIComponent(month)}`),
+    saveRevenue: (month: string, figures: RevenueFigures): Promise<RevenueEntry> =>
+      request<RevenueEntry>('/api/pl/revenue', {
+        method: 'PUT',
+        body: JSON.stringify({ month, ...figures }),
+        headers: { 'Content-Type': 'application/json' },
       }),
   },
 
