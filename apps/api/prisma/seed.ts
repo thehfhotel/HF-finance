@@ -66,6 +66,29 @@ const USERS: readonly UserSeed[] = [
   { id: 'user_kpol',  name: 'ก. พล',     role: Role.APPROVER, initials: 'กพ' },
   { id: 'user_som',   name: 'สม พ.',     role: Role.EMPLOYEE, initials: 'สพ' },
   { id: 'user_mai',   name: 'ใหม่ ท.',   role: Role.EMPLOYEE, initials: 'มท' },
+  { id: 'user_admin', name: 'แอดมิน สำนักงาน', role: Role.ADMIN, initials: 'อด' },
+];
+
+// A few company-expense ledger entries so the admin dashboard/report have
+// data in dev. Month is fixed (like the receipt dates above).
+const EXPENSE_MONTH = '2026-07';
+
+interface ExpenseSeed {
+  readonly id: string;
+  readonly plLine: string;
+  readonly vendor: string;
+  readonly amount: number;
+  readonly paymentMethod: 'cash' | 'transfer';
+  readonly paid: boolean;
+  readonly billingPeriod?: string;
+  readonly note?: string;
+}
+
+const EXPENSES: readonly ExpenseSeed[] = [
+  { id: 'exp1', plLine: 'elec_saichon', vendor: 'การไฟฟ้าส่วนภูมิภาค', amount: 58212.4, paymentMethod: 'transfer', paid: true, billingPeriod: 'มิ.ย. 69' },
+  { id: 'exp2', plLine: 'water_saichon', vendor: 'การประปาส่วนภูมิภาค', amount: 6120.55, paymentMethod: 'transfer', paid: true, billingPeriod: 'มิ.ย. 69' },
+  { id: 'exp3', plLine: 'laundry', vendor: 'โรงซักผ้าสายชล', amount: 6800, paymentMethod: 'cash', paid: true },
+  { id: 'exp4', plLine: 'elec_ville', vendor: 'การไฟฟ้าส่วนภูมิภาค', amount: 41230.05, paymentMethod: 'transfer', paid: false, billingPeriod: 'มิ.ย. 69', note: 'รอครบกำหนด 15 ก.ค.' },
 ];
 
 // Six receipts owned by user_niran, mirroring SAMPLE_RECEIPTS.
@@ -357,10 +380,37 @@ async function seed(): Promise<void> {
           });
         }
       }
+
+      // 5. Company-expense ledger entries (admin-entered)
+      for (const expense of EXPENSES) {
+        const data = {
+          enteredById: 'user_admin',
+          plLine: expense.plLine,
+          expenseMonth: EXPENSE_MONTH,
+          vendor: expense.vendor,
+          amount: expense.amount,
+          paymentMethod: expense.paymentMethod,
+          paid: expense.paid,
+          billingPeriod: expense.billingPeriod ?? null,
+          note: expense.note ?? null,
+        };
+        await tx.expense.upsert({
+          where: { id: expense.id },
+          create: { id: expense.id, ...data },
+          update: data,
+        });
+      }
+
+      // 6. Revenue figures for the seeded ledger month
+      await tx.revenueEntry.upsert({
+        where: { month: EXPENSE_MONTH },
+        create: { month: EXPENSE_MONTH, rooms: 512340.5, waterBar: 3100, other: 1250 },
+        update: { rooms: 512340.5, waterBar: 3100, other: 1250 },
+      });
     });
 
     console.log(
-      `Seeded ${USERS.length} users, ${ALL_RECEIPTS.length} receipts, ${BUNDLES.length} bundles.`,
+      `Seeded ${USERS.length} users, ${ALL_RECEIPTS.length} receipts, ${BUNDLES.length} bundles, ${EXPENSES.length} expenses.`,
     );
   } finally {
     await prisma.$disconnect();
