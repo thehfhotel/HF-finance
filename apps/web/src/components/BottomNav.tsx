@@ -7,10 +7,7 @@ export type BottomNavRoute =
   | 'upload'
   | 'approver-home'
   | 'my-requests'
-  | 'admin-employees'
-  | 'ledger'
-  | 'ledger-entry'
-  | 'ledger-report';
+  | 'admin-employees';
 
 interface NavItem {
   label: string;
@@ -27,26 +24,17 @@ const APPROVER_ITEMS: NavItem[] = [
   { label: 'กล่องอนุมัติ', route: 'approver-home', icon: Icon.bundle },
   { label: 'คำขอของฉัน', route: 'my-requests', icon: Icon.receipt },
   { label: 'พนักงาน', route: 'admin-employees', icon: Icon.user },
-  // Company expense ledger — approvers are authorized the same as admins
-  // (see apps/api/src/routes/expenses.ts, pl.ts); this is their mobile entry point.
-  { label: 'บัญชีบริษัท', route: 'ledger', icon: Icon.bank },
-];
-
-const ADMIN_ITEMS: NavItem[] = [
-  { label: 'รายจ่าย', route: 'ledger', icon: Icon.receipt },
-  { label: 'บันทึกบิล', route: 'ledger-entry', icon: Icon.plus },
-  { label: 'งบเดือน', route: 'ledger-report', icon: Icon.bank },
 ];
 
 interface BottomNavProps {
-  role: 'employee' | 'approver' | 'admin';
+  role: 'employee' | 'approver';
   activeRoute: BottomNavRoute;
   theme: Theme;
   onNavigate: (route: BottomNavRoute) => void;
 }
 
 export function BottomNav({ role, activeRoute, theme, onNavigate }: BottomNavProps) {
-  const items = role === 'admin' ? ADMIN_ITEMS : role === 'approver' ? APPROVER_ITEMS : EMPLOYEE_ITEMS;
+  const items = role === 'approver' ? APPROVER_ITEMS : EMPLOYEE_ITEMS;
 
   return (
     <div

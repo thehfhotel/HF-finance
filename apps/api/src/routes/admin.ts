@@ -4,9 +4,8 @@ import { auth } from '../auth';
 import { prisma } from '../db';
 import { serializeAdminUser } from '../serializers';
 
-function roleFromShared(role: Role): 'EMPLOYEE' | 'APPROVER' | 'ADMIN' {
+function roleFromShared(role: Role): 'EMPLOYEE' | 'APPROVER' {
   if (role === 'approver') return 'APPROVER';
-  if (role === 'admin') return 'ADMIN';
   return 'EMPLOYEE';
 }
 
@@ -92,7 +91,7 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       body: t.Object({
         name: t.String({ minLength: 1 }),
         initials: t.String({ minLength: 1, maxLength: 4 }),
-        role: t.Union([t.Literal('employee'), t.Literal('approver'), t.Literal('admin')]),
+        role: t.Union([t.Literal('employee'), t.Literal('approver')]),
         badge: t.Optional(t.Union([t.String(), t.Null()])),
         email: t.Optional(t.Union([t.String(), t.Null()])),
       }),
@@ -110,7 +109,7 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       const updates: {
         name?: string;
         initials?: string;
-        role?: 'EMPLOYEE' | 'APPROVER' | 'ADMIN';
+        role?: 'EMPLOYEE' | 'APPROVER';
         badge?: string | null;
         email?: string | null;
       } = {};
@@ -144,7 +143,7 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       body: t.Object({
         name: t.Optional(t.String({ minLength: 1 })),
         initials: t.Optional(t.String({ minLength: 1, maxLength: 4 })),
-        role: t.Optional(t.Union([t.Literal('employee'), t.Literal('approver'), t.Literal('admin')])),
+        role: t.Optional(t.Union([t.Literal('employee'), t.Literal('approver')])),
         badge: t.Optional(t.Union([t.String(), t.Null()])),
         email: t.Optional(t.Union([t.String(), t.Null()])),
       }),
@@ -157,15 +156,14 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       return status(404, { message: 'User not found' });
     }
 
-    const [bundleCount, receiptCount, expenseCount] = await Promise.all([
+    const [bundleCount, receiptCount] = await Promise.all([
       prisma.bundle.count({ where: { userId: params.id } }),
       prisma.receipt.count({ where: { userId: params.id } }),
-      prisma.expense.count({ where: { enteredById: params.id } }),
     ]);
 
-    if (bundleCount > 0 || receiptCount > 0 || expenseCount > 0) {
+    if (bundleCount > 0 || receiptCount > 0) {
       return status(409, {
-        message: 'User has existing bundles, receipts or ledger entries; remove them before deleting',
+        message: 'User has existing bundles or receipts; remove them before deleting',
       });
     }
 

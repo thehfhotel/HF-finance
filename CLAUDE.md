@@ -12,6 +12,11 @@ This file is read by Claude Code when working in this repository.
 - **Approver / Manager** — reviews bundles in an inbox, approves or rejects, then
   attaches a bank-transfer slip + reference to mark as paid.
 
+Company accounting (daily income + expenses, monthly P&L) is **out of scope** for
+this app — that lives in a separate app, income.thehfhotel.org. Don't add a
+company-ledger/admin-role feature here again (see PR #28 / its removal in
+`docs/change-requests/CR-2026-07-29-remove-expense-ledger.md`).
+
 ## Stack
 
 | Layer | Tech |

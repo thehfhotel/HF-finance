@@ -5,6 +5,9 @@ Employees submit receipts, the manager reviews and pays. Login is behind the
 Cloudflare Access wall — Google for managers, HF ID for employees (also
 usable via NFC staff-card tap) — then a silent token exchange.
 
+Reimbursement only — company accounting (daily income + expenses, P&L) lives
+in a separate app, income.thehfhotel.org.
+
 ## Stack
 
 Bun · Elysia · Prisma · Postgres · Vite · React · TypeScript · Cloudflare

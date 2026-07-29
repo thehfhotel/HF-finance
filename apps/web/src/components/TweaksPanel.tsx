@@ -93,7 +93,6 @@ export function TweaksPanel({ tweaks, onChange, onJump }: TweaksPanelProps) {
           options={[
             { label: 'Employee', value: 'employee' },
             { label: 'Approver', value: 'approver' },
-            { label: 'Admin', value: 'admin' },
           ]}
           onChange={(v) => onChange('role', v as Role)}
         />
@@ -166,19 +165,12 @@ export function TweaksPanel({ tweaks, onChange, onJump }: TweaksPanelProps) {
             <JumpButton onClick={() => onJump('bundle-new')}>Bundle &amp; submit</JumpButton>
             <JumpButton onClick={() => onJump('bundle:b3')}>Open paid bundle</JumpButton>
           </>
-        ) : tweaks.role === 'admin' ? (
-          <>
-            <JumpButton onClick={() => onJump('ledger')}>Ledger month</JumpButton>
-            <JumpButton onClick={() => onJump('ledger-entry')}>Record bill</JumpButton>
-            <JumpButton onClick={() => onJump('ledger-report')}>P&amp;L report</JumpButton>
-          </>
         ) : (
           <>
             <JumpButton onClick={() => onJump('approver-home')}>Inbox</JumpButton>
             <JumpButton onClick={() => onJump('approver-review:b1')}>Review pending</JumpButton>
             <JumpButton onClick={() => onJump('approver-review:b2')}>Mark paid</JumpButton>
             <JumpButton onClick={() => onJump('admin-employees')}>Manage employees</JumpButton>
-            <JumpButton onClick={() => onJump('ledger')}>Expense ledger</JumpButton>
           </>
         )}
       </Section>

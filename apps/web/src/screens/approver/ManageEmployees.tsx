@@ -541,7 +541,7 @@ function EmployeeCard({
   onEdit,
   onDelete,
 }: EmployeeCardProps): JSX.Element {
-  const roleLabel = user.role === 'approver' ? 'ผู้อนุมัติ' : user.role === 'admin' ? 'แอดมิน' : 'พนักงาน';
+  const roleLabel = user.role === 'approver' ? 'ผู้อนุมัติ' : 'พนักงาน';
 
   return (
     <div
@@ -696,7 +696,7 @@ function UserRow({
   onEdit,
   onDelete,
 }: UserRowProps): JSX.Element {
-  const roleLabel = user.role === 'approver' ? 'ผู้อนุมัติ' : user.role === 'admin' ? 'แอดมิน' : 'พนักงาน';
+  const roleLabel = user.role === 'approver' ? 'ผู้อนุมัติ' : 'พนักงาน';
   return (
     <div
       style={{
@@ -1057,12 +1057,6 @@ function UserFormModal({
             label="ผู้อนุมัติ"
             active={role === 'approver'}
             onClick={() => setRole('approver')}
-          />
-          <RoleToggle
-            theme={theme}
-            label="แอดมิน"
-            active={role === 'admin'}
-            onClick={() => setRole('admin')}
           />
         </div>
       </ModalField>

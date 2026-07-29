@@ -42,8 +42,9 @@ function cardErrorText(err: unknown): string {
 }
 
 /** Contact point shown when the user has no account or needs help.
- *  Change to a LINE deep-link, mailto:, or tel: as appropriate. */
-const ADMIN_CONTACT = 'mailto:admin@example.com';
+ *  Accounts are admin-created (no self-signup), so this reaches the approver
+ *  who can add the badge/email mapping. */
+const ADMIN_CONTACT = 'mailto:winut.hf@gmail.com';
 
 interface LoginProps {
   /** Optional theme — Login is shown pre-auth, so a default is provided. */
