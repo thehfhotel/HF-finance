@@ -24,26 +24,6 @@ const THAI_MONTHS = [
   'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.',
 ];
 
-/**
- * Returns a relative Thai expiry string for a linking code.
- * future >1h  → "หมดอายุในอีก N ชม."
- * future <=1h → "หมดอายุในอีก N นาที"
- * past        → "หมดอายุแล้ว"
- */
-export function formatExpiry(iso: string): string {
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return 'หมดอายุแล้ว';
-  const diffMs = t - Date.now();
-  if (diffMs <= 0) return 'หมดอายุแล้ว';
-  const diffMinutes = Math.floor(diffMs / 60_000);
-  if (diffMinutes >= 60) {
-    const hours = Math.floor(diffMinutes / 60);
-    return `หมดอายุในอีก ${hours} ชม.`;
-  }
-  const minutes = Math.max(1, diffMinutes);
-  return `หมดอายุในอีก ${minutes} นาที`;
-}
-
 export function formatThaiDate(s: string | null | undefined): string {
   if (!s || typeof s !== 'string') return s ?? '';
   // Accepts both YYYY-MM-DD and ISO datetimes like 2026-04-23T12:34:56.000Z.

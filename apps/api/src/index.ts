@@ -5,7 +5,7 @@ import { prisma } from './db';
 import { meRoutes } from './routes/me';
 import { receiptRoutes } from './routes/receipts';
 import { bundleRoutes } from './routes/bundles';
-import { authLineRoutes } from './routes/auth_line';
+import { authCfRoutes } from './routes/auth_cf';
 import { authCardRoutes } from './routes/auth_card';
 import { adminRoutes } from './routes/admin';
 
@@ -49,7 +49,7 @@ const app = new Elysia()
       .use(meRoutes)
       .use(receiptRoutes)
       .use(bundleRoutes)
-      .use(authLineRoutes)
+      .use(authCfRoutes)
       .use(authCardRoutes)
       .use(adminRoutes),
   )

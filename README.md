@@ -1,12 +1,14 @@
 # reimbursement-v2
 
 Internal hotel-ops expense reimbursement app for **HF Hotel** & **HF Ville**.
-Employees submit receipts via LINE login, the manager reviews and pays.
+Employees submit receipts, the manager reviews and pays. Login is behind the
+Cloudflare Access wall — Google for managers, HF ID for employees (also
+usable via NFC staff-card tap) — then a silent token exchange.
 
 ## Stack
 
-Bun · Elysia · Prisma · Postgres · Vite · React · TypeScript · LINE OAuth ·
-Docker · GitHub Actions
+Bun · Elysia · Prisma · Postgres · Vite · React · TypeScript · Cloudflare
+Access + NFC card login · Docker · GitHub Actions
 
 ## Run it locally
 
@@ -17,13 +19,13 @@ bun install
 bun run db:up           # Postgres on :5433 in Docker
 bun run db:migrate      # apply schema
 bun run db:seed         # sample users + receipts
-cp .env.example .env    # fill in LINE_CHANNEL_ID + JWT_SECRET
+cp .env.example .env    # fill in JWT_SECRET (Cloudflare Access + card login are optional locally)
 bun run dev:api         # API on :3001
 bun run dev:web         # frontend on :5173
 ```
 
 Open <http://localhost:5173>. In dev, the tweaks panel on the right lets you
-swap between seeded users without going through LINE OAuth.
+swap between seeded users without going through Cloudflare Access.
 
 ## Layout
 
@@ -32,7 +34,7 @@ swap between seeded users without going through LINE OAuth.
 - `packages/shared` — API contract types shared by both
 - `Dockerfile.api`, `Dockerfile.web`, `docker-compose.production.yml` — prod images
 - `.github/workflows/deploy.yml` — build → SSH-deploy to evergreen
-- `DEPLOYMENT.md` — first-deploy walkthrough (DNS, LINE callback URL, secrets)
+- `DEPLOYMENT.md` — first-deploy walkthrough (DNS, Cloudflare Access, secrets)
 - `CLAUDE.md` — contributor guide for AI-assisted edits
 - `SECURITY.md` — auth model and disclosure policy
 - `PORTS.md` — local & prod port map

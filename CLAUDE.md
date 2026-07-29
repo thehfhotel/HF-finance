@@ -19,7 +19,7 @@ This file is read by Claude Code when working in this repository.
 | Runtime | Bun 1.3+ |
 | Backend | Elysia + Prisma + Postgres |
 | Frontend | Vite + React 18 + TypeScript |
-| Auth | LINE OAuth (shared channel) → app-issued HS256 JWT (jose) |
+| Auth | Cloudflare Access (`Cf-Access-Jwt-Assertion` → app-issued HS256 JWT) + HF-ID NFC card login |
 | Workspace | Bun workspaces (`apps/*`, `packages/*`) |
 | Container | Docker (api + nginx-fronted SPA) |
 | Deploy | GitHub Actions → SSH → evergreen Ubuntu host |
@@ -49,10 +49,11 @@ Dockerfile.api, Dockerfile.web, docker-compose.production.yml
 - **Property** is a per-receipt dimension: `'hf-hotel'` | `'hf-ville'`. Default
   `hf-hotel`.
 - **JWT-only auth** in production. Dev mode honors `X-Dev-User-Id` header for
-  faster iteration without LINE round-trips (gated by `NODE_ENV !== 'production'`).
-- **LINE binding flow**: admin/approver pre-creates the User row + mints a 6-digit
-  `lineLinkingCode`. Employee logs in via LINE → enters the code → server writes
-  `lineId` and issues a full JWT.
+  faster iteration without a Cloudflare round-trip (gated by `NODE_ENV !== 'production'`).
+- **Identity mapping**: no self-signup — admin manages `badge` + `email` on the
+  User row. On login, the verified identity resolves by `email` exact match
+  first, else via the synthetic `<badge>@emp.thehfhotel.org` address → `badge`
+  match. No match → fail-closed 403.
 - **No tests yet** — Phase 6 territory. Don't add a test framework without asking.
 
 ## Important commands
@@ -87,3 +88,17 @@ bun run db:seed                # seed sample users + receipts + bundles
 - Don't commit the Notion export folder (`Private & Shared 2/`). It's gitignored
   and contains 1.2k receipt photos + business data. The CSV importer (Phase 5)
   will read from it locally and push to the prod DB once over SSH.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (thehfhotel/reimbursement-v2) via the `gh` CLI; external PRs are NOT a triage/request surface. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Canonical defaults (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), created on first use. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one root `CONTEXT.md` (lazy-created by /grill-with-docs) + `docs/adr/`. See `docs/agents/domain.md`.

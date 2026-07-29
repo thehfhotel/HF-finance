@@ -9,7 +9,8 @@ import { signAuthToken } from '../jwt';
  * Employees tap their card on a paired terminal; the browser drives a two-step
  * poll against these endpoints, and this API talks server-to-server to the
  * central HF-ID service to obtain (and verify) a signed card assertion, then
- * mints the SAME app-issued JWT session that the LINE OAuth flow produces.
+ * mints the SAME app-issued JWT session that the Cloudflare Access exchange
+ * (`auth_cf.ts`) produces.
  *
  *   POST /api/auth/card-login/start  { reader_id }
  *        → HF-ID  POST /api/private/reader/claim  (X-Reader-Secret)
@@ -252,13 +253,9 @@ export const authCardRoutes = new Elysia().group('/auth', (group) =>
         });
       }
 
-      // Mint the app's own session — identical to the LINE OAuth path, keyed on
-      // the internal User.id. lineUserId is informational only here; fall back
-      // to a badge-derived marker when the employee hasn't linked LINE.
-      const token = await signAuthToken({
-        lineUserId: user.lineId ?? `hfid:${badge}`,
-        userId: user.id,
-      });
+      // Mint the app's own session — identical shape to the Cloudflare Access
+      // path, keyed on the internal User.id. `badge` is informational only.
+      const token = await signAuthToken({ userId: user.id, badge });
 
       return { token, linked: true as const, redirect: '/' };
     }),

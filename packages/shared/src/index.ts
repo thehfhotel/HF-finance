@@ -88,24 +88,25 @@ export interface User {
   /** Initials for avatar (e.g. "มย"). */
   initials: string;
   /**
-   * Central HF-ID badge (the OIDC `sub`). When set, the employee can log in by
-   * tapping their NFC staff card at a terminal — the HF-ID service issues a
-   * signed assertion whose `sub` we resolve back to this row. Null = card login
-   * not available for this user (LINE login still works).
+   * Central HF-ID badge used by NFC card login and Cloudflare Access identity
+   * mapping. When set, the employee can log in by tapping their staff card at
+   * a terminal — the HF-ID service issues a signed assertion whose `sub` we
+   * resolve back to this row. Null = card login not available for this user.
    */
   badge: string | null;
-  lineId: string | null;
-  lineDisplayName: string | null;
-  linePictureUrl: string | null;
+  /**
+   * Login email for Cloudflare Access identity mapping, admin-managed, stored
+   * lowercased. Managers use their real Gmail; employees usually resolve via
+   * badge instead, through the synthetic `<badge>@emp.thehfhotel.org` address.
+   */
+  email: string | null;
 }
 
 /**
  * Extended User shape only ever returned to approvers/admins. Includes
- * the active 6-digit linking code so the admin UI can show / share it.
+ * the account creation timestamp so the admin UI can show it.
  */
 export interface AdminUser extends User {
-  lineLinkingCode: string | null;
-  lineLinkingCodeGeneratedAt: string | null;
   createdAt: string;
 }
 
@@ -115,24 +116,11 @@ export interface CreateUserRequest {
   initials: string;
   /** Optional HF-ID badge to enable NFC card login for this employee. */
   badge?: string | null;
+  /** Optional login email for Cloudflare Access identity mapping. */
+  email?: string | null;
 }
 
 export interface UpdateUserRequest extends Partial<CreateUserRequest> {}
-
-/** Auth response: a JWT + a flag indicating whether the user has been linked. */
-export interface AuthResponse {
-  token: string;
-  /** True once `userId` claim is set in the JWT (i.e. binding completed). */
-  linked: boolean;
-  /** Pre-link only: the LINE display name to greet the user with. */
-  displayName?: string;
-  pictureUrl?: string;
-}
-
-export interface LinkAccountRequest {
-  /** 6-digit numeric code an admin generated. */
-  code: string;
-}
 
 // ─── API contract types ──────────────────────────────────────────
 

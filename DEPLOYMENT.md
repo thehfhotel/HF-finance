@@ -24,6 +24,10 @@ evergreen (Ubuntu)
                               │
         Cloudflare Tunnel (asgard) ──▶ reimbursement.thehfhotel.org
                               │
+                    Cloudflare Access application (Google for managers,
+                    HF ID for employees) — managed in HF-erp's
+                    infra/cloudflare hostnames.json
+                              │
                        public internet
 ```
 
@@ -31,6 +35,10 @@ The web container has its own internal nginx — handles SPA fallback and
 proxies `/api` + `/uploads` to the api container. There is no host-level
 nginx; cloudflared routes the public hostname directly to host port 5800.
 The port is bound to the loopback so it's reachable only via the tunnel.
+The public hostname itself sits behind a Cloudflare Access application
+(managed in HF-erp's `infra/cloudflare/hostnames.json`, not in this repo);
+the app JWT exchange re-verifies the Access assertion at the origin rather
+than trusting the edge.
 
 ## Repo secrets (Settings → Secrets and variables → Actions)
 
@@ -41,8 +49,8 @@ The port is bound to the loopback so it's reachable only via the tunnel.
 | `CF_ACCESS_CLIENT_ID` | *(optional)* Cloudflare Access service token id, only if the evergreen SSH tunnel has an Access app |
 | `CF_ACCESS_CLIENT_SECRET` | *(optional)* Cloudflare Access service token secret |
 | `JWT_SECRET` | App JWT signing key — `openssl rand -base64 48` |
-| `LINE_CHANNEL_ID` | LINE Login channel id — **reuse the legacy reimbursement app's** (`2008209394`); the callback URL `/api/auth/callback/line` is already registered |
-| `LINE_CHANNEL_SECRET` | LINE Login channel secret for the same channel |
+| `CF_ACCESS_TEAM_DOMAIN` | *(optional)* Team domain for the login-verifying Access app, e.g. `laikaexpress.cloudflareaccess.com` — falls back to that default if unset |
+| `CF_ACCESS_AUD` | **Required.** AUD tag of the reimbursement Access application (Cloudflare Zero Trust → Access → Applications → app → Overview); read back via the Cloudflare API (`GET /accounts/:id/access/apps`) when auditing the app |
 | `POSTGRES_PASSWORD` | Strong DB password — `openssl rand -base64 32` |
 
 ## First-time setup
@@ -102,22 +110,7 @@ The deploy workflow auto-detects whether the secrets are set; if both are
 present it includes them in the cloudflared ProxyCommand, otherwise it
 runs without.
 
-### 5. LINE Developers console
-
-We reuse the **legacy reimbursement app's LINE Login channel** (`2008209394`).
-Its production callback URL `https://reimbursement.thehfhotel.org/api/auth/callback/line`
-is already registered, so **no console changes are needed for prod**.
-
-The route in our backend (`apps/api/src/routes/auth_line.ts`) is mounted at
-the NextAuth-style path `/api/auth/callback/line` deliberately so this URL
-keeps working — see CLAUDE.md.
-
-Local-dev LINE testing requires a localhost callback URL registered in the
-console; if you want it, add `http://localhost:5173/api/auth/callback/line`.
-For day-to-day local dev the tweaks panel's user-swap (`X-Dev-User-Id`)
-covers most flows without going through real LINE.
-
-### 6. Cloudflare tunnel cutover
+### 5. Cloudflare tunnel cutover
 
 The hostname `reimbursement.thehfhotel.org` already proxies through the
 asgard tunnel (CNAME exists), but the ingress rule still points at the OLD
@@ -149,7 +142,7 @@ curl -fsS -X PUT \
 Rollback is the same call with `:3000` (or whatever the previous port was)
 in place of `:5800`. Cloudflare propagates the change in under 60 seconds.
 
-### 7. Trigger the first deploy
+### 6. Trigger the first deploy
 
 ```bash
 git push origin main

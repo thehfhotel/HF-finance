@@ -9,19 +9,15 @@ const ISSUER = 'reimbursement-api';
 const AUDIENCE = 'reimbursement-web';
 
 /**
- * Claims carried in app-issued JWTs. Mirrors the fingerprint-time-logger pattern:
- * `lineUserId` is always present after LINE OAuth; `userId` is null until the
- * user binds their LINE account to an internal User record via the 6-digit code.
+ * Claims carried in app-issued JWTs. Issued after a verified Cloudflare Access
+ * login (email claim resolved to a User row) or an NFC card tap (badge
+ * resolved to a User row).
  */
 export interface AuthClaims {
-  /** LINE userId (the long `U…` string). Always set. */
-  lineUserId: string;
-  /** Internal User.id once linked. Null in the pre-link state. */
-  userId: string | null;
-  /** Pre-link only: the LINE display name to show on the binding page. */
-  displayName?: string;
-  /** Pre-link only: the LINE picture URL to show on the binding page. */
-  pictureUrl?: string;
+  /** Internal User.id. Always present — the pre-link state no longer exists. */
+  userId: string;
+  /** HF-ID badge when the session came from a card tap. Informational. */
+  badge?: string;
 }
 
 export async function signAuthToken(claims: AuthClaims): Promise<string> {
@@ -39,13 +35,11 @@ export async function verifyAuthToken(token: string): Promise<AuthClaims> {
     issuer: ISSUER,
     audience: AUDIENCE,
   });
-  if (typeof payload.lineUserId !== 'string') {
-    throw new Error('Token missing lineUserId');
+  if (typeof payload.userId !== 'string') {
+    throw new Error('Token missing userId');
   }
   return {
-    lineUserId: payload.lineUserId,
-    userId: typeof payload.userId === 'string' ? payload.userId : null,
-    displayName: typeof payload.displayName === 'string' ? payload.displayName : undefined,
-    pictureUrl: typeof payload.pictureUrl === 'string' ? payload.pictureUrl : undefined,
+    userId: payload.userId,
+    badge: typeof payload.badge === 'string' ? payload.badge : undefined,
   };
 }

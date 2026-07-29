@@ -27,8 +27,6 @@ import { Pay } from './screens/approver/Pay';
 import { DesktopApprover } from './screens/approver/Desktop';
 import { DesktopEmployee } from './screens/employee/Desktop';
 import { Login } from './screens/auth/Login';
-import { Callback } from './screens/auth/Callback';
-import { LinkAccount } from './screens/auth/LinkAccount';
 import { ManageEmployees } from './screens/approver/ManageEmployees';
 import { BottomNav } from './components/BottomNav';
 import type { BottomNavRoute } from './components/BottomNav';
@@ -47,15 +45,23 @@ function initialRouteFromUrl(): Route {
   if (typeof window === 'undefined') return { name: 'home' };
   const path = window.location.pathname;
   if (path === '/login') return { name: 'login' };
-  if (path === '/auth/callback') return { name: 'auth-callback' };
-  if (path === '/link-account') return { name: 'link-account' };
   if (path === '/admin/employees') return { name: 'admin-employees' };
   if (path === '/my-requests') return { name: 'my-requests' };
   return { name: 'home' };
 }
 
 function isPublicAuthRoute(route: Route): boolean {
-  return route.name === 'login' || route.name === 'auth-callback' || route.name === 'link-account';
+  return route.name === 'login';
+}
+
+/** Maps a failed silent `api.auth.cfLogin()` exchange to the Thai message
+ *  shown on the login screen. Login's own retry button uses the same mapping. */
+function cfLoginErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 403) return error.message;
+    if (error.status === 503) return 'ระบบเข้าสู่ระบบยังไม่พร้อมใช้งาน — ติดต่อผู้ดูแลระบบ';
+  }
+  return 'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
 }
 
 export function App() {
@@ -76,6 +82,7 @@ export function App() {
   const [myState, setMyState] = useState<AppState>(EMPTY_STATE); // approver's own requests
   const [loading, setLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [cfError, setCfError] = useState<string | null>(null);
 
   // ── Bootstrap auth + initial data load ──────────────────────────
   const refetch = useCallback(async (): Promise<void> => {
@@ -99,7 +106,15 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (isPublicAuthRoute(route) || route.name === 'admin-employees') {
+    if (isPublicAuthRoute(route)) {
+      setLoading(false);
+      return;
+    }
+
+    // Bootstrap once per identity: skip when the user is already resolved so
+    // in-app navigation doesn't re-run auth + refetch (which blanked the app
+    // with a spinner and could drop just-mutated data mid-flow).
+    if (currentUserRef.current !== null) {
       setLoading(false);
       return;
     }
@@ -109,21 +124,28 @@ export function App() {
 
     (async () => {
       try {
-        // Real JWT path: ask /api/auth/me to learn linked status.
+        // (1) Stored token (from a prior CF-login or card-login) → resolve
+        // identity via /api/me. The JWT itself is opaque to the client.
         if (getAuthToken() !== null) {
-          const meResponse = await api.auth.me();
-          if (cancelled) return;
-          if (!meResponse.linked || !meResponse.user) {
-            setRoute({ name: 'link-account' });
+          try {
+            const me = await api.me();
+            if (cancelled) return;
+            currentUserRef.current = me;
+            setCurrentUser(me);
+            await refetch();
             return;
+          } catch (error) {
+            if (cancelled) return;
+            if (!(error instanceof ApiError && (error.status === 401 || error.status === 403))) {
+              throw error;
+            }
+            // Stale/invalid token — clear it and fall through to dev
+            // impersonation (dev) or the silent CF Access exchange (prod).
+            setAuthToken(null);
           }
-          currentUserRef.current = meResponse.user;
-          setCurrentUser(meResponse.user);
-          await refetch();
-          return;
         }
 
-        // Dev impersonation path: skip OAuth, hit /api/me directly.
+        // (2) Dev impersonation path: skip real auth, hit /api/me directly.
         if (IS_DEV) {
           if (getDevUserId() === null) {
             setDevUserId(DEV_USER_ID_BY_ROLE[tweaks.role]);
@@ -136,8 +158,21 @@ export function App() {
           return;
         }
 
-        // No credentials in production → kick to login.
-        setRoute({ name: 'login' });
+        // (3) Production, no valid token → silent Cloudflare Access exchange.
+        // The edge already injected Cf-Access-Jwt-Assertion on this request;
+        // the server reads it and mints an app JWT with no user interaction.
+        try {
+          const response = await api.auth.cfLogin();
+          if (cancelled) return;
+          setAuthToken(response.token);
+          currentUserRef.current = response.user;
+          setCurrentUser(response.user);
+          await refetch();
+        } catch (error) {
+          if (cancelled) return;
+          setCfError(cfLoginErrorMessage(error));
+          setRoute({ name: 'login' });
+        }
       } catch (error) {
         if (cancelled) return;
         if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
@@ -156,6 +191,16 @@ export function App() {
     };
   }, [route, refetch, tweaks.role]);
 
+  // ── Silent refresh on top-level screens ──────────────────────────
+  // Bootstrap runs once, so returning to a list screen re-syncs server truth
+  // in the background (no spinner, no unmount) to pick up status changes.
+  useEffect(() => {
+    const REFRESH_ROUTES: ReadonlySet<Route['name']> = new Set(['home', 'approver-home', 'my-requests']);
+    if (!REFRESH_ROUTES.has(route.name)) return;
+    if (currentUserRef.current === null) return;
+    void refetch();
+  }, [route, refetch]);
+
   // ── URL sync — keep the address bar in step with the route name ─
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -172,7 +217,10 @@ export function App() {
     prevRoleRef.current = tweaks.role;
     if (IS_DEV && getAuthToken() === null) {
       setDevUserId(DEV_USER_ID_BY_ROLE[tweaks.role]);
-      // Force a re-bootstrap by nudging the route — same name, new identity.
+      // Clear the resolved identity so the bootstrap effect runs again for
+      // the new dev user (it skips whenever currentUserRef is set).
+      currentUserRef.current = null;
+      setCurrentUser(null);
       setLoading(true);
       setRoute(tweaks.role === 'employee' ? { name: 'home' } : { name: 'approver-home' });
     }
@@ -207,16 +255,9 @@ export function App() {
     setRoute({ name: 'login' });
   };
 
-  // ── Public auth screens — no IOSDevice frame, no tweaks panel ────
-  if (route.name === 'login' || route.name === 'auth-callback' || route.name === 'link-account') {
-    const inner =
-      route.name === 'login' ? (
-        <Login theme={theme} />
-      ) : route.name === 'auth-callback' ? (
-        <Callback nav={nav} theme={theme} />
-      ) : (
-        <LinkAccount nav={nav} theme={theme} />
-      );
+  // ── Public auth screen — no IOSDevice frame, no tweaks panel ─────
+  if (route.name === 'login') {
+    const inner = <Login theme={theme} cfError={cfError} />;
 
     // On desktop: center a ~420px column on the paper background.
     if (viewportPlatform === 'desktop') {
@@ -378,12 +419,33 @@ export function App() {
   const reqState = role === 'approver' ? myState : state;
   const reqSetState = role === 'approver' ? setMyState : setState;
 
-  const screen = renderScreen({ route, theme, state, setState, reqState, reqSetState, nav, role, currentUser });
+  // For an approver working in requestor mode, "back to home" from a requestor
+  // sub-screen should land on their own requests, not the approver inbox.
+  const reqNav: typeof nav =
+    role === 'approver' ? (r) => nav(r.name === 'home' ? { name: 'my-requests' } : r) : nav;
+
+  const screen = renderScreen({
+    route,
+    theme,
+    state,
+    setState,
+    reqState,
+    reqSetState,
+    nav,
+    reqNav,
+    role,
+    currentUser,
+    onLogout: handleLogout,
+  });
 
   // Bottom nav is visible on top-level screens only (not sub-screens or auth).
   const BOTTOM_NAV_ROUTES = new Set<Route['name']>(['home', 'approver-home', 'my-requests']);
   const showBottomNav = platform === 'mobile' && BOTTOM_NAV_ROUTES.has(route.name);
   const handleBottomNav = (r: BottomNavRoute) => setRoute({ name: r } as Route);
+  // An approver landing at '/' sits on route 'home' but sees the Inbox —
+  // highlight the matching bottom-nav item.
+  const activeBottomRoute: BottomNavRoute =
+    route.name === 'home' && role === 'approver' ? 'approver-home' : (route.name as BottomNavRoute);
 
   // FAB is mobile-only; desktop home has the explicit + button in the AppBar.
   // Hide the FAB when the bottom nav is visible (it includes the "เพิ่ม" entry).
@@ -406,6 +468,7 @@ export function App() {
               else setRoute({ name: 'admin-employees' });
             }}
             currentUser={currentUser}
+            onLogout={handleLogout}
           />
         ) : role === 'approver' ? (
           <DesktopEmployee
@@ -414,9 +477,16 @@ export function App() {
             setState={setMyState}
             currentUser={currentUser}
             onBackToInbox={() => setRoute({ name: 'approver-home' })}
+            onLogout={handleLogout}
           />
         ) : (
-          <DesktopEmployee theme={theme} state={state} setState={setState} />
+          <DesktopEmployee
+            theme={theme}
+            state={state}
+            setState={setState}
+            currentUser={currentUser}
+            onLogout={handleLogout}
+          />
         )}
         {IS_DEV && <TweaksPanel tweaks={tweaks} onChange={setTweak} onJump={onJump} />}
       </>
@@ -439,7 +509,7 @@ export function App() {
       {showBottomNav && (
         <BottomNav
           role={role}
-          activeRoute={route.name as BottomNavRoute}
+          activeRoute={activeBottomRoute}
           theme={theme}
           onNavigate={handleBottomNav}
         />
@@ -516,18 +586,20 @@ interface RenderArgs {
   reqState: AppState;
   reqSetState: (updater: (s: AppState) => AppState) => void;
   nav: (r: Route) => void;
+  reqNav: (r: Route) => void;
   role: Tweaks['role'];
   currentUser: User | null;
+  onLogout: () => void;
 }
 
-function renderScreen({ route, theme, state, setState, reqState, reqSetState, nav, role, currentUser }: RenderArgs) {
+function renderScreen({ route, theme, state, setState, reqState, reqSetState, nav, reqNav, role, currentUser, onLogout }: RenderArgs) {
   // Requestor flow — available to any signed-in user (owner-scoped data)
-  if (route.name === 'upload') return <Upload theme={theme} state={reqState} nav={nav} setState={reqSetState} editId={route.editId} />;
-  if (route.name === 'record') return <RecordDetail theme={theme} state={reqState} setState={reqSetState} nav={nav} recordId={route.id} />;
-  if (route.name === 'bundle-new') return <BundleBuilder theme={theme} state={reqState} nav={nav} setState={reqSetState} preselectId={route.id} />;
+  if (route.name === 'upload') return <Upload theme={theme} state={reqState} nav={reqNav} setState={reqSetState} editId={route.editId} />;
+  if (route.name === 'record') return <RecordDetail theme={theme} state={reqState} setState={reqSetState} nav={reqNav} recordId={route.id} />;
+  if (route.name === 'bundle-new') return <BundleBuilder theme={theme} state={reqState} nav={reqNav} setState={reqSetState} preselectId={route.id} />;
   if (route.name === 'bundle-submitted')
-    return <BundleSubmitted theme={theme} state={reqState} nav={nav} bundleId={route.id} />;
-  if (route.name === 'bundle') return <BundleDetail theme={theme} state={reqState} nav={nav} bundleId={route.id} />;
+    return <BundleSubmitted theme={theme} state={reqState} nav={reqNav} bundleId={route.id} />;
+  if (route.name === 'bundle') return <BundleDetail theme={theme} state={reqState} nav={reqNav} bundleId={route.id} />;
   if (route.name === 'my-requests')
     return <Home theme={theme} state={reqState} nav={nav} currentUser={currentUser} isApprover={role === 'approver'} />;
 
@@ -537,21 +609,18 @@ function renderScreen({ route, theme, state, setState, reqState, reqSetState, na
   if (route.name === 'approver-pay')
     return <Pay theme={theme} state={state} nav={nav} bundleId={route.id} setState={setState} />;
   if (route.name === 'approver-home')
-    return <Inbox theme={theme} state={state} nav={nav} currentUser={currentUser} />;
+    return <Inbox theme={theme} state={state} nav={nav} currentUser={currentUser} onLogout={onLogout} />;
 
   // 'home': employee → requestor Home; approver → inbox
-  if (role === 'employee') return <Home theme={theme} state={reqState} nav={nav} currentUser={currentUser} />;
-  return <Inbox theme={theme} state={state} nav={nav} currentUser={currentUser} />;
+  if (role === 'employee')
+    return <Home theme={theme} state={reqState} nav={nav} currentUser={currentUser} onLogout={onLogout} />;
+  return <Inbox theme={theme} state={state} nav={nav} currentUser={currentUser} onLogout={onLogout} />;
 }
 
 function pathForRoute(route: Route): string {
   switch (route.name) {
     case 'login':
       return '/login';
-    case 'auth-callback':
-      return '/auth/callback';
-    case 'link-account':
-      return '/link-account';
     case 'admin-employees':
       return '/admin/employees';
     case 'my-requests':

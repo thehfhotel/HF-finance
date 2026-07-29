@@ -65,14 +65,16 @@ services:
       API_PORT: "3001"
       DATABASE_URL: ${DATABASE_URL}
       JWT_SECRET: ${JWT_SECRET}
-      LINE_CHANNEL_ID: ${LINE_CHANNEL_ID}
-      LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET}
-      LINE_REDIRECT_URI: ${LINE_REDIRECT_URI}
       WEB_BASE_URL: ${WEB_BASE_URL}
+      # Cloudflare Access login. CF_ACCESS_AUD absent → CF login fails closed
+      # (503); card login fails closed the same way without
+      # READER_RESOLVE_SECRET, below — the two are independent.
+      CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:-laikaexpress.cloudflareaccess.com}
+      CF_ACCESS_AUD: ${CF_ACCESS_AUD:-}
       # NFC staff-card login → central HF-ID service. Compose only forwards
       # vars listed here, so these MUST be enumerated (they come from .env,
       # materialized by the deploy job). READER_RESOLVE_SECRET absent → card
-      # login fails closed (503); LINE login is unaffected.
+      # login fails closed (503).
       READER_RESOLVE_SECRET: ${READER_RESOLVE_SECRET:-}
       HF_ID_BASE_URL: ${HF_ID_BASE_URL:-http://192.168.100.228:5000}
       HF_ID_ISSUER: ${HF_ID_ISSUER:-https://id.thehfhotel.org/oidc}

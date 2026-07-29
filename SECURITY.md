@@ -43,12 +43,17 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 
 ## Security measures
 
-- **Authentication**: LINE OAuth → server-issued HS256 JWT (jose). 24h expiry.
-  Pre-link tokens (no `userId` claim) only authorize the binding endpoint.
+- **Authentication**: Cloudflare Access edge wall in front of the SPA, plus
+  origin-side re-verification — the api never trusts the `Cf-Access-Jwt-Assertion`
+  header at face value. It verifies the RS256 signature against the team's
+  JWKS and pins `iss`/`aud` before minting the app's own server-issued HS256
+  JWT (jose, 24h expiry). NFC staff-card login follows the same pattern against
+  the central HF-ID service's JWKS.
 - **Authorization**: Role-based access (`employee` / `approver`). Approver-only
   endpoints check `user.role === 'APPROVER'` server-side before mutation.
-- **Account binding**: New users are admin-created and bound to a LINE id via a
-  6-digit single-use code with 24h expiry. No self-signup.
+- **Account binding**: No self-signup. Admins manage the `badge` (NFC card /
+  employee identity) and `email` (Cloudflare Access identity) mapping directly
+  on the User row — there is no auto-provisioning from either login path.
 - **Input validation**: Elysia `t.Object` schemas on every body/query/multipart.
 - **Database**: Prisma ORM with parameterized queries.
 - **Secrets**: `.env` and `.env*.local` are gitignored. Production secrets live

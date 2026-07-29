@@ -215,8 +215,8 @@ jobs:
         # straight into the deploy host with mode 0600.
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          LINE_CHANNEL_ID: ${{ secrets.LINE_CHANNEL_ID }}
-          LINE_CHANNEL_SECRET: ${{ secrets.LINE_CHANNEL_SECRET }}
+          CF_ACCESS_TEAM_DOMAIN: ${{ secrets.CF_ACCESS_TEAM_DOMAIN || 'laikaexpress.cloudflareaccess.com' }}
+          CF_ACCESS_AUD: ${{ secrets.CF_ACCESS_AUD }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           # NFC staff-card login → central HF-ID service. The secret is optional:
           # if unset, card login stays disabled (503) and nothing else breaks.
@@ -227,7 +227,7 @@ jobs:
           IMAGE_TAG: sha-${{ github.sha }}
         run: |
           set -euo pipefail
-          for var in JWT_SECRET LINE_CHANNEL_ID LINE_CHANNEL_SECRET POSTGRES_PASSWORD; do
+          for var in JWT_SECRET CF_ACCESS_AUD POSTGRES_PASSWORD; do
             if [ -z "${!var:-}" ]; then
               echo "::error::required secret $var is empty"
               exit 1
@@ -249,10 +249,9 @@ jobs:
           DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/reimbursement
           JWT_SECRET=${JWT_SECRET}
 
-          # LINE Login
-          LINE_CHANNEL_ID=${LINE_CHANNEL_ID}
-          LINE_CHANNEL_SECRET=${LINE_CHANNEL_SECRET}
-          LINE_REDIRECT_URI=https://reimbursement.thehfhotel.org/api/auth/callback/line
+          # Cloudflare Access login
+          CF_ACCESS_TEAM_DOMAIN=${CF_ACCESS_TEAM_DOMAIN}
+          CF_ACCESS_AUD=${CF_ACCESS_AUD}
           WEB_BASE_URL=https://reimbursement.thehfhotel.org
 
           # NFC staff-card login (central HF-ID service)

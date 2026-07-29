@@ -3,9 +3,6 @@ import type { Theme } from '../../lib/types';
 import { FONT_DISPLAY, FONT_UI, getTheme } from '../../lib/theme';
 import { ApiError, api, setAuthToken } from '../../lib/api';
 
-const LINE_BRAND_GREEN = '#06C755';
-const LINE_LOGIN_REDIRECT = '/api/auth/login/line?redirect=' + encodeURIComponent('/');
-
 /** Per-terminal reader id, paired once and remembered in this browser. */
 const READER_ID_STORAGE_KEY = 'reimbursement_reader_id';
 /** Poll cadence + overall deadline for waiting on a card tap. */
@@ -51,29 +48,36 @@ const ADMIN_CONTACT = 'mailto:admin@example.com';
 interface LoginProps {
   /** Optional theme — Login is shown pre-auth, so a default is provided. */
   theme?: Theme;
+  /** Thai error message from a failed silent Cloudflare Access exchange that
+   *  ran during app bootstrap, if any — seeds the screen's error banner. */
+  cfError?: string | null;
 }
 
-/** OAuth failure reason forwarded by the API's /auth/error redirect. */
-function loginErrorFromUrl(): string | null {
-  if (typeof window === 'undefined') return null;
-  const reason = new URLSearchParams(window.location.search).get('reason');
-  if (!reason) return null;
-  const messages: Record<string, string> = {
-    access_denied: 'คุณยกเลิกการเข้าสู่ระบบด้วย LINE',
-    line_api_error: 'เชื่อมต่อ LINE ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง',
-    line_not_configured: 'ระบบยังไม่ได้ตั้งค่า LINE Login — กรุณาติดต่อผู้ดูแลระบบ',
-    invalid_state: 'ลิงก์เข้าสู่ระบบหมดอายุ กรุณาลองใหม่อีกครั้ง',
-    expired_state: 'ลิงก์เข้าสู่ระบบหมดอายุ กรุณาลองใหม่อีกครั้ง',
-    missing_code_or_state: 'ลิงก์เข้าสู่ระบบไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง',
-  };
-  return messages[reason] ?? 'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
+/** Maps a failed `api.auth.cfLogin()` to the Thai message shown on this
+ *  screen — mirrors the mapping App.tsx uses for the silent bootstrap attempt. */
+function cfLoginErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 403) return error.message;
+    if (error.status === 503) return 'ระบบเข้าสู่ระบบยังไม่พร้อมใช้งาน — ติดต่อผู้ดูแลระบบ';
+  }
+  return 'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
 }
 
-export function Login({ theme = getTheme(false, '#262626') }: LoginProps) {
-  const errorMessage = loginErrorFromUrl();
+export function Login({ theme = getTheme(false, '#262626'), cfError = null }: LoginProps) {
+  const [errorMessage, setErrorMessage] = useState<string | null>(cfError);
+  const [submitting, setSubmitting] = useState<boolean>(false);
 
-  const handleLineLogin = () => {
-    window.location.href = LINE_LOGIN_REDIRECT;
+  const handleCfLogin = async () => {
+    setSubmitting(true);
+    setErrorMessage(null);
+    try {
+      const result = await api.auth.cfLogin();
+      setAuthToken(result.token);
+      window.location.assign('/');
+    } catch (error) {
+      setErrorMessage(cfLoginErrorMessage(error));
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -131,7 +135,7 @@ export function Login({ theme = getTheme(false, '#262626') }: LoginProps) {
             lineHeight: 1.5,
           }}
         >
-          เข้าสู่ระบบด้วย LINE เพื่อเริ่มใช้งาน
+          แตะบัตรพนักงาน หรือเข้าสู่ระบบผ่านระบบกลางของบริษัท
         </div>
         {errorMessage && (
           <div
@@ -154,7 +158,7 @@ export function Login({ theme = getTheme(false, '#262626') }: LoginProps) {
       </div>
 
       <div style={{ padding: '0 20px 30px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <LineLoginButton onClick={handleLineLogin} />
+        <CfLoginButton theme={theme} onClick={handleCfLogin} submitting={submitting} />
         <CardLoginSection theme={theme} />
         <a
           href={ADMIN_CONTACT}
@@ -177,18 +181,21 @@ export function Login({ theme = getTheme(false, '#262626') }: LoginProps) {
   );
 }
 
-interface LineLoginButtonProps {
+interface CfLoginButtonProps {
+  theme: Theme;
+  submitting: boolean;
   onClick: () => void;
 }
 
-function LineLoginButton({ onClick }: LineLoginButtonProps) {
+function CfLoginButton({ theme, submitting, onClick }: CfLoginButtonProps) {
   return (
     <button
       onClick={onClick}
+      disabled={submitting}
       style={{
         width: '100%',
         padding: '15px 22px',
-        background: LINE_BRAND_GREEN,
+        background: theme.accent,
         color: '#fff',
         border: 'none',
         borderRadius: 14,
@@ -196,15 +203,15 @@ function LineLoginButton({ onClick }: LineLoginButtonProps) {
         fontSize: 16,
         fontWeight: 600,
         letterSpacing: 0.1,
-        cursor: 'pointer',
+        cursor: submitting ? 'default' : 'pointer',
+        opacity: submitting ? 0.7 : 1,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         gap: 12,
       }}
     >
-      <LineGlyph />
-      <span>เข้าสู่ระบบด้วย LINE</span>
+      <span>{submitting ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบผ่านระบบกลาง HF'}</span>
     </button>
   );
 }
@@ -576,34 +583,6 @@ function CardGlyph({ color }: { color: string }) {
       <rect x="2.5" y="5.5" width="19" height="13" rx="2.5" fill="none" stroke={color} strokeWidth="1.6" />
       <line x1="2.5" y1="9.5" x2="21.5" y2="9.5" stroke={color} strokeWidth="1.6" />
       <line x1="5.5" y1="14.5" x2="11" y2="14.5" stroke={color} strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function LineGlyph() {
-  return (
-    <svg
-      viewBox="0 0 36 36"
-      width={22}
-      height={22}
-      aria-hidden="true"
-      focusable="false"
-      style={{ display: 'block' }}
-    >
-      <rect x="0" y="0" width="36" height="36" rx="8" ry="8" fill="#ffffff" fillOpacity={0.16} />
-      <text
-        x="50%"
-        y="54%"
-        textAnchor="middle"
-        dominantBaseline="middle"
-        fill="#ffffff"
-        fontFamily="Arial, sans-serif"
-        fontSize="11"
-        fontWeight={700}
-        letterSpacing="0.5"
-      >
-        LINE
-      </text>
     </svg>
   );
 }

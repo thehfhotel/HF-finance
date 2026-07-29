@@ -54,9 +54,7 @@ export function serializeUser(user: PrismaUser): SharedUser {
     role: roleToShared(user.role),
     initials: user.initials,
     badge: user.badge,
-    lineId: user.lineId,
-    lineDisplayName: user.lineDisplayName,
-    linePictureUrl: user.linePictureUrl,
+    email: user.email,
   };
 }
 
@@ -118,17 +116,13 @@ export function serializeBundleWithDetails(
 }
 
 /**
- * Admin-only user shape that exposes the active LINE binding code and
- * timestamps. Returned exclusively from `/api/admin/*` endpoints, which
- * are gated to APPROVER role.
+ * Admin-only user shape that exposes the account creation timestamp.
+ * Returned exclusively from `/api/admin/*` endpoints, which are gated to
+ * APPROVER role.
  */
 export function serializeAdminUser(user: PrismaUser): AdminUser {
   return {
     ...serializeUser(user),
-    lineLinkingCode: user.lineLinkingCode,
-    lineLinkingCodeGeneratedAt: user.lineLinkingCodeGeneratedAt
-      ? user.lineLinkingCodeGeneratedAt.toISOString()
-      : null,
     createdAt: user.createdAt.toISOString(),
   };
 }

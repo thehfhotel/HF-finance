@@ -1,6 +1,5 @@
 import type {
   AdminUser,
-  AuthResponse,
   Bundle,
   BundleStatus,
   BundleWithDetails,
@@ -49,7 +48,7 @@ export function getAuthToken(): string | null {
 
 // ─── Dev impersonation (DEV mode only) ───────────────────────────
 // In dev, the tweaks panel can swap between seeded users without going
-// through the real LINE OAuth flow. When set, the API client forwards
+// through the real Cloudflare Access flow. When set, the API client forwards
 // `X-Dev-User-Id` instead of `Authorization: Bearer`. The API's auth
 // middleware honors this header only when NODE_ENV !== 'production'.
 
@@ -212,19 +211,6 @@ export function payFormFromFields(transferRef: string, proof: File): FormData {
 // ─── Auth response shapes ────────────────────────────────────────
 
 /**
- * Shape returned by `GET /api/auth/me`. When the JWT is a pre-link token
- * (no `userId` claim), `user` is `null` and the LINE profile fields describe
- * the just-authenticated LINE account that still needs to be bound.
- */
-export interface AuthMeResponse {
-  linked: boolean;
-  user: User | null;
-  lineUserId: string | null;
-  displayName?: string;
-  pictureUrl?: string;
-}
-
-/**
  * Result of a successful `GET /api/auth/card-login/wait` (HTTP 200). A 204 is
  * surfaced as `null` by the request helper (keep polling); a 4xx throws.
  */
@@ -234,15 +220,27 @@ export interface CardLoginResult {
   redirect: string;
 }
 
+/**
+ * Result of a successful `POST /api/auth/cf-login` — the silent exchange of
+ * the edge-injected Cloudflare Access identity for an app JWT.
+ */
+export interface CfLoginResponse {
+  token: string;
+  user: User;
+}
+
 // ─── Endpoints ───────────────────────────────────────────────────
 
 export const api = {
   me: (): Promise<User> => request<User>('/api/me'),
 
   auth: {
-    me: (): Promise<AuthMeResponse> => request<AuthMeResponse>('/api/auth/me'),
-    linkAccount: (payload: { code: string }): Promise<AuthResponse> =>
-      request<AuthResponse>('/api/auth/link-account', jsonBody(payload)),
+    // ── Cloudflare Access → app-JWT exchange ──
+    // The SPA sits behind a CF Access wall in prod; the edge injects a
+    // `Cf-Access-Jwt-Assertion` header on every request. This exchanges that
+    // header (read server-side) for an app-issued JWT + the bound User.
+    cfLogin: (): Promise<CfLoginResponse> =>
+      request<CfLoginResponse>('/api/auth/cf-login', { method: 'POST' }),
     // ── NFC staff-card login ──
     // start opens a claim against the central HF-ID service for this terminal;
     // the claim_token is kept server-side in an HttpOnly cookie, so wait() takes
@@ -302,15 +300,6 @@ export const api = {
       request<AdminUser>(`/api/admin/users/${encodeURIComponent(id)}`, jsonPatchBody(req)),
     deleteUser: (id: string): Promise<void> =>
       request<void>(`/api/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    generateLineCode: (id: string): Promise<{ code: string; expiresAt: string }> =>
-      request<{ code: string; expiresAt: string }>(
-        `/api/admin/users/${encodeURIComponent(id)}/line-code`,
-        { method: 'POST' },
-      ),
-    revokeLineCode: (id: string): Promise<void> =>
-      request<void>(`/api/admin/users/${encodeURIComponent(id)}/line-code`, {
-        method: 'DELETE',
-      }),
   },
 };
 

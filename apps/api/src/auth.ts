@@ -11,15 +11,15 @@ const ALLOW_DEV_USER_HEADER = process.env.NODE_ENV === 'development';
  * JWT-backed authentication plugin.
  *
  * Looks for `Authorization: Bearer <jwt>`, verifies it, and resolves the
- * internal `User` via the `userId` claim. Pre-link tokens (where `userId`
- * is null because the user has not yet entered their 6-digit binding code)
- * are rejected here — those should hit `/api/auth/line/link-account` instead.
+ * internal `User` via the `userId` claim. The token is issued after a
+ * verified Cloudflare Access login or an NFC card tap, so `userId` is always
+ * present here.
  *
  * In dev, we additionally honor `X-Dev-User-Id: <userId>` so the existing
  * tweaks panel "view as employee/approver" toggle keeps working without
- * forcing a real LINE OAuth round-trip during local development. This bypass
- * is enabled ONLY when `NODE_ENV=development`, so it fails closed when NODE_ENV
- * is unset or set to anything else (production included).
+ * forcing a real Cloudflare Access round-trip during local development. This
+ * bypass is enabled ONLY when `NODE_ENV=development`, so it fails closed when
+ * NODE_ENV is unset or set to anything else (production included).
  */
 export const auth = new Elysia({ name: 'auth' }).derive(
   { as: 'scoped' },
@@ -46,40 +46,11 @@ export const auth = new Elysia({ name: 'auth' }).derive(
       return status(401, { message: 'Invalid or expired token' });
     }
 
-    if (!claims.userId) {
-      return status(403, {
-        message: 'Account not linked. Submit your 6-digit binding code first.',
-      });
-    }
-
     const user = await prisma.user.findUnique({ where: { id: claims.userId } });
     if (!user) {
       return status(401, { message: 'User no longer exists' });
     }
 
     return { user };
-  },
-);
-
-/**
- * Looser variant of `auth` that allows pre-link tokens through. Used by
- * the LINE binding endpoint, which needs to authenticate the LINE user
- * even before they have an internal User record.
- */
-export const prelinkAuth = new Elysia({ name: 'prelinkAuth' }).derive(
-  { as: 'scoped' },
-  async ({ headers, status }) => {
-    const authz = headers.authorization;
-    if (!authz?.startsWith('Bearer ')) {
-      return status(401, { message: 'Missing Authorization: Bearer header' });
-    }
-    const token = authz.slice('Bearer '.length).trim();
-
-    try {
-      const claims = await verifyAuthToken(token);
-      return { claims };
-    } catch {
-      return status(401, { message: 'Invalid or expired token' });
-    }
   },
 );

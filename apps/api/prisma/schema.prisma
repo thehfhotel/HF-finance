@@ -32,12 +32,10 @@ model User {
   /// HF-ID service resolve to this app's internal User. Optional + unique: a badge
   /// maps to at most one employee, and rows without a badge simply can't card-login.
   badge                      String?  @unique
-  lineId                     String?  @unique
-  lineDisplayName            String?
-  linePictureUrl             String?
-  /// 6-digit numeric code an admin generates so the user can bind their LINE id on first login.
-  lineLinkingCode            String?  @unique
-  lineLinkingCodeGeneratedAt DateTime?
+  /// Login email for Cloudflare Access identity mapping, stored lowercased,
+  /// admin-managed. Optional + unique: maps at most one Access identity to
+  /// this row.
+  email                      String?  @unique
   createdAt                  DateTime @default(now())
 
   receipts        Receipt[]

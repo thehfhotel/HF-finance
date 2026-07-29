@@ -9,8 +9,6 @@ export type Route =
   | { name: 'approver-review'; id: string }
   | { name: 'approver-pay'; id: string }
   | { name: 'login' }
-  | { name: 'auth-callback' }
-  | { name: 'link-account' }
   | { name: 'admin-employees' }
   | { name: 'my-requests' };
 

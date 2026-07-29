@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { ApiError, api } from '../../lib/api';
-import { formatExpiry, formatThaiDate } from '../../lib/format';
+import { formatThaiDate } from '../../lib/format';
 import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../../lib/theme';
 import type { AdminUser, CreateUserRequest, Role, Theme, UpdateUserRequest } from '../../lib/types';
 import { useViewportPlatform } from '../../lib/useViewportPlatform';
@@ -10,21 +10,12 @@ import { AppBar } from '../../components/AppBar';
 import { Avatar, Card, GhostButton, IconBtn, PrimaryButton } from '../../components/primitives';
 import { Icon } from '../../components/icons';
 
-const LINE_CODE_TTL_MS = 24 * 60 * 60 * 1000;
-
 const TABLE_GRID_COLUMNS = '40px 1.5fr 1.4fr 1fr 80px';
 
 interface ManageEmployeesProps {
   theme: Theme;
   /** Optional — when set, the back action navigates via the app's router instead of `window.history.back()`. */
   onBack?: () => void;
-}
-
-interface CodeDisplay {
-  userId: string;
-  userName: string;
-  code: string;
-  expiresAt: string;
 }
 
 interface ToastMessage {
@@ -42,8 +33,6 @@ export function ManageEmployees({ theme, onBack }: ManageEmployeesProps): JSX.El
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<AdminUser | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [codeDisplay, setCodeDisplay] = useState<CodeDisplay | null>(null);
-  const [regenerateTarget, setRegenerateTarget] = useState<AdminUser | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
@@ -93,23 +82,6 @@ export function ManageEmployees({ theme, onBack }: ManageEmployeesProps): JSX.El
       const created = await api.admin.createUser(req);
       upsertUser(created);
       setCreateOpen(false);
-      try {
-        const codeRes = await api.admin.generateLineCode(created.id);
-        const refreshed: AdminUser = {
-          ...created,
-          lineLinkingCode: codeRes.code,
-          lineLinkingCodeGeneratedAt: new Date().toISOString(),
-        };
-        upsertUser(refreshed);
-        setCodeDisplay({
-          userId: created.id,
-          userName: created.name,
-          code: codeRes.code,
-          expiresAt: codeRes.expiresAt,
-        });
-      } catch (err) {
-        showError(err);
-      }
     } catch (err) {
       showError(err);
     }
@@ -120,29 +92,6 @@ export function ManageEmployees({ theme, onBack }: ManageEmployeesProps): JSX.El
       const updated = await api.admin.updateUser(id, req);
       upsertUser(updated);
       setEditing(null);
-    } catch (err) {
-      showError(err);
-    }
-  };
-
-  const handleGenerateCode = async (user: AdminUser): Promise<void> => {
-    try {
-      const res = await api.admin.generateLineCode(user.id);
-      const refreshed: AdminUser = {
-        ...user,
-        lineId: null,
-        lineDisplayName: null,
-        linePictureUrl: null,
-        lineLinkingCode: res.code,
-        lineLinkingCodeGeneratedAt: new Date().toISOString(),
-      };
-      upsertUser(refreshed);
-      setCodeDisplay({
-        userId: user.id,
-        userName: user.name,
-        code: res.code,
-        expiresAt: res.expiresAt,
-      });
     } catch (err) {
       showError(err);
     }
@@ -179,24 +128,9 @@ export function ManageEmployees({ theme, onBack }: ManageEmployeesProps): JSX.El
       setEditing(u);
       setMenuFor(null);
     },
-    onRegenerate: (u: AdminUser) => {
-      setRegenerateTarget(u);
-      setMenuFor(null);
-    },
     onDelete: (u: AdminUser) => {
       setDeleteTarget(u);
       setMenuFor(null);
-    },
-    onGenerate: (u: AdminUser) => void handleGenerateCode(u),
-    onShowCode: (u: AdminUser) => {
-      if (u.lineLinkingCode && u.lineLinkingCodeGeneratedAt) {
-        setCodeDisplay({
-          userId: u.id,
-          userName: u.name,
-          code: u.lineLinkingCode,
-          expiresAt: codeExpiry(u.lineLinkingCodeGeneratedAt),
-        });
-      }
     },
   };
 
@@ -220,32 +154,6 @@ export function ManageEmployees({ theme, onBack }: ManageEmployeesProps): JSX.El
           initial={editing}
           onClose={() => setEditing(null)}
           onSubmit={(req) => void handleEdit(editing.id, req)}
-        />
-      )}
-
-      {codeDisplay && (
-        <CodeDisplayModal
-          theme={theme}
-          isMobile={isMobile}
-          display={codeDisplay}
-          onClose={() => setCodeDisplay(null)}
-        />
-      )}
-
-      {regenerateTarget && (
-        <ConfirmModal
-          theme={theme}
-          isMobile={isMobile}
-          title="สร้างรหัสใหม่?"
-          body={`การสร้างรหัสใหม่จะยกเลิกการเชื่อมต่อ LINE ปัจจุบันของ ${regenerateTarget.name} (ถ้ามี) และสร้างรหัส 6 หลักใหม่`}
-          confirmLabel="สร้างรหัสใหม่"
-          confirmTone="warn"
-          onCancel={() => setRegenerateTarget(null)}
-          onConfirm={() => {
-            const target = regenerateTarget;
-            setRegenerateTarget(null);
-            void handleGenerateCode(target);
-          }}
         />
       )}
 
@@ -584,10 +492,7 @@ interface MobileEmployeeListProps {
   onMenuToggle: (id: string) => void;
   onMenuClose: () => void;
   onEdit: (u: AdminUser) => void;
-  onRegenerate: (u: AdminUser) => void;
   onDelete: (u: AdminUser) => void;
-  onGenerate: (u: AdminUser) => void;
-  onShowCode: (u: AdminUser) => void;
 }
 
 function MobileEmployeeList({
@@ -597,10 +502,7 @@ function MobileEmployeeList({
   onMenuToggle,
   onMenuClose,
   onEdit,
-  onRegenerate,
   onDelete,
-  onGenerate,
-  onShowCode,
 }: MobileEmployeeListProps): JSX.Element {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -613,10 +515,7 @@ function MobileEmployeeList({
           onMenuToggle={() => onMenuToggle(u.id)}
           onMenuClose={onMenuClose}
           onEdit={() => onEdit(u)}
-          onRegenerate={() => onRegenerate(u)}
           onDelete={() => onDelete(u)}
-          onGenerate={() => onGenerate(u)}
-          onShowCode={() => onShowCode(u)}
         />
       ))}
     </div>
@@ -630,10 +529,7 @@ interface EmployeeCardProps {
   onMenuToggle: () => void;
   onMenuClose: () => void;
   onEdit: () => void;
-  onRegenerate: () => void;
   onDelete: () => void;
-  onGenerate: () => void;
-  onShowCode: () => void;
 }
 
 function EmployeeCard({
@@ -643,10 +539,7 @@ function EmployeeCard({
   onMenuToggle,
   onMenuClose,
   onEdit,
-  onRegenerate,
   onDelete,
-  onGenerate,
-  onShowCode,
 }: EmployeeCardProps): JSX.Element {
   const roleLabel = user.role === 'approver' ? 'ผู้อนุมัติ' : 'พนักงาน';
 
@@ -690,14 +583,13 @@ function EmployeeCard({
               theme={theme}
               onClose={onMenuClose}
               onEdit={onEdit}
-              onRegenerate={onRegenerate}
               onDelete={onDelete}
             />
           )}
         </div>
       </div>
 
-      {/* LINE status row */}
+      {/* Email row */}
       <div
         style={{
           paddingTop: 10,
@@ -714,14 +606,9 @@ function EmployeeCard({
             marginBottom: 6,
           }}
         >
-          LINE
+          อีเมล
         </div>
-        <LineStatusCell
-          theme={theme}
-          user={user}
-          onGenerate={onGenerate}
-          onShowCode={onShowCode}
-        />
+        <EmailCell theme={theme} email={user.email} />
       </div>
     </div>
   );
@@ -736,10 +623,7 @@ interface UsersTableProps {
   onMenuToggle: (id: string) => void;
   onMenuClose: () => void;
   onEdit: (u: AdminUser) => void;
-  onRegenerate: (u: AdminUser) => void;
   onDelete: (u: AdminUser) => void;
-  onGenerate: (u: AdminUser) => void;
-  onShowCode: (u: AdminUser) => void;
 }
 
 function UsersTable({
@@ -749,10 +633,7 @@ function UsersTable({
   onMenuToggle,
   onMenuClose,
   onEdit,
-  onRegenerate,
   onDelete,
-  onGenerate,
-  onShowCode,
 }: UsersTableProps): JSX.Element {
   return (
     <Card theme={theme} padding={0}>
@@ -773,7 +654,7 @@ function UsersTable({
       >
         <span />
         <span>ชื่อ</span>
-        <span>LINE</span>
+        <span>อีเมล</span>
         <span>สร้างเมื่อ</span>
         <span style={{ textAlign: 'right' }}>จัดการ</span>
       </div>
@@ -787,10 +668,7 @@ function UsersTable({
           onMenuToggle={() => onMenuToggle(u.id)}
           onMenuClose={onMenuClose}
           onEdit={() => onEdit(u)}
-          onRegenerate={() => onRegenerate(u)}
           onDelete={() => onDelete(u)}
-          onGenerate={() => onGenerate(u)}
-          onShowCode={() => onShowCode(u)}
         />
       ))}
     </Card>
@@ -805,10 +683,7 @@ interface UserRowProps {
   onMenuToggle: () => void;
   onMenuClose: () => void;
   onEdit: () => void;
-  onRegenerate: () => void;
   onDelete: () => void;
-  onGenerate: () => void;
-  onShowCode: () => void;
 }
 
 function UserRow({
@@ -819,10 +694,7 @@ function UserRow({
   onMenuToggle,
   onMenuClose,
   onEdit,
-  onRegenerate,
   onDelete,
-  onGenerate,
-  onShowCode,
 }: UserRowProps): JSX.Element {
   const roleLabel = user.role === 'approver' ? 'ผู้อนุมัติ' : 'พนักงาน';
   return (
@@ -865,12 +737,7 @@ function UserRow({
           {roleLabel}
         </div>
       </div>
-      <LineStatusCell
-        theme={theme}
-        user={user}
-        onGenerate={onGenerate}
-        onShowCode={onShowCode}
-      />
+      <EmailCell theme={theme} email={user.email} />
       <div style={{ fontFamily: FONT_MONO, fontSize: 12, color: theme.inkSoft }}>
         {formatThaiDate(user.createdAt)}
       </div>
@@ -883,7 +750,6 @@ function UserRow({
             theme={theme}
             onClose={onMenuClose}
             onEdit={onEdit}
-            onRegenerate={onRegenerate}
             onDelete={onDelete}
           />
         )}
@@ -892,97 +758,27 @@ function UserRow({
   );
 }
 
-// ── LINE status cell ────────────────────────────────────────────────
+// ── Email cell ──────────────────────────────────────────────────────
 
-interface LineStatusCellProps {
+interface EmailCellProps {
   theme: Theme;
-  user: AdminUser;
-  onGenerate: () => void;
-  onShowCode: () => void;
+  email: string | null;
 }
 
-function LineStatusCell({ theme, user, onGenerate, onShowCode }: LineStatusCellProps): JSX.Element {
-  if (user.lineId) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Dot color={theme.success} />
-        <span style={{ fontSize: 12, color: theme.ink }}>เชื่อมต่อ LINE แล้ว</span>
-        {user.linePictureUrl && (
-          <img
-            src={user.linePictureUrl}
-            alt={user.lineDisplayName ?? 'LINE'}
-            style={{ width: 24, height: 24, borderRadius: 12, objectFit: 'cover' }}
-          />
-        )}
-      </div>
-    );
-  }
-
-  if (user.lineLinkingCode && user.lineLinkingCodeGeneratedAt) {
-    const expiresAt = codeExpiry(user.lineLinkingCodeGeneratedAt);
-    const expired = isExpired(expiresAt);
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <Dot color={expired ? theme.inkSofter : theme.warn} />
-        <button
-          onClick={onShowCode}
-          title="คลิกเพื่อคัดลอก / ดูรหัส"
-          style={{
-            padding: '2px 8px',
-            borderRadius: 6,
-            background: theme.surface2,
-            border: `0.5px solid ${theme.hairline}`,
-            fontFamily: FONT_MONO,
-            fontSize: 12,
-            color: theme.ink,
-            cursor: 'pointer',
-            letterSpacing: 1,
-          }}
-        >
-          รหัส: {user.lineLinkingCode}
-        </button>
-        <span style={{ fontSize: 11, color: theme.inkSoft }}>
-          {formatExpiry(expiresAt)}
-        </span>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-      <Dot color={theme.inkSofter} />
-      <span style={{ fontSize: 12, color: theme.inkSoft }}>ยังไม่ได้เชื่อมต่อ</span>
-      <button
-        onClick={onGenerate}
-        style={{
-          padding: '4px 10px',
-          borderRadius: 100,
-          background: 'transparent',
-          border: `0.5px solid ${theme.hairlineStrong}`,
-          fontFamily: FONT_UI,
-          fontSize: 11,
-          fontWeight: 500,
-          color: theme.ink,
-          cursor: 'pointer',
-        }}
-      >
-        สร้างรหัส
-      </button>
-    </div>
-  );
-}
-
-function Dot({ color }: { color: string }): JSX.Element {
+function EmailCell({ theme, email }: EmailCellProps): JSX.Element {
   return (
     <span
       style={{
-        width: 7,
-        height: 7,
-        borderRadius: '50%',
-        background: color,
-        flexShrink: 0,
+        fontFamily: FONT_MONO,
+        fontSize: 12,
+        color: email ? theme.ink : theme.inkSofter,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
       }}
-    />
+    >
+      {email ?? '—'}
+    </span>
   );
 }
 
@@ -992,11 +788,10 @@ interface RowMenuProps {
   theme: Theme;
   onClose: () => void;
   onEdit: () => void;
-  onRegenerate: () => void;
   onDelete: () => void;
 }
 
-function RowMenu({ theme, onClose, onEdit, onRegenerate, onDelete }: RowMenuProps): JSX.Element {
+function RowMenu({ theme, onClose, onEdit, onDelete }: RowMenuProps): JSX.Element {
   return (
     <>
       <div
@@ -1022,7 +817,6 @@ function RowMenu({ theme, onClose, onEdit, onRegenerate, onDelete }: RowMenuProp
         }}
       >
         <MenuItem theme={theme} label="แก้ไข" onClick={onEdit} />
-        <MenuItem theme={theme} label="สร้างรหัสใหม่" onClick={onRegenerate} />
         <MenuItem theme={theme} label="ลบ" onClick={onDelete} tone="danger" />
       </div>
     </>
@@ -1199,6 +993,7 @@ function UserFormModal({
   const [initials, setInitials] = useState(initial?.initials ?? '');
   const [role, setRole] = useState<Role>(initial?.role ?? 'employee');
   const [badge, setBadge] = useState(initial?.badge ?? '');
+  const [email, setEmail] = useState(initial?.email ?? '');
 
   const canSubmit = name.trim().length > 0;
 
@@ -1218,6 +1013,7 @@ function UserFormModal({
       initials: resolvedInitials,
       role,
       badge: badge.trim() === '' ? null : badge.trim(),
+      email: email.trim() === '' ? null : email.trim(),
     });
   };
 
@@ -1274,6 +1070,16 @@ function UserFormModal({
         />
       </ModalField>
 
+      <ModalField theme={theme} label="อีเมล (สำหรับเข้าสู่ระบบ)">
+        <ModalInput
+          theme={theme}
+          type="email"
+          value={email}
+          onChange={setEmail}
+          placeholder="name@thehfhotel.org"
+        />
+      </ModalField>
+
       <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
         <GhostButton theme={theme} onClick={onClose}>
           ยกเลิก
@@ -1321,13 +1127,15 @@ interface ModalInputProps {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  type?: string;
   onFocus?: () => void;
   onBlur?: () => void;
 }
 
-function ModalInput({ theme, value, onChange, placeholder, onFocus, onBlur }: ModalInputProps): JSX.Element {
+function ModalInput({ theme, value, onChange, placeholder, type = 'text', onFocus, onBlur }: ModalInputProps): JSX.Element {
   return (
     <input
+      type={type}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
@@ -1375,116 +1183,6 @@ function RoleToggle({ theme, label, active, onClick }: RoleToggleProps): JSX.Ele
     >
       {label}
     </button>
-  );
-}
-
-// ── Code display modal ─────────────────────────────────────────────
-
-interface CodeDisplayModalProps {
-  theme: Theme;
-  isMobile?: boolean;
-  display: CodeDisplay;
-  onClose: () => void;
-}
-
-function CodeDisplayModal({ theme, isMobile = false, display, onClose }: CodeDisplayModalProps): JSX.Element {
-  const [copied, setCopied] = useState(false);
-
-  const copy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(display.code);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      setCopied(false);
-    }
-  };
-
-  const expired = isExpired(display.expiresAt);
-
-  return (
-    <ModalShell theme={theme} isMobile={isMobile} onClose={onClose}>
-      <div
-        style={{
-          fontFamily: FONT_UI,
-          fontSize: 11,
-          color: theme.inkSoft,
-          letterSpacing: 1.4,
-          textTransform: 'uppercase',
-          marginBottom: 6,
-        }}
-      >
-        รหัสเชื่อมต่อ LINE
-      </div>
-      <div
-        style={{
-          fontFamily: FONT_DISPLAY,
-          fontSize: 22,
-          color: theme.ink,
-          letterSpacing: -0.4,
-          marginBottom: 18,
-        }}
-      >
-        {display.userName}
-      </div>
-
-      <div
-        style={{
-          padding: '24px 18px',
-          borderRadius: 14,
-          background: theme.surface,
-          border: `0.5px solid ${theme.hairline}`,
-          textAlign: 'center',
-          marginBottom: 14,
-        }}
-      >
-        <div
-          style={{
-            fontFamily: FONT_MONO,
-            fontSize: 44,
-            fontWeight: 600,
-            color: theme.ink,
-            letterSpacing: 8,
-            lineHeight: 1.1,
-          }}
-        >
-          {display.code}
-        </div>
-        <div
-          style={{
-            marginTop: 8,
-            fontFamily: FONT_UI,
-            fontSize: 12,
-            color: expired ? theme.danger : theme.inkSoft,
-          }}
-        >
-          {formatExpiry(display.expiresAt)}
-        </div>
-      </div>
-
-      <div
-        style={{
-          fontFamily: FONT_UI,
-          fontSize: 13,
-          color: theme.inkSoft,
-          textAlign: 'center',
-          marginBottom: 20,
-        }}
-      >
-        คัดลอกและส่งให้พนักงานใช้กับ LINE Login
-      </div>
-
-      <div style={{ display: 'flex', gap: 10 }}>
-        <GhostButton theme={theme} onClick={onClose}>
-          ปิด
-        </GhostButton>
-        <div style={{ flex: 1 }}>
-          <PrimaryButton theme={theme} onClick={() => void copy()}>
-            {copied ? 'คัดลอกแล้ว' : 'คัดลอกรหัส'}
-          </PrimaryButton>
-        </div>
-      </div>
-    </ModalShell>
   );
 }
 
@@ -1577,18 +1275,4 @@ function ConfirmButton({ theme, tone, onClick, children }: ConfirmButtonProps): 
       {children}
     </button>
   );
-}
-
-// ── Helpers ────────────────────────────────────────────────────────
-
-function codeExpiry(generatedAt: string): string {
-  const t = Date.parse(generatedAt);
-  if (Number.isNaN(t)) return generatedAt;
-  return new Date(t + LINE_CODE_TTL_MS).toISOString();
-}
-
-function isExpired(expiresAt: string): boolean {
-  const t = Date.parse(expiresAt);
-  if (Number.isNaN(t)) return false;
-  return Date.now() > t;
 }
