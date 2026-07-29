@@ -33,7 +33,7 @@ export interface AppState {
 export type Platform = 'mobile' | 'desktop';
 
 export interface Tweaks {
-  role: 'employee' | 'approver' | 'admin';
+  role: 'employee' | 'approver';
   platform: Platform;
   accent: string;
   dark: boolean;

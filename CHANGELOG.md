@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-07-29
+
+### Removed
+- **Company expense ledger (บัญชีรายจ่ายบริษัท) and the `ADMIN` role.** Reverts `0.11.0` (#28) as
+  out-of-scope: company accounting belongs to a separate app, not this one.
+  - UI: the บันทึกบิล admin-entry wizard, the รายจ่ายบริษัท month dashboard, and the printable
+    งบกำไรขาดทุน P&L report screen — routes `ledger`, `ledger-entry`, `ledger-report`.
+  - API: `/api/expenses/*` and `/api/pl/*`.
+  - Schema: the `expenses` and `revenue_entries` tables and `Role.ADMIN`, dropped by migration
+    `20260729120000_remove_expense_ledger` (reverts `20260706113537_expense_ledger`).
+  - Shared contract: `Expense`, `RevenueEntry`, `PaymentMethod`, `MonthLedgerSummary`, `PlLine` /
+    `PL_LINES` / `PL_LINE_BY_CODE`. `Role` is now exactly `'employee' | 'approver'`.
+
+  Production never used it — `expenses`/`revenue_entries` had 0 rows (`n_tup_ins = 0`) and the
+  sole `ADMIN` user owned no data — so this is a clean extraction with no data migration. Company
+  accounting (daily income + expenses, P&L) now lives at income.thehfhotel.org. See
+  `docs/change-requests/CR-2026-07-29-remove-expense-ledger.md`.
+
 ## [0.12.0] - 2026-07-29
 
 ### Added

@@ -1,5 +1,3 @@
-import type { Expense } from '@reimbursement/shared';
-
 export type Route =
   | { name: 'home' }
   | { name: 'upload'; editId?: string }
@@ -12,11 +10,7 @@ export type Route =
   | { name: 'approver-pay'; id: string }
   | { name: 'login' }
   | { name: 'admin-employees' }
-  | { name: 'my-requests' }
-  // Company expense ledger (admin/approver)
-  | { name: 'ledger'; month?: string }
-  | { name: 'ledger-entry'; edit?: Expense }
-  | { name: 'ledger-report'; month?: string };
+  | { name: 'my-requests' };
 
 export type RouteName = Route['name'];
 
