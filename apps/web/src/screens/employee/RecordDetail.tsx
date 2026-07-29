@@ -26,6 +26,10 @@ export function RecordDetail({ theme, state, setState, nav, recordId }: RecordDe
 
   if (!r) return null;
   const isDraft = r.bundleId === null;
+  const parentBundle = r.bundleId ? state.bundles.find((b) => b.id === r.bundleId) ?? null : null;
+  const backRoute: Parameters<Nav>[0] = parentBundle
+    ? { name: 'bundle', id: parentBundle.id }
+    : { name: 'home' };
   const [whole, frac] = fmtN(r.amount).split('.');
 
   const handleDelete = async (): Promise<void> => {
@@ -47,7 +51,7 @@ export function RecordDetail({ theme, state, setState, nav, recordId }: RecordDe
         theme={theme}
         title="ใบเสร็จ"
         leading={
-          <IconBtn theme={theme} onClick={() => nav({ name: 'home' })}>
+          <IconBtn theme={theme} onClick={() => nav(backRoute)}>
             {Icon.back(theme.ink)}
           </IconBtn>
         }
@@ -91,7 +95,12 @@ export function RecordDetail({ theme, state, setState, nav, recordId }: RecordDe
           <DetailRow theme={theme} label="หมวดหมู่" value={r.category} />
           <DetailRow theme={theme} label="วันที่" value={formatThaiDate(r.date)} />
           <DetailRow theme={theme} label="หมายเหตุ" value={r.note || '—'} />
-          <DetailRow theme={theme} label="สถานะ" value="ฉบับร่าง · ยังไม่ได้รวม" last />
+          <DetailRow
+            theme={theme}
+            label="สถานะ"
+            value={parentBundle ? `อยู่ในชุด · ${parentBundle.name}` : 'ฉบับร่าง · ยังไม่ได้รวม'}
+            last
+          />
         </Card>
 
         {r.items.length > 0 && (
@@ -127,9 +136,11 @@ export function RecordDetail({ theme, state, setState, nav, recordId }: RecordDe
       </div>
 
       <div style={{ padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <PrimaryButton theme={theme} onClick={() => nav({ name: 'bundle-new', id: r.id })}>
-          เพิ่มในชุดเบิก
-        </PrimaryButton>
+        {isDraft && (
+          <PrimaryButton theme={theme} onClick={() => nav({ name: 'bundle-new', id: r.id })}>
+            เพิ่มในชุดเบิก
+          </PrimaryButton>
+        )}
 
         {isDraft && (
           <>

@@ -41,9 +41,10 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
           return status(400, { message: `Unknown status: ${query.status}` });
         }
         filters.status = bundleStatusFromShared(query.status);
-      } else if (isApprover && !mine) {            // guard: don't force PENDING for the mine view
-        filters.status = bundleStatusFromShared('pending');
       }
+      // No default status filter: the approver UI builds its pending/approved/
+      // paid/rejected tabs client-side from the unfiltered list, so forcing
+      // PENDING here would leave every non-pending tab permanently empty.
 
       // Include receipts + approver so list items are full BundleWithDetails —
       // the UI sums receipt amounts and shows the approver, so omitting these
@@ -214,6 +215,14 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
       const reason = body.reason?.trim() || null;
 
       const updated = await prisma.$transaction(async (tx) => {
+        // Return the receipts to the submitter's draft pool so they can be
+        // fixed and resubmitted — otherwise a rejection is a dead-end (the
+        // receipts stay locked to the rejected bundle forever).
+        await tx.receipt.updateMany({
+          where: { bundleId: params.id },
+          data: { bundleId: null },
+        });
+
         const result = await tx.bundle.update({
           where: { id: params.id },
           data: { status: 'REJECTED', rejectReason: reason },

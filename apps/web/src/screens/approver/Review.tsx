@@ -32,13 +32,40 @@ type ConfirmKind = 'approve' | 'reject';
 export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
   const found = state.bundles.find((x) => x.id === bundleId);
   const [b, setB] = useState<BundleWithDetails | undefined>(found);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [photoIdx, setPhotoIdx] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmKind, setConfirmKind] = useState<ConfirmKind | null>(null);
   const [rejectReason, setRejectReason] = useState('');
 
-  if (!b) return null;
+  // The bundle may be absent from client state (deep link, stale list) —
+  // fetch it directly instead of rendering a blank screen.
+  useEffect(() => {
+    if (b) return;
+    let cancelled = false;
+    api.bundles
+      .get(bundleId)
+      .then((fetched) => {
+        if (!cancelled) setB(fetched);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [b, bundleId]);
+
+  if (!b) {
+    return (
+      <MissingBundle
+        theme={theme}
+        failed={loadFailed}
+        onBack={() => nav({ name: 'approver-home' })}
+      />
+    );
+  }
   const items = b.receipts;
   const total = items.reduce((s, r) => s + r.amount, 0);
   const [whole, frac] = fmtN(total).split('.');
@@ -47,7 +74,9 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
     setB(updated);
     setState((s) => ({
       ...s,
-      bundles: s.bundles.map((x) => (x.id === updated.id ? updated : x)),
+      bundles: s.bundles.some((x) => x.id === updated.id)
+        ? s.bundles.map((x) => (x.id === updated.id ? updated : x))
+        : [updated, ...s.bundles],
     }));
   };
 
@@ -110,14 +139,7 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
           {b.name}
         </h1>
         <div style={{ fontFamily: FONT_UI, fontSize: 13, color: theme.inkSoft, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Avatar
-            theme={theme}
-            initials={b.submitter.name
-              .split(' ')
-              .map((s) => s[0] ?? '')
-              .join('')}
-            size={22}
-          />
+          <Avatar theme={theme} initials={b.submitter.initials} size={22} />
           {b.submitter.name}
         </div>
         {b.status === 'rejected' && b.rejectReason && (
@@ -389,6 +411,59 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
           onConfirm={() => void handleReject(rejectReason)}
           onCancel={() => { setConfirmKind(null); setRejectReason(''); }}
         />
+      )}
+    </div>
+  );
+}
+
+interface MissingBundleProps {
+  theme: Theme;
+  failed: boolean;
+  onBack: () => void;
+}
+
+/** Shown while a bundle absent from client state is being fetched (or failed to load). */
+export function MissingBundle({ theme, failed, onBack }: MissingBundleProps) {
+  return (
+    <div
+      style={{
+        minHeight: 320,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 16,
+        padding: '60px 28px',
+        textAlign: 'center',
+      }}
+    >
+      {failed ? (
+        <>
+          <div style={{ fontFamily: FONT_UI, fontSize: 15, color: theme.ink, fontWeight: 500 }}>
+            ไม่พบคำขอนี้
+          </div>
+          <div style={{ fontFamily: FONT_UI, fontSize: 13, color: theme.inkSoft, lineHeight: 1.5 }}>
+            คำขออาจถูกลบไปแล้ว หรือคุณไม่มีสิทธิ์เข้าถึง
+          </div>
+          <GhostButton theme={theme} onClick={onBack}>
+            กลับกล่องอนุมัติ
+          </GhostButton>
+        </>
+      ) : (
+        <>
+          <div
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 13,
+              border: `2.5px solid ${theme.accent}33`,
+              borderTopColor: theme.accent,
+              animation: 'review-load-spin 0.8s linear infinite',
+            }}
+          />
+          <div style={{ fontFamily: FONT_UI, fontSize: 13, color: theme.inkSoft }}>กำลังโหลด...</div>
+          <style>{`@keyframes review-load-spin { to { transform: rotate(360deg); } }`}</style>
+        </>
       )}
     </div>
   );

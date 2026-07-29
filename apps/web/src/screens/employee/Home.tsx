@@ -16,21 +16,27 @@ interface HomeProps {
   nav: Nav;
   currentUser: User | null;
   isApprover?: boolean;
+  onLogout?: () => void;
 }
 
-export function Home({ theme, state, nav, currentUser, isApprover }: HomeProps) {
+export function Home({ theme, state, nav, currentUser, isApprover, onLogout }: HomeProps) {
   const { receipts, bundles } = state;
 
   const loose = receipts.filter((r) => r.bundleId === null);
   const looseTotal = loose.reduce((s, r) => s + r.amount, 0);
 
   const pending = bundles.filter((b) => b.status === 'pending');
+  const approved = bundles.filter((b) => b.status === 'approved');
   const paid = bundles.filter((b) => b.status === 'paid');
   const sumBundle = (b: { receipts: { amount: number }[] }) =>
     b.receipts.reduce((a, r) => a + r.amount, 0);
   const ytd = paid.reduce((s, b) => s + sumBundle(b), 0);
 
-  const outstandingTotal = looseTotal + pending.reduce((s, b) => s + sumBundle(b), 0);
+  // Money not yet received: drafts + submitted + approved-but-unpaid.
+  const outstandingTotal =
+    looseTotal +
+    pending.reduce((s, b) => s + sumBundle(b), 0) +
+    approved.reduce((s, b) => s + sumBundle(b), 0);
 
   const [outstandingWhole, outstandingFrac] = fmtN(outstandingTotal).split('.');
 
@@ -44,6 +50,26 @@ export function Home({ theme, state, nav, currentUser, isApprover }: HomeProps) 
         leading={<Avatar theme={theme} initials={currentUser?.initials ?? ''} />}
         trailing={
           <>
+            {onLogout && !isApprover && (
+              <button
+                onClick={onLogout}
+                title="ออกจากระบบ"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '8px 10px',
+                  borderRadius: 100,
+                  background: 'transparent',
+                  color: theme.inkSoft,
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontFamily: FONT,
+                  fontSize: 13,
+                }}
+              >
+                ออก
+              </button>
+            )}
             {isApprover && (
               <button
                 onClick={() => nav({ name: 'approver-home' })}

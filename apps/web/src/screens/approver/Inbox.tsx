@@ -14,11 +14,12 @@ interface InboxProps {
   state: AppState;
   nav: Nav;
   currentUser: User | null;
+  onLogout?: () => void;
 }
 
 type TabKey = Extract<BundleStatus, 'pending' | 'approved' | 'paid' | 'rejected'>;
 
-export function Inbox({ theme, state, nav, currentUser }: InboxProps) {
+export function Inbox({ theme, state, nav, currentUser, onLogout }: InboxProps) {
   const allBundles: BundleWithDetails[] = state.bundles;
   const pending = allBundles.filter((b) => b.status === 'pending');
   const approved = allBundles.filter((b) => b.status === 'approved');
@@ -55,20 +56,39 @@ export function Inbox({ theme, state, nav, currentUser }: InboxProps) {
         title="กล่องอนุมัติ"
         leading={<Avatar theme={theme} initials={currentUser?.initials ?? ''} />}
         trailing={
-          <button
-            onClick={() => nav({ name: 'my-requests' })}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              fontFamily: FONT_UI,
-              fontSize: 14,
-              color: theme.inkSoft,
-              cursor: 'pointer',
-              padding: '4px 8px',
-            }}
-          >
-            คำขอของฉัน
-          </button>
+          <>
+            <button
+              onClick={() => nav({ name: 'my-requests' })}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                fontFamily: FONT_UI,
+                fontSize: 14,
+                color: theme.inkSoft,
+                cursor: 'pointer',
+                padding: '4px 8px',
+              }}
+            >
+              คำขอของฉัน
+            </button>
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                title="ออกจากระบบ"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  fontFamily: FONT_UI,
+                  fontSize: 14,
+                  color: theme.inkSoft,
+                  cursor: 'pointer',
+                  padding: '4px 8px',
+                }}
+              >
+                ออก
+              </button>
+            )}
+          </>
         }
       />
 

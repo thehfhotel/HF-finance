@@ -40,7 +40,8 @@ function sanitizeAmountInput(raw: string): string {
 // Pulled from `@reimbursement/shared` to stay in sync with the rest of the app.
 import { RECEIPT_CATEGORIES } from '../../lib/types';
 
-type View = 'drafts' | 'bundle-detail';
+type View = 'drafts' | 'bundle-detail' | 'bundle-list';
+type BundleFilter = 'pending' | 'approved' | 'paid' | 'rejected';
 
 interface DesktopEmployeeProps {
   theme: Theme;
@@ -48,10 +49,13 @@ interface DesktopEmployeeProps {
   setState: (updater: (s: AppState) => AppState) => void;
   currentUser?: User | null;
   onBackToInbox?: () => void;
+  onLogout?: () => void;
 }
 
-export function DesktopEmployee({ theme, state, setState, currentUser, onBackToInbox }: DesktopEmployeeProps): JSX.Element {
+export function DesktopEmployee({ theme, state, setState, currentUser, onBackToInbox, onLogout }: DesktopEmployeeProps): JSX.Element {
   const [view, setView] = useState<View>('drafts');
+  const [listFilter, setListFilter] = useState<BundleFilter>('pending');
+  const [detailOrigin, setDetailOrigin] = useState<Exclude<View, 'bundle-detail'>>('drafts');
   const [selectedBundleId, setSelectedBundleId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bundleName, setBundleName] = useState<string>('');
@@ -60,6 +64,8 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState<boolean>(false);
+  const [editTarget, setEditTarget] = useState<Receipt | null>(null);
+  const [savingReceipt, setSavingReceipt] = useState<boolean>(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [deleteInProgress, setDeleteInProgress] = useState<boolean>(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -76,6 +82,7 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
     pending: bundles.filter((b) => b.status === 'pending').length,
     approved: bundles.filter((b) => b.status === 'approved').length,
     paid: bundles.filter((b) => b.status === 'paid').length,
+    rejected: bundles.filter((b) => b.status === 'rejected').length,
   };
 
   const owed = bundles
@@ -97,9 +104,25 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
     setSelectedBundleId(null);
   };
 
+  const openBundleList = (filter: BundleFilter): void => {
+    setListFilter(filter);
+    setView('bundle-list');
+    setSelectedBundleId(null);
+  };
+
   const openBundle = (id: string): void => {
+    setDetailOrigin(view === 'bundle-list' ? 'bundle-list' : 'drafts');
     setSelectedBundleId(id);
     setView('bundle-detail');
+  };
+
+  const backFromDetail = (): void => {
+    if (detailOrigin === 'bundle-list') {
+      setView('bundle-list');
+      setSelectedBundleId(null);
+    } else {
+      goToDrafts();
+    }
   };
 
   const submitBundle = async (): Promise<void> => {
@@ -128,10 +151,13 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
     }
   };
 
-  const handleCreateReceipt = async (input: NewReceiptInput): Promise<void> => {
+  const handleSaveReceipt = async (input: NewReceiptInput): Promise<void> => {
+    if (savingReceipt) return;
     setCreateError(null);
+    setSavingReceipt(true);
     try {
-      const photoFile = await dataUrlToFile(input.photo, 'receipt.jpg');
+      // `photo` is a data URL only when the user picked a (new) file.
+      const photoFile = input.photo ? await dataUrlToFile(input.photo, 'receipt.jpg') : undefined;
       const form = receiptFormFromFields(
         {
           merchant: input.merchant.trim() || NEW_RECEIPT_MERCHANT_FALLBACK,
@@ -141,24 +167,47 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
           amount: input.amount,
           date: input.date,
           note: input.note.trim() ? input.note.trim() : '',
-          color: NEW_RECEIPT_COLOR,
-          accent: NEW_RECEIPT_ACCENT,
-          items: [],
-          tax: '0',
+          color: editTarget?.color ?? NEW_RECEIPT_COLOR,
+          accent: editTarget?.accent ?? NEW_RECEIPT_ACCENT,
+          items: editTarget?.items ?? [],
+          tax: editTarget?.tax ?? '0',
         },
         photoFile,
       );
-      const created = await api.receipts.create(form);
-      setState((s) => ({ ...s, receipts: [created, ...s.receipts] }));
+      if (editTarget) {
+        const updated = await api.receipts.update(editTarget.id, form);
+        setState((s) => ({
+          ...s,
+          receipts: s.receipts.map((r) => (r.id === updated.id ? updated : r)),
+        }));
+        showCreateToast('แก้ไขใบเสร็จแล้ว');
+      } else {
+        const created = await api.receipts.create(form);
+        setState((s) => ({ ...s, receipts: [created, ...s.receipts] }));
+        showCreateToast('บันทึกใบเสร็จแล้ว');
+      }
       setCreateOpen(false);
-      showCreateToast('บันทึกใบเสร็จแล้ว');
+      setEditTarget(null);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
+    } finally {
+      setSavingReceipt(false);
     }
   };
 
-  const openCreateModal = (): void => setCreateOpen(true);
-  const closeCreateModal = (): void => setCreateOpen(false);
+  const openCreateModal = (): void => {
+    setEditTarget(null);
+    setCreateOpen(true);
+  };
+  const openEditModal = (receipt: Receipt): void => {
+    setEditTarget(receipt);
+    setCreateOpen(true);
+  };
+  const closeCreateModal = (): void => {
+    if (savingReceipt) return;
+    setCreateOpen(false);
+    setEditTarget(null);
+  };
 
   const openDeleteDialog = (id: string): void => {
     setDeleteError(null);
@@ -216,14 +265,40 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
 
       <div style={{ height: 14 }} />
       <SidebarSectionInline theme={theme} label="คำขอของฉัน" />
-      <DeskNavItem theme={theme} label="รออนุมัติ" count={totalsByStatus.pending} />
-      <DeskNavItem theme={theme} label="อนุมัติแล้ว" count={totalsByStatus.approved} />
-      <DeskNavItem theme={theme} label="จ่ายแล้ว" count={totalsByStatus.paid} />
+      <DeskNavItem
+        theme={theme}
+        label="รออนุมัติ"
+        count={totalsByStatus.pending}
+        active={view === 'bundle-list' && listFilter === 'pending'}
+        onClick={() => openBundleList('pending')}
+      />
+      <DeskNavItem
+        theme={theme}
+        label="อนุมัติแล้ว"
+        count={totalsByStatus.approved}
+        active={view === 'bundle-list' && listFilter === 'approved'}
+        onClick={() => openBundleList('approved')}
+      />
+      <DeskNavItem
+        theme={theme}
+        label="จ่ายแล้ว"
+        count={totalsByStatus.paid}
+        active={view === 'bundle-list' && listFilter === 'paid'}
+        onClick={() => openBundleList('paid')}
+      />
+      <DeskNavItem
+        theme={theme}
+        label="ปฏิเสธ"
+        count={totalsByStatus.rejected}
+        active={view === 'bundle-list' && listFilter === 'rejected'}
+        onClick={() => openBundleList('rejected')}
+      />
+      {onLogout && <DeskNavItem theme={theme} label="ออกจากระบบ" onClick={onLogout} />}
 
       <SidebarSection theme={theme} label="ล่าสุด" />
       {bundles
-        .slice(-5)
-        .reverse()
+        // Server returns newest-first; show the five most recent.
+        .slice(0, 5)
         .map((b) => {
           const sum = b.receipts.reduce((acc, r) => acc + r.amount, 0);
           const statusLabel =
@@ -282,7 +357,15 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
       <BundleDetailPane
         theme={theme}
         bundle={selectedBundle}
-        onBack={goToDrafts}
+        onBack={backFromDetail}
+        backLabel={detailOrigin === 'bundle-list' ? '← รายการคำขอ' : '← ฉบับร่าง'}
+      />
+    ) : view === 'bundle-list' ? (
+      <BundleListPane
+        theme={theme}
+        filter={listFilter}
+        bundles={bundles.filter((b) => b.status === listFilter)}
+        onOpenBundle={openBundle}
       />
     ) : (
       <DraftsPane
@@ -302,6 +385,7 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
         onSubmitBundle={submitBundle}
         onCameraClick={openCreateModal}
         onDeleteReceipt={openDeleteDialog}
+        onEditReceipt={openEditModal}
       />
     );
 
@@ -338,8 +422,10 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
       {createOpen && (
         <CreateReceiptModal
           theme={theme}
+          initial={editTarget}
+          saving={savingReceipt}
           onClose={closeCreateModal}
-          onSave={handleCreateReceipt}
+          onSave={handleSaveReceipt}
         />
       )}
       {deleteTargetId !== null && (
@@ -451,6 +537,7 @@ interface DraftsPaneProps {
   onSubmitBundle: () => void;
   onCameraClick: () => void;
   onDeleteReceipt: (id: string) => void;
+  onEditReceipt: (receipt: Receipt) => void;
 }
 
 function DraftsPane({
@@ -470,6 +557,7 @@ function DraftsPane({
   onSubmitBundle,
   onCameraClick,
   onDeleteReceipt,
+  onEditReceipt,
 }: DraftsPaneProps) {
   const lightboxReceipt = photoIdx !== null ? looseReceipts[photoIdx] : null;
 
@@ -561,6 +649,7 @@ function DraftsPane({
                 onToggle={() => onToggleReceipt(receipt.id)}
                 onOpenPhoto={() => onPhotoIdxChange(idx)}
                 onDelete={() => onDeleteReceipt(receipt.id)}
+                onEdit={() => onEditReceipt(receipt)}
               />
             ))}
           </div>
@@ -588,6 +677,125 @@ function DraftsPane({
           onClose={() => onPhotoIdxChange(null)}
         />
       )}
+    </div>
+  );
+}
+
+// ── Bundle list pane (per-status request list) ───────────────────────
+const BUNDLE_FILTER_LABELS: Record<BundleFilter, string> = {
+  pending: 'รออนุมัติ',
+  approved: 'อนุมัติแล้ว',
+  paid: 'จ่ายแล้ว',
+  rejected: 'ปฏิเสธ',
+};
+
+interface BundleListPaneProps {
+  theme: Theme;
+  filter: BundleFilter;
+  bundles: BundleWithDetails[];
+  onOpenBundle: (id: string) => void;
+}
+
+function BundleListPane({ theme, filter, bundles, onOpenBundle }: BundleListPaneProps) {
+  return (
+    <div style={{ height: '100%', overflow: 'auto', background: theme.paper }}>
+      <div style={{ maxWidth: 760, margin: '0 auto', padding: '40px 48px 56px' }}>
+        <div
+          style={{
+            fontFamily: FONT_UI,
+            fontSize: 11,
+            color: theme.inkSoft,
+            letterSpacing: 1.4,
+            textTransform: 'uppercase',
+            fontWeight: 500,
+          }}
+        >
+          คำขอของฉัน
+        </div>
+        <h1
+          style={{
+            margin: '4px 0 24px',
+            fontFamily: FONT_DISPLAY,
+            fontWeight: 400,
+            fontSize: 32,
+            lineHeight: 1.1,
+            letterSpacing: -0.5,
+            color: theme.ink,
+          }}
+        >
+          {BUNDLE_FILTER_LABELS[filter]} · {bundles.length}
+        </h1>
+
+        {bundles.length === 0 ? (
+          <div style={{ minHeight: 280 }}>
+            <EmptyState
+              theme={theme}
+              icon={Icon.bundle}
+              title="ไม่มีรายการ"
+              subtext="ไม่มีคำขอในสถานะนี้"
+            />
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {bundles.map((b) => {
+              const sum = b.receipts.reduce((acc, r) => acc + r.amount, 0);
+              return (
+                <Card key={b.id} theme={theme} padding={18} onClick={() => onOpenBundle(b.id)}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontFamily: FONT_UI,
+                          fontSize: 15,
+                          fontWeight: 500,
+                          color: theme.ink,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {b.name}
+                      </div>
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontFamily: FONT_UI,
+                          fontSize: 12,
+                          color: theme.inkSoft,
+                          display: 'flex',
+                          gap: 10,
+                          alignItems: 'center',
+                        }}
+                      >
+                        <StatusPill status={b.status} theme={theme} size="sm" />
+                        <span>
+                          {b.receipts.length} ใบเสร็จ · ส่งเมื่อ {formatThaiDate(b.submittedAt)}
+                        </span>
+                      </div>
+                      {b.status === 'rejected' && b.rejectReason && (
+                        <div
+                          style={{
+                            marginTop: 6,
+                            fontFamily: FONT_UI,
+                            fontSize: 12,
+                            color: theme.danger,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          เหตุผล: {b.rejectReason}
+                        </div>
+                      )}
+                    </div>
+                    <Money value={b.transferAmount ?? sum} theme={theme} size={18} weight={500} />
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -670,9 +878,10 @@ interface ReceiptCardProps {
   onToggle: () => void;
   onOpenPhoto: () => void;
   onDelete: () => void;
+  onEdit: () => void;
 }
 
-function ReceiptCard({ theme, receipt, isSelected, onToggle, onOpenPhoto, onDelete }: ReceiptCardProps) {
+function ReceiptCard({ theme, receipt, isSelected, onToggle, onOpenPhoto, onDelete, onEdit }: ReceiptCardProps) {
   const [hovered, setHovered] = useState(false);
 
   return (
@@ -709,30 +918,56 @@ function ReceiptCard({ theme, receipt, isSelected, onToggle, onOpenPhoto, onDele
         {isSelected && Icon.check('#fff')}
       </div>
       {hovered && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          title="ลบฉบับร่าง"
-          style={{
-            position: 'absolute',
-            top: 10,
-            left: 10,
-            width: 26,
-            height: 26,
-            borderRadius: 13,
-            background: theme.danger,
-            border: 'none',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            zIndex: 2,
-            padding: 0,
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
-            <path d="M5 6h10M8 6V4h4v2M9 9v6M11 9v6M6 6l1 10h6l1-10" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
+        <>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            title="ลบฉบับร่าง"
+            style={{
+              position: 'absolute',
+              top: 10,
+              left: 10,
+              width: 26,
+              height: 26,
+              borderRadius: 13,
+              background: theme.danger,
+              border: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              zIndex: 2,
+              padding: 0,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
+              <path d="M5 6h10M8 6V4h4v2M9 9v6M11 9v6M6 6l1 10h6l1-10" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onEdit(); }}
+            title="แก้ไขใบเสร็จ"
+            style={{
+              position: 'absolute',
+              top: 10,
+              left: 42,
+              width: 26,
+              height: 26,
+              borderRadius: 13,
+              background: theme.ink,
+              border: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              zIndex: 2,
+              padding: 0,
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
+              <path d="M4 13.5V16h2.5l8-8L12 5.5l-8 8zM13.5 4l2.5 2.5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </>
       )}
       <div
         onClick={(e) => {
@@ -1060,7 +1295,23 @@ function PhotoLightbox({ receipt, onClose }: PhotoLightboxProps) {
           gap: 18,
         }}
       >
-        <ReceiptPhoto receipt={receipt} height={460} />
+        {receipt.photoPath ? (
+          <img
+            src={receipt.photoPath}
+            alt={receipt.merchant}
+            style={{
+              maxWidth: '80vw',
+              maxHeight: '78vh',
+              objectFit: 'contain',
+              borderRadius: 8,
+              display: 'block',
+              boxShadow: '0 8px 40px rgba(0,0,0,0.6)',
+            }}
+            draggable={false}
+          />
+        ) : (
+          <ReceiptPhoto receipt={receipt} height={460} />
+        )}
         <button
           onClick={onClose}
           style={{
@@ -1086,9 +1337,10 @@ interface BundleDetailPaneProps {
   theme: Theme;
   bundle: BundleWithDetails;
   onBack: () => void;
+  backLabel?: string;
 }
 
-function BundleDetailPane({ theme, bundle, onBack }: BundleDetailPaneProps) {
+function BundleDetailPane({ theme, bundle, onBack, backLabel = '← ฉบับร่าง' }: BundleDetailPaneProps) {
   const items: Receipt[] = bundle.receipts;
   const total = items.reduce((sum, r) => sum + r.amount, 0);
   const [totalWhole, totalFrac] = fmtN(total).split('.');
@@ -1121,7 +1373,7 @@ function BundleDetailPane({ theme, bundle, onBack }: BundleDetailPaneProps) {
           gap: 6,
         }}
       >
-        ← ฉบับร่าง
+        {backLabel}
       </button>
 
       <div
@@ -1184,6 +1436,31 @@ function BundleDetailPane({ theme, bundle, onBack }: BundleDetailPaneProps) {
       <Card theme={theme} padding={18} style={{ marginBottom: 28 }}>
         <BundleStatusBlock theme={theme} bundle={bundle} total={total} />
       </Card>
+
+      {bundle.status === 'paid' && bundle.transferProofPath && (
+        <div style={{ marginBottom: 28 }}>
+          <div
+            style={{
+              fontFamily: FONT_UI,
+              fontSize: 11,
+              color: theme.inkSoft,
+              letterSpacing: 1.4,
+              textTransform: 'uppercase',
+              fontWeight: 500,
+              marginBottom: 12,
+            }}
+          >
+            หลักฐานการโอน
+          </div>
+          <Card theme={theme} padding={16}>
+            <img
+              src={bundle.transferProofPath}
+              alt="หลักฐานการโอน"
+              style={{ width: '100%', borderRadius: 10, display: 'block' }}
+            />
+          </Card>
+        </div>
+      )}
 
       <div style={{ marginBottom: 28 }}>
         <div
@@ -1395,6 +1672,9 @@ function BundleStatusBlock({ theme, bundle, total }: BundleStatusBlockProps) {
               ไม่มีหมายเหตุเพิ่มเติม
             </div>
           )}
+          <div style={{ fontFamily: FONT_UI, fontSize: 12, color: theme.inkSoft, marginTop: 6, lineHeight: 1.5 }}>
+            ใบเสร็จถูกส่งกลับไปยังฉบับร่างแล้ว — แก้ไขและส่งใหม่ได้จากหน้าฉบับร่าง
+          </div>
         </div>
       </div>
     );
@@ -1403,9 +1683,10 @@ function BundleStatusBlock({ theme, bundle, total }: BundleStatusBlockProps) {
   return null;
 }
 
-// ── Create receipt modal ──────────────────────────────────────────────
+// ── Create / edit receipt modal ──────────────────────────────────────
 interface NewReceiptInput {
-  photo: string;
+  /** Data URL of a newly picked photo; null when unchanged (edit) or absent. */
+  photo: string | null;
   amount: number;
   merchant: string;
   category: string;
@@ -1417,25 +1698,31 @@ interface NewReceiptInput {
 
 interface CreateReceiptModalProps {
   theme: Theme;
+  /** When set, the modal edits this receipt instead of creating a new one. */
+  initial?: Receipt | null;
+  saving?: boolean;
   onClose: () => void;
   onSave: (input: NewReceiptInput) => void;
 }
 
-function CreateReceiptModal({ theme, onClose, onSave }: CreateReceiptModalProps): JSX.Element {
+function CreateReceiptModal({ theme, initial, saving, onClose, onSave }: CreateReceiptModalProps): JSX.Element {
   const modalToday = new Date().toISOString().slice(0, 10);
   const [photo, setPhoto] = useState<string | null>(null);
-  const [amount, setAmount] = useState<string>('');
-  const [merchant, setMerchant] = useState<string>('');
-  const [category, setCategory] = useState<string>(RECEIPT_CATEGORIES[0]);
-  const [property, setProperty] = useState<'hf-hotel' | 'hf-ville'>('hf-hotel');
-  const [quantity, setQuantity] = useState<string>('');
-  const [date, setDate] = useState<string>(modalToday);
-  const [note, setNote] = useState<string>('');
+  const [amount, setAmount] = useState<string>(initial ? String(initial.amount) : '');
+  const [merchant, setMerchant] = useState<string>(initial?.merchant ?? '');
+  const [category, setCategory] = useState<string>(initial?.category ?? RECEIPT_CATEGORIES[0]);
+  const [property, setProperty] = useState<'hf-hotel' | 'hf-ville'>(initial?.property ?? 'hf-hotel');
+  const [quantity, setQuantity] = useState<string>(initial?.quantity != null ? String(initial.quantity) : '');
+  const [date, setDate] = useState<string>(initial?.date ?? modalToday);
+  const [note, setNote] = useState<string>(initial?.note ?? '');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const isEdit = initial != null;
+  // Preview: freshly picked photo wins; otherwise show the stored one on edit.
+  const photoPreview = photo ?? (isEdit ? initial?.photoPath ?? null : null);
   const parsedAmount = parseFloat(amount);
   const hasValidAmount = !Number.isNaN(parsedAmount) && parsedAmount > 0;
-  const canSave = !!photo && hasValidAmount;
+  const canSave = (isEdit || !!photo) && hasValidAmount && !saving;
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent): void => {
@@ -1455,7 +1742,8 @@ function CreateReceiptModal({ theme, onClose, onSave }: CreateReceiptModalProps)
   };
 
   const handleSave = (): void => {
-    if (!canSave || !photo) return;
+    if (!canSave) return;
+    if (!isEdit && !photo) return;
     onSave({
       photo,
       amount: parsedAmount,
@@ -1544,7 +1832,7 @@ function CreateReceiptModal({ theme, onClose, onSave }: CreateReceiptModalProps)
               fontWeight: 500,
             }}
           >
-            ใบเสร็จใหม่
+            {isEdit ? 'แก้ไขใบเสร็จ' : 'ใบเสร็จใหม่'}
           </div>
           <h2
             style={{
@@ -1557,7 +1845,7 @@ function CreateReceiptModal({ theme, onClose, onSave }: CreateReceiptModalProps)
               color: theme.ink,
             }}
           >
-            เพิ่มค่าใช้จ่าย
+            {isEdit ? 'แก้ไขค่าใช้จ่าย' : 'เพิ่มค่าใช้จ่าย'}
           </h2>
           <button
             onClick={onClose}
@@ -1594,7 +1882,7 @@ function CreateReceiptModal({ theme, onClose, onSave }: CreateReceiptModalProps)
               flexShrink: 0,
               background: theme.surface2,
               borderRadius: 14,
-              border: photo ? 'none' : `1.5px dashed ${theme.hairlineStrong}`,
+              border: photoPreview ? 'none' : `1.5px dashed ${theme.hairlineStrong}`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -1603,10 +1891,10 @@ function CreateReceiptModal({ theme, onClose, onSave }: CreateReceiptModalProps)
               position: 'relative',
             }}
           >
-            {photo ? (
+            {photoPreview ? (
               <>
                 <img
-                  src={photo}
+                  src={photoPreview}
                   alt="ใบเสร็จ"
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
@@ -1834,7 +2122,7 @@ function CreateReceiptModal({ theme, onClose, onSave }: CreateReceiptModalProps)
           <div style={{ flex: 1 }} />
           <div style={{ minWidth: 220 }}>
             <PrimaryButton theme={theme} disabled={!canSave} onClick={handleSave}>
-              บันทึก · {hasValidAmount ? fmt(parsedAmount) : '฿0.00'}
+              {saving ? 'กำลังบันทึก...' : `บันทึก · ${hasValidAmount ? fmt(parsedAmount) : '฿0.00'}`}
             </PrimaryButton>
           </div>
         </div>

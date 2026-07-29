@@ -74,9 +74,10 @@ export function Upload({ theme, nav, state, setState, editId }: UploadProps) {
     reader.readAsDataURL(file);
   };
 
-  // In edit mode: a photo is not required if the existing receipt already has one.
+  // Create requires a photo; edit keeps whatever the receipt already has
+  // (imported receipts may legitimately have none).
   const hasPhoto = !!photoFile || (editId != null && existing?.photoPath != null);
-  const canSave = hasPhoto && parseFloat(amount) > 0 && !submitting;
+  const canSave = (editId != null || hasPhoto) && parseFloat(amount) > 0 && !submitting;
 
   const handleSave = async () => {
     if (!canSave) return;

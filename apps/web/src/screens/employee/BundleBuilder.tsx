@@ -36,7 +36,10 @@ export function BundleBuilder({ theme, state, nav, setState, preselectId }: Bund
     preselectId ? new Set([preselectId]) : new Set(),
   );
 
-  const total = loose.filter((r) => selected.has(r.id)).reduce((s, r) => s + r.amount, 0);
+  // Only loose receipts are submittable — a stale preselect (e.g. a receipt
+  // that got bundled elsewhere) must not poison the request.
+  const selectedLoose = loose.filter((r) => selected.has(r.id));
+  const total = selectedLoose.reduce((s, r) => s + r.amount, 0);
 
   const toggle = (id: string) => {
     const next = new Set(selected);
@@ -46,14 +49,14 @@ export function BundleBuilder({ theme, state, nav, setState, preselectId }: Bund
   };
 
   const submit = async () => {
-    if (selected.size === 0 || submitting) return;
+    if (selectedLoose.length === 0 || submitting) return;
     setError(null);
     setSubmitting(true);
     try {
       const effectiveName = name.trim() || todayAutoName();
       const created = await api.bundles.create({
         name: effectiveName,
-        receiptIds: Array.from(selected),
+        receiptIds: selectedLoose.map((r) => r.id),
         note,
       });
       setState((s) => ({
@@ -99,7 +102,7 @@ export function BundleBuilder({ theme, state, nav, setState, preselectId }: Bund
       </div>
 
       <div style={{ padding: '0 20px' }}>
-        <SectionHeader theme={theme} title={`ใบเสร็จ · ${selected.size} จาก ${loose.length}`} />
+        <SectionHeader theme={theme} title={`ใบเสร็จ · ${selectedLoose.length} จาก ${loose.length}`} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {loose.map((r) => (
             <SelectableReceiptRow
@@ -150,7 +153,7 @@ export function BundleBuilder({ theme, state, nav, setState, preselectId }: Bund
             </div>
           </div>
           <div style={{ fontFamily: FONT_UI, fontSize: 12, color: theme.inkSoft, textAlign: 'right' }}>
-            {selected.size} ใบเสร็จ
+            {selectedLoose.length} ใบเสร็จ
             <br />
             <span style={{ color: theme.inkSofter }}>→ ฝ่ายการเงิน</span>
           </div>
@@ -168,7 +171,7 @@ export function BundleBuilder({ theme, state, nav, setState, preselectId }: Bund
             {error}
           </div>
         )}
-        <PrimaryButton theme={theme} disabled={selected.size === 0 || submitting} onClick={submit}>
+        <PrimaryButton theme={theme} disabled={selectedLoose.length === 0 || submitting} onClick={submit}>
           {submitting ? 'กำลังส่ง...' : 'ส่งขออนุมัติ'}
         </PrimaryButton>
       </div>

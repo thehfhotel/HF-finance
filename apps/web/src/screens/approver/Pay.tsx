@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react';
-import type { AppState, Theme } from '../../lib/types';
+import { useEffect, useRef, useState } from 'react';
+import type { AppState, BundleWithDetails, Theme } from '../../lib/types';
 import type { Nav } from '../../lib/router';
+import { MissingBundle } from './Review';
 import { fmt } from '../../lib/format';
 import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../../lib/theme';
 import { api, payFormFromFields } from '../../lib/api';
@@ -19,7 +20,9 @@ interface PayProps {
 }
 
 export function Pay({ theme, state, nav, bundleId, setState }: PayProps) {
-  const b = state.bundles.find((x) => x.id === bundleId);
+  const found = state.bundles.find((x) => x.id === bundleId);
+  const [fetched, setFetched] = useState<BundleWithDetails | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [step, setStep] = useState<'attach' | 'done'>('attach');
   const [ref, setRef] = useState('');
   const [proofPreview, setProofPreview] = useState<string | null>(null);
@@ -29,7 +32,35 @@ export function Pay({ theme, state, nav, bundleId, setState }: PayProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  if (!b) return null;
+  const b = found ?? fetched ?? undefined;
+
+  // Fetch directly when the bundle is missing from client state instead of
+  // dead-ending on a blank screen.
+  useEffect(() => {
+    if (b) return;
+    let cancelled = false;
+    api.bundles
+      .get(bundleId)
+      .then((loaded) => {
+        if (!cancelled) setFetched(loaded);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [b, bundleId]);
+
+  if (!b) {
+    return (
+      <MissingBundle
+        theme={theme}
+        failed={loadFailed}
+        onBack={() => nav({ name: 'approver-home' })}
+      />
+    );
+  }
   const items = b.receipts;
   const total = items.reduce((s, r) => s + r.amount, 0);
 
@@ -48,8 +79,11 @@ export function Pay({ theme, state, nav, bundleId, setState }: PayProps) {
       const updated = await api.bundles.pay(b.id, payFormFromFields(ref.trim(), proofFile));
       setState((s) => ({
         ...s,
-        bundles: s.bundles.map((x) => (x.id === updated.id ? updated : x)),
+        bundles: s.bundles.some((x) => x.id === updated.id)
+          ? s.bundles.map((x) => (x.id === updated.id ? updated : x))
+          : [updated, ...s.bundles],
       }));
+      setFetched(updated);
       setConfirmOpen(false);
       setStep('done');
     } catch (err) {
@@ -308,7 +342,7 @@ export function Pay({ theme, state, nav, bundleId, setState }: PayProps) {
       {confirmOpen && (
         <ConfirmDialog
           theme={theme}
-          title={`ยืนยันว่าโอนแล้ว ฿${fmt(total)}?`}
+          title={`ยืนยันว่าโอนแล้ว ${fmt(total)}?`}
           message={`จ่ายให้ ${b.submitter.name} — การดำเนินการนี้ไม่สามารถยกเลิกได้`}
           confirmLabel="ยืนยัน"
           loading={submitting}

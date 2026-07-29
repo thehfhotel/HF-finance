@@ -22,7 +22,9 @@ const receiptMultipartBody = t.Object({
   note: t.Optional(t.String()),
   color: t.Optional(t.String()),
   accent: t.Optional(t.String()),
-  items: t.Optional(t.String()),
+  // Elysia >= 1.4 auto-JSON-parses multipart fields that look like arrays/
+  // objects, so the JSON-stringified `items` field may arrive pre-parsed.
+  items: t.Optional(t.Union([t.String(), t.Array(t.Unknown())])),
   tax: t.Optional(t.String()),
   photo: t.Optional(t.File()),
 });
@@ -94,7 +96,9 @@ async function parseReceiptMultipart(
   }
 
   if (body.items !== undefined) {
-    parsed.items = parseItems(body.items);
+    parsed.items = Array.isArray(body.items)
+      ? (body.items as ReceiptItem[])
+      : parseItems(body.items);
   }
 
   if (body.photo) {
@@ -210,6 +214,11 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
       if (user.role !== 'APPROVER' && existing.userId !== user.id) {
         return status(403, { message: 'Forbidden' });
       }
+      if (existing.bundleId !== null) {
+        // Attached receipts are part of a submitted request the approver may
+        // already have reviewed or paid; rejection detaches them first.
+        return status(409, { message: 'Receipt is attached to a bundle and cannot be edited' });
+      }
 
       let parsed: ParsedReceiptInput;
       try {
@@ -252,6 +261,9 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
     }
     if (user.role !== 'APPROVER' && existing.userId !== user.id) {
       return status(403, { message: 'Forbidden' });
+    }
+    if (existing.bundleId !== null) {
+      return status(409, { message: 'Receipt is attached to a bundle and cannot be deleted' });
     }
 
     await prisma.receipt.delete({ where: { id: params.id } });

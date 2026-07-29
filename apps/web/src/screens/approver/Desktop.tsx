@@ -24,9 +24,10 @@ interface DesktopApproverProps {
   setState: (updater: (s: AppState) => AppState) => void;
   onNavigate?: (target: 'admin-employees' | 'my-requests') => void;
   currentUser: User | null;
+  onLogout?: () => void;
 }
 
-export function DesktopApprover({ theme, state, setState, onNavigate, currentUser }: DesktopApproverProps): JSX.Element {
+export function DesktopApprover({ theme, state, setState, onNavigate, currentUser, onLogout }: DesktopApproverProps): JSX.Element {
   const [filter, setFilter] = useState<FilterKey>('pending');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [photoIdx, setPhotoIdx] = useState<number | null>(null);
@@ -115,6 +116,7 @@ export function DesktopApprover({ theme, state, setState, onNavigate, currentUse
     setPayOpen(false);
     setTransferRefInput('');
     setProof(null);
+    setActionError(null);
   };
 
   const confirmPay = async (): Promise<void> => {
@@ -142,6 +144,12 @@ export function DesktopApprover({ theme, state, setState, onNavigate, currentUse
   const selectFilter = (next: FilterKey): void => {
     setFilter(next);
     setSelectedId(null);
+    setActionError(null);
+  };
+
+  const selectBundle = (id: string): void => {
+    setSelectedId(id);
+    setActionError(null);
   };
 
   const sidebar = (
@@ -155,6 +163,7 @@ export function DesktopApprover({ theme, state, setState, onNavigate, currentUse
       onSelectFilter={selectFilter}
       onNavigate={onNavigate}
       currentUser={currentUser}
+      onLogout={onLogout}
     />
   );
 
@@ -168,7 +177,7 @@ export function DesktopApprover({ theme, state, setState, onNavigate, currentUse
           selected={selectedBundle}
           totalPending={totalPending}
           sumOfBundle={sumOfBundle}
-          onSelect={(id) => setSelectedId(id)}
+          onSelect={selectBundle}
         />
 
         <div style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
@@ -309,6 +318,7 @@ interface SidebarContentProps {
   onSelectFilter: (next: FilterKey) => void;
   onNavigate?: (target: 'admin-employees' | 'my-requests') => void;
   currentUser: User | null;
+  onLogout?: () => void;
 }
 
 function SidebarContent({
@@ -321,6 +331,7 @@ function SidebarContent({
   onSelectFilter,
   onNavigate,
   currentUser,
+  onLogout,
 }: SidebarContentProps): JSX.Element {
   return (
     <>
@@ -387,6 +398,7 @@ function SidebarContent({
         label="คำขอของฉัน"
         onClick={onNavigate ? () => onNavigate('my-requests') : undefined}
       />
+      {onLogout && <SidebarItem theme={theme} label="ออกจากระบบ" onClick={onLogout} />}
 
       <div style={{ flex: 1 }} />
 

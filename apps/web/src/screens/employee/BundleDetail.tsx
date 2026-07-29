@@ -111,6 +111,17 @@ export function BundleDetail({ theme, state, nav, bundleId }: BundleDetailProps)
                   เหตุผลที่ปฏิเสธ: {b.rejectReason}
                 </div>
               )}
+              <div
+                style={{
+                  fontFamily: FONT_UI,
+                  fontSize: 12,
+                  color: theme.inkSoft,
+                  lineHeight: 1.5,
+                  marginTop: 6,
+                }}
+              >
+                ใบเสร็จถูกส่งกลับไปยังฉบับร่างแล้ว — แก้ไขและส่งใหม่ได้จากหน้าหลัก
+              </div>
             </div>
           </div>
         </div>
@@ -160,6 +171,27 @@ export function BundleDetail({ theme, state, nav, bundleId }: BundleDetailProps)
             >
               <span style={{ color: theme.inkSoft }}>โอนผ่านธนาคาร</span>
               <span style={{ color: theme.ink }}>{b.transferRef}</span>
+            </div>
+          )}
+          {b.status === 'paid' && b.transferProofPath && (
+            <div style={{ marginTop: 14 }}>
+              <div
+                style={{
+                  fontFamily: FONT_UI,
+                  fontSize: 11,
+                  color: theme.inkSoft,
+                  letterSpacing: 1.4,
+                  textTransform: 'uppercase',
+                  marginBottom: 8,
+                }}
+              >
+                หลักฐานการโอน
+              </div>
+              <img
+                src={b.transferProofPath}
+                alt="หลักฐานการโอน"
+                style={{ width: '100%', borderRadius: 10, display: 'block' }}
+              />
             </div>
           )}
         </Card>
