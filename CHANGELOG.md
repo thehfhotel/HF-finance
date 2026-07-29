@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-07-29
+
+### Added
+- **Cloudflare Access login.** The app now sits behind a Cloudflare Access application; a silent
+  exchange endpoint, `POST /api/auth/cf-login`, verifies the `Cf-Access-Jwt-Assertion` header at
+  the origin and mints the app's existing JWT. Identity resolves via `users.email` (exact match)
+  first, then the synthetic `<badge>@emp.thehfhotel.org` badge address; ManageEmployees gains an
+  admin-managed email field for the mapping.
+
+### Removed
+- **LINE OAuth login.** The app-level LINE channel, the callback route, and the 6-digit
+  `lineLinkingCode` binding ceremony are gone, along with all `users.line*` columns (migration
+  `20260729000000_cf_access_login`).
+
+### Changed
+- App JWT claims are now `{ userId, badge? }`.
+
 ## [0.11.0] - 2026-07-06
 
 ### Added

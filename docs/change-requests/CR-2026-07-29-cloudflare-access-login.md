@@ -41,6 +41,7 @@ secrets from this app's threat surface entirely.
 | `docker-compose.production.yml` | api service env: LINE vars removed, `CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD` added, nearby comment corrected |
 | `.github/workflows/deploy.yml` | Secret wiring + required-secrets validation + `.env` heredoc all swapped from LINE vars to the two CF Access vars |
 | `apps/web/src/screens/approver/ManageEmployees.tsx` | Linking-code UX (generate/regenerate/revoke, code display modal, LINE status column) removed; email field + column added to the create/edit admin UI |
+| `CHANGELOG.md` | New `[0.12.0] - 2026-07-29` entry: Added (CF Access login), Removed (LINE OAuth + linking-code flow + `users.line*` columns), Changed (JWT claim shape) |
 
 ## Data migration
 
