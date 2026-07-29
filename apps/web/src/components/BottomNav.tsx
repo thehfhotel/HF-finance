@@ -27,6 +27,9 @@ const APPROVER_ITEMS: NavItem[] = [
   { label: 'กล่องอนุมัติ', route: 'approver-home', icon: Icon.bundle },
   { label: 'คำขอของฉัน', route: 'my-requests', icon: Icon.receipt },
   { label: 'พนักงาน', route: 'admin-employees', icon: Icon.user },
+  // Company expense ledger — approvers are authorized the same as admins
+  // (see apps/api/src/routes/expenses.ts, pl.ts); this is their mobile entry point.
+  { label: 'บัญชีบริษัท', route: 'ledger', icon: Icon.bank },
 ];
 
 const ADMIN_ITEMS: NavItem[] = [

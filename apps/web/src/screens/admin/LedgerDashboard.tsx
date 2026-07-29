@@ -7,7 +7,7 @@ import { FONT_DISPLAY, FONT_UI } from '../../lib/theme';
 import { fmt } from '../../lib/format';
 import { api } from '../../lib/api';
 import { AppBar } from '../../components/AppBar';
-import { Card, PrimaryButton } from '../../components/primitives';
+import { Card, IconBtn, PrimaryButton } from '../../components/primitives';
 import { Icon } from '../../components/icons';
 import { MonthSwitcher, currentMonth, thaiMonthLabel } from './_shared';
 
@@ -15,6 +15,9 @@ interface LedgerDashboardProps {
   theme: Theme;
   nav: Nav;
   initialMonth?: string;
+  /** Set for approvers only — shows a back arrow to their inbox. Admins have
+   *  no "back" (this screen is their app root), so this stays unset for them. */
+  onBack?: () => void;
 }
 
 /**
@@ -22,7 +25,7 @@ interface LedgerDashboardProps {
  * total, per-line amounts (admin bills + reimbursement rollup), the
  * recurring-bill completeness checklist, and the raw entries.
  */
-export function LedgerDashboard({ theme, nav, initialMonth }: LedgerDashboardProps) {
+export function LedgerDashboard({ theme, nav, initialMonth, onBack }: LedgerDashboardProps) {
   const [month, setMonth] = useState(initialMonth ?? currentMonth());
   const [summary, setSummary] = useState<MonthLedgerSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +56,13 @@ export function LedgerDashboard({ theme, nav, initialMonth }: LedgerDashboardPro
 
   return (
     <div style={{ paddingBottom: 24 }}>
-      <AppBar theme={theme} large title="รายจ่ายบริษัท" subtitle="บัญชีรายจ่าย · HF" />
+      <AppBar
+        theme={theme}
+        large
+        title="รายจ่ายบริษัท"
+        subtitle="บัญชีรายจ่าย · HF"
+        leading={onBack ? <IconBtn theme={theme} onClick={onBack}>{Icon.back(theme.ink)}</IconBtn> : undefined}
+      />
 
       <div style={{ padding: '4px 20px 0' }}>
         <MonthSwitcher theme={theme} month={month} onChange={setMonth} max={currentMonth()} />

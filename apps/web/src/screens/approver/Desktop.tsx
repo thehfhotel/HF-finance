@@ -22,7 +22,7 @@ interface DesktopApproverProps {
   theme: Theme;
   state: AppState;
   setState: (updater: (s: AppState) => AppState) => void;
-  onNavigate?: (target: 'admin-employees' | 'my-requests') => void;
+  onNavigate?: (target: 'admin-employees' | 'my-requests' | 'ledger') => void;
   currentUser: User | null;
   onLogout?: () => void;
 }
@@ -316,7 +316,7 @@ interface SidebarContentProps {
   paidCount: number;
   rejectedCount: number;
   onSelectFilter: (next: FilterKey) => void;
-  onNavigate?: (target: 'admin-employees' | 'my-requests') => void;
+  onNavigate?: (target: 'admin-employees' | 'my-requests' | 'ledger') => void;
   currentUser: User | null;
   onLogout?: () => void;
 }
@@ -399,6 +399,26 @@ function SidebarContent({
         onClick={onNavigate ? () => onNavigate('my-requests') : undefined}
       />
       {onLogout && <SidebarItem theme={theme} label="ออกจากระบบ" onClick={onLogout} />}
+
+      <div style={{ height: 16 }} />
+      <div
+        style={{
+          padding: '6px 16px 6px',
+          fontFamily: FONT_UI,
+          fontSize: 10,
+          fontWeight: 600,
+          color: theme.inkSofter,
+          letterSpacing: 1.2,
+          textTransform: 'uppercase',
+        }}
+      >
+        บัญชีบริษัท
+      </div>
+      <SidebarItem
+        theme={theme}
+        label="รายจ่ายบริษัท"
+        onClick={onNavigate ? () => onNavigate('ledger') : undefined}
+      />
 
       <div style={{ flex: 1 }} />
 

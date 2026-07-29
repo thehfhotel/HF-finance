@@ -429,6 +429,12 @@ export function App() {
   }
 
   const role = currentUser?.role ?? tweaks.role;
+  // Company expense ledger — API-authorized for admin and approver alike
+  // (apps/api/src/routes/expenses.ts, pl.ts). Approvers reach it only while
+  // on one of these routes; outside them they keep their normal desktop/
+  // mobile approver experience.
+  const LEDGER_ROUTE_NAMES = new Set<Route['name']>(['ledger', 'ledger-entry', 'ledger-report']);
+  const isApproverLedger = role === 'approver' && LEDGER_ROUTE_NAMES.has(route.name);
   const REQUESTOR_ROUTES = new Set(['upload', 'record', 'bundle-new', 'bundle-submitted', 'bundle']);
   const inRequestorMode = role === 'employee' || route.name === 'my-requests' || REQUESTOR_ROUTES.has(route.name);
   const reqState = role === 'approver' ? myState : state;
@@ -458,7 +464,7 @@ export function App() {
   // column shell regardless of platform.
   const BOTTOM_NAV_ROUTES = new Set<Route['name']>(['home', 'approver-home', 'my-requests', 'ledger', 'ledger-report']);
   const showBottomNav =
-    (platform === 'mobile' || role === 'admin') && BOTTOM_NAV_ROUTES.has(route.name);
+    (platform === 'mobile' || role === 'admin' || isApproverLedger) && BOTTOM_NAV_ROUTES.has(route.name);
   const handleBottomNav = (r: BottomNavRoute) => setRoute({ name: r } as Route);
   // An approver landing at '/' sits on route 'home' but sees the Inbox —
   // highlight the matching bottom-nav item.
@@ -475,7 +481,10 @@ export function App() {
 
   // Admin (expense ledger) — no dedicated desktop layout; the kiosk-style
   // screens render in a centered phone-width column on desktop viewports.
-  if (platform === 'desktop' && role === 'admin') {
+  // Approvers share this same shell, but only while on a ledger route (their
+  // sidebar dashboard sends them here); every other route keeps their normal
+  // desktop shell below unchanged.
+  if (platform === 'desktop' && (role === 'admin' || isApproverLedger)) {
     return (
       <>
         <div style={{ position: 'fixed', inset: 0, background: theme.paper }} />
@@ -515,7 +524,10 @@ export function App() {
           </div>
           {showBottomNav && (
             <BottomNav
-              role={role}
+              // Approvers borrow the admin ledger nav (รายจ่าย/บันทึกบิล/งบเดือน)
+              // while in this shell so "บันทึกบิล" (new entry) stays reachable —
+              // identical to what admin sees on this same route.
+              role={isApproverLedger ? 'admin' : role}
               activeRoute={route.name as BottomNavRoute}
               theme={theme}
               onNavigate={handleBottomNav}
@@ -537,6 +549,7 @@ export function App() {
             setState={setState}
             onNavigate={(target) => {
               if (target === 'my-requests') setRoute({ name: 'my-requests' });
+              else if (target === 'ledger') setRoute({ name: 'ledger' });
               else setRoute({ name: 'admin-employees' });
             }}
             currentUser={currentUser}
@@ -684,7 +697,15 @@ function renderScreen({ route, theme, state, setState, reqState, reqSetState, na
     return <Inbox theme={theme} state={state} nav={nav} currentUser={currentUser} onLogout={onLogout} />;
 
   // Company expense ledger (admin, also reachable by approvers)
-  if (route.name === 'ledger') return <LedgerDashboard theme={theme} nav={nav} initialMonth={route.month} />;
+  if (route.name === 'ledger')
+    return (
+      <LedgerDashboard
+        theme={theme}
+        nav={nav}
+        initialMonth={route.month}
+        onBack={role === 'approver' ? () => nav({ name: 'approver-home' }) : undefined}
+      />
+    );
   if (route.name === 'ledger-entry') return <ExpenseWizard theme={theme} nav={nav} edit={route.edit} />;
   if (route.name === 'ledger-report') return <PlReportScreen theme={theme} nav={nav} initialMonth={route.month} />;
 
