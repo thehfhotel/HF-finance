@@ -209,7 +209,6 @@ export async function loadSheet(period: string): Promise<Sheet> {
   // value the user cleared stays cleared.
   const seed = existing ? null : new Map((await latestPriorSheet(period))?.rows.map((r) => [r.accountId, r]) ?? []);
   for (const a of accounts) {
-    if (dismissed.has(a.id)) continue;
     const number = normalizeAccountNumber(a.accountNumber);
     const row = rowsById.get(a.id) ?? rowsByNumber.get(number);
     if (row) {
@@ -221,6 +220,10 @@ export async function loadSheet(period: string): Promise<Sheet> {
       rowsByNumber.delete(number);
       continue;
     }
+    // Dismissing an account only suppresses ADDING a row for it. Operators
+    // dismissed the roster row as a workaround for the duplicate above, while
+    // keeping the one they typed — that kept row still deserves to be linked.
+    if (dismissed.has(a.id)) continue;
     const prior = seed?.get(a.id);
     sheet.rows.push(prior ? seededRow(a, prior) : emptyRow(a));
   }
