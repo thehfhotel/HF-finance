@@ -43,6 +43,7 @@ jobs:
           filters: |
             payroll:
               - 'src/**'
+              - 'test/**'
               - 'package.json'
               - 'bun.lock'
               - 'Dockerfile'
@@ -56,8 +57,29 @@ jobs:
               - 'scripts/deploy/**'
               - '.github/workflows/deploy.yml'
 
-  build-payroll:
+  test:
     needs: changes
+    # Runs whenever code changed, in either image — the suite covers both
+    # src/ and kbiz-bot/, and it's seconds. Doc-only commits skip it.
+    if: needs.changes.outputs.payroll == 'true' || needs.changes.outputs.kbiz == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v5.0.0
+
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76  # v2.0.2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      # Covers both packages: kbiz-bot's tests import only pure parsing code
+      # (its `playwright` import is type-only), so no browser install needed.
+      - run: bun test
+
+  build-payroll:
+    needs: [changes, test]
     if: needs.changes.outputs.payroll == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -87,7 +109,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=payroll
 
   build-kbiz-bot:
-    needs: changes
+    needs: [changes, test]
     if: needs.changes.outputs.kbiz == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -116,7 +138,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=kbiz-bot
 
   deploy:
-    needs: [changes, build-payroll, build-kbiz-bot]
+    needs: [changes, test, build-payroll, build-kbiz-bot]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -124,9 +146,12 @@ jobs:
     # Allow deploy when:
     #   - at least one image rebuilt successfully, OR
     #   - only deploy-scoped files changed (re-roll existing :latest images)
-    # Always require build jobs to be success-or-skipped (never failed).
+    # Always require test + build jobs to be success-or-skipped (never failed).
+    # The test guard is load-bearing: a failed `test` SKIPS both builds, and
+    # "skipped" alone would otherwise read as permission to re-roll :latest.
     if: |
       always() &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped') &&
       (needs.build-payroll.result == 'success' || needs.build-payroll.result == 'skipped') &&
       (needs.build-kbiz-bot.result == 'success' || needs.build-kbiz-bot.result == 'skipped') &&
       (needs.build-payroll.result == 'success' ||

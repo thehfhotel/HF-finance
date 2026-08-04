@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { listAccounts } from "./store";
+import { listAccounts, normalizeAccountNumber } from "./store";
 
 const SHEETS_DIR = process.env.SHEETS_DIR ?? "data/sheets";
 
@@ -45,6 +45,18 @@ const PERIOD_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 export function isValidPeriod(p: string): boolean {
   return PERIOD_RE.test(p);
+}
+
+// "Past" = a cycle locked once its payout day arrives. Payout is the 5th of
+// the following month, so 2026-05 stays open through 4 Jun and locks on 5 Jun.
+// Mirrors isPastPeriod() in views/worksheet.ts — a locked cycle is frozen, so
+// roster name changes must never rewrite it.
+export function isPastPeriod(period: string): boolean {
+  const m = PERIOD_RE.exec(period || "");
+  if (!m) return false;
+  const [y, mo] = period.split("-").map((n) => parseInt(n, 10));
+  // Date's month is 0-based, so passing `mo` lands on the 5th of the NEXT month.
+  return new Date() >= new Date(y, mo, 5, 0, 0, 0);
 }
 
 // Defaults pulled from the most recent payroll snapshot
@@ -199,17 +211,38 @@ export async function loadSheet(period: string): Promise<Sheet> {
   };
   if (!Array.isArray(sheet.dismissed)) sheet.dismissed = [];
   sheet.rows = sheet.rows.map(normalize);
-  const have = new Set(sheet.rows.map((r) => r.accountId));
   const dismissed = new Set(sheet.dismissed);
+  const rowsById = new Map(sheet.rows.map((r) => [r.accountId, r] as const));
+  // Rows typed by hand ("+ เพิ่มแถวใหม่") carry a local "m-…" accountId, so
+  // matching the roster on id alone appended a SECOND row for someone who was
+  // already on the sheet. The bank account number is the real identity.
+  const rowsByNumber = new Map<string, SheetRow>();
+  for (const r of sheet.rows) {
+    const n = normalizeAccountNumber(r.accountNumber || "");
+    if (n && !rowsByNumber.has(n)) rowsByNumber.set(n, r);
+  }
+  // An open cycle tracks the roster (and therefore the KBIZ-synced name);
+  // a locked past cycle keeps whatever it was paid out with.
+  const refreshNames = !isPastPeriod(period);
   // For a brand-new sheet, seed each fresh row from the most recent prior cycle
   // (carry salary + recompute 5%/5%). Existing sheets are never reseeded, so a
   // value the user cleared stays cleared.
   const seed = existing ? null : new Map((await latestPriorSheet(period))?.rows.map((r) => [r.accountId, r]) ?? []);
   for (const a of accounts) {
-    if (!have.has(a.id) && !dismissed.has(a.id)) {
-      const prior = seed?.get(a.id);
-      sheet.rows.push(prior ? seededRow(a, prior) : emptyRow(a));
+    if (dismissed.has(a.id)) continue;
+    const number = normalizeAccountNumber(a.accountNumber);
+    const row = rowsById.get(a.id) ?? rowsByNumber.get(number);
+    if (row) {
+      // Adopt a hand-typed row so future cycles carry it forward properly.
+      row.accountId = a.id;
+      row.accountNumber = a.accountNumber;
+      if (refreshNames && a.accountName) row.accountName = a.accountName;
+      rowsById.set(a.id, row);
+      rowsByNumber.delete(number);
+      continue;
     }
+    const prior = seed?.get(a.id);
+    sheet.rows.push(prior ? seededRow(a, prior) : emptyRow(a));
   }
   return sheet;
 }
