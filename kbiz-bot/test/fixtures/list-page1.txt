@@ -1,0 +1,96 @@
+K BIZ
+Setting
+Account / Card
+Account Number
+User Profile
+Add or delete Payroll Accounts
+(maximum limit of 500 accounts in system)
+Search Name/Account Number
+Add Account
+No.
+Payroll Account Name
+Account Number
+1
+นางสาวทดสอบ หนึ่ง
+MS. TESTONE SAMPLE
+101-1-10001-1
+2
+นายทดสอบ สอง
+MR. TESTTWO SAMPLE
+102-2-10002-2
+3
+นางสาวทดสอบ สาม
+MS. TESTTHREE SAMPLE
+103-3-10003-3
+4
+นางทดสอบ สี่
+MS. TESTFOUR SAMPLE
+104-4-10004-4
+5
+นายทดสอบ ห้า
+MR. TESTFIVE SAMPLE
+105-5-10005-5
+6
+นางสาวทดสอบ หก
+MS. TESTSIX SAMPLE
+106-6-10006-6
+7
+นางทดสอบ เจ็ด
+MS. TESTSEVEN SAMPLE
+107-7-10007-7
+8
+นายทดสอบ แปด
+MR. TESTEIGHT SAMPLE
+108-8-10008-8
+9
+นางสาวทดสอบ เก้า
+MS. TESTNINE SAMPLE
+109-9-10009-9
+10
+นางทดสอบ สิบ
+MS. TESTTEN SAMPLE
+110-1-10010-0
+11
+นางสาวทดสอบ สิบเอ็ด
+MS. TESTELEVEN SAMPLE
+111-2-10011-1
+12
+นายทดสอบ สิบสอง
+MR. TESTTWELVE SAMPLE
+112-3-10012-2
+13
+นางสาวทดสอบ สิบสาม
+MS. TESTTHIRTEEN SAMPLE
+113-4-10013-3
+14
+นางทดสอบ สิบสี่
+MS. TESTFOURTEEN SAMPLE
+114-5-10014-4
+15
+นายทดสอบ สิบห้า
+MR. TESTFIFTEEN SAMPLE
+115-6-10015-5
+16
+นางสาวทดสอบ สิบหก
+MS. TESTSIXTEEN SAMPLE
+116-7-10016-6
+17
+นางทดสอบ สิบเจ็ด
+MS. TESTSEVENTEEN SAMPLE
+117-8-10017-7
+18
+นายทดสอบ สิบแปด
+MR. TESTEIGHTEEN SAMPLE
+118-9-10018-8
+19
+นางสาวทดสอบ สิบเก้า
+MS. TESTNINETEEN SAMPLE
+119-1-10019-9
+20
+นางทดสอบ ยี่สิบ
+MS. TESTTWENTY SAMPLE
+120-2-10020-0
+Accounts 1-20 of 21 accounts
+1
+2
+Remark: The Account Names shown are name on the date of adding the Payroll Accounts into the system.

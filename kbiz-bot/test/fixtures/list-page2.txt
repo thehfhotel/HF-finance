@@ -1,0 +1,20 @@
+K BIZ
+Setting
+Account / Card
+Account Number
+User Profile
+Add or delete Payroll Accounts
+(maximum limit of 500 accounts in system)
+Search Name/Account Number
+Add Account
+No.
+Payroll Account Name
+Account Number
+21
+นางสาวทดสอบ ยี่สิบเอ็ด
+MS. TESTTWENTYONE SAMPLE
+121-3-10021-1
+Accounts 21 of 21 accounts
+1
+2
+Remark: The Account Names shown are name on the date of adding the Payroll Accounts into the system.
