@@ -5,7 +5,15 @@ import { registeredByNumber } from "./registered";
 
 const DATA_PATH = process.env.DATA_PATH ?? "data/accounts.json";
 
-export type Account = { id: string; accountNumber: string; accountName: string };
+export type Account = {
+  id: string;
+  accountNumber: string;
+  accountName: string;
+  // What the operator typed. KBIZ overwrites accountName on every sync, so
+  // this is the only surviving copy of the provisional entry — it's what a
+  // name disagreement is measured against. Never rewritten by a sync.
+  enteredName?: string;
+};
 
 let cache: Account[] | null = null;
 
@@ -39,7 +47,11 @@ export function normalizeAccountNumber(n: string) {
 /**
  * KBIZ is the source of truth for ชื่อบัญชี: once an account is registered
  * with the bank, the Thai payee name on the KBIZ record replaces whatever was
- * typed here, on every sync.
+ * typed here, on every sync — including when the two disagree.
+ *
+ * What was typed is preserved in `enteredName` instead of being discarded, so
+ * a disagreement stays visible (see nameMismatch on /api/accounts). The local
+ * entry is a check on the bank's record, not an override of it.
  *
  * Applied on read rather than on a sync event, because the sync runs in the
  * kbiz-bot container and only rewrites data/kbiz-registered.json — the app
@@ -51,9 +63,14 @@ async function applyBankNames(list: Account[]): Promise<Account[]> {
   if (registered.size === 0) return list;
   let changed = false;
   for (const a of list) {
-    const name = registered.get(a.accountNumber)?.payeeName?.trim();
-    if (name && name !== a.accountName) {
-      a.accountName = name;
+    const bankName = registered.get(a.accountNumber)?.payeeName?.trim();
+    if (!bankName) continue;
+    if (a.enteredName === undefined) {
+      a.enteredName = a.accountName;
+      changed = true;
+    }
+    if (bankName !== a.accountName) {
+      a.accountName = bankName;
       changed = true;
     }
   }
@@ -71,6 +88,7 @@ export async function addAccount(input: { accountNumber: string; accountName: st
     id: nextId(list),
     accountNumber: normalizeAccountNumber(input.accountNumber),
     accountName: input.accountName.trim(),
+    enteredName: input.accountName.trim(),
   };
   list.push(item);
   await persist();
@@ -81,10 +99,13 @@ export async function updateAccount(id: string, input: { accountNumber: string; 
   const list = await load();
   const idx = list.findIndex((a) => a.id === id);
   if (idx === -1) throw new Error("not found");
+  // Re-typing the name is how an operator resolves a disagreement with the
+  // bank, so an edit always resets the provisional entry too.
   list[idx] = {
     id,
     accountNumber: normalizeAccountNumber(input.accountNumber),
     accountName: input.accountName.trim(),
+    enteredName: input.accountName.trim(),
   };
   await persist();
   return list[idx];

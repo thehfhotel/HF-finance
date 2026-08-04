@@ -22,6 +22,8 @@ mkdirSync(join(dir, "sheets"), { recursive: true });
 
 const REGISTERED_NUMBER = "1213100211";
 const UNREGISTERED_NUMBER = "999919999";
+// An account whose typed name disagrees with the bank's record.
+const MISMATCH_NUMBER = "1919919199";
 
 writeFileSync(
   process.env.DATA_PATH,
@@ -29,6 +31,7 @@ writeFileSync(
     { id: "1", accountNumber: "1011100011", accountName: "น.ส. ทดสอบ หนึ่ง" },
     { id: "21", accountNumber: REGISTERED_NUMBER, accountName: "น.ส. ทดสอบ ยี่สิบเอ็ด" },
     { id: "22", accountNumber: UNREGISTERED_NUMBER, accountName: "น.ส. ยังไม่ลง ทะเบียน" },
+    { id: "23", accountNumber: MISMATCH_NUMBER, accountName: "น.ส. กมลวรรณ สังข์แก้ว" },
   ])
 );
 writeFileSync(
@@ -42,6 +45,11 @@ writeFileSync(
         accountNumber: REGISTERED_NUMBER,
         accountName: "MS. TESTTWENTYONE SAMPLE",
         payeeName: "นางสาวทดสอบ ยี่สิบเอ็ด",
+      },
+      {
+        accountNumber: MISMATCH_NUMBER,
+        accountName: "MS. KANOKWAN SANGKAEW",
+        payeeName: "นางสาวกนกวรรณ สังข์แก้ว",
       },
     ],
   })
@@ -122,6 +130,24 @@ describe("listAccounts", () => {
     const onDisk = JSON.parse(readFileSync(process.env.DATA_PATH!, "utf8"));
     expect(onDisk.find((a: { id: string }) => a.id === "21").accountName).toBe("นางสาวทดสอบ ยี่สิบเอ็ด");
   });
+
+  it("takes the bank's name even when it disagrees with what was typed", async () => {
+    // KBIZ is the source of truth: a disagreement is reported, never resolved
+    // in favour of the local entry.
+    const account = (await listAccounts()).find((a) => a.id === "23");
+    expect(account?.accountName).toBe("นางสาวกนกวรรณ สังข์แก้ว");
+  });
+
+  it("keeps the typed name so the disagreement stays visible", async () => {
+    const account = (await listAccounts()).find((a) => a.id === "23");
+    expect(account?.enteredName).toBe("น.ส. กมลวรรณ สังข์แก้ว");
+  });
+
+  it("records the pre-sync entry for agreeing rows too", async () => {
+    const account = (await listAccounts()).find((a) => a.id === "1");
+    expect(account?.enteredName).toBe("น.ส. ทดสอบ หนึ่ง");
+    expect(account?.accountName).toBe("นางสาวทดสอบ หนึ่ง");
+  });
 });
 
 describe("loadSheet reconciliation", () => {
@@ -146,7 +172,7 @@ describe("loadSheet reconciliation", () => {
 
   it("still appends roster accounts that have no row yet", async () => {
     const sheet = await loadSheet(OPEN_PERIOD);
-    expect(sheet.rows.map((r) => r.accountId).sort()).toEqual(["1", "21", "22"]);
+    expect(sheet.rows.map((r) => r.accountId).sort()).toEqual(["1", "21", "22", "23"]);
   });
 
   it("never rewrites a locked past cycle's name", async () => {
