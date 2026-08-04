@@ -9,11 +9,12 @@ import { WORKSHEET_HTML } from "./views/worksheet";
 import { STATUS_HTML } from "./views/status";
 import { ADMIN_MODAL_HTML, adminNavHtml } from "./views/admin";
 import { addAccount, deleteAccount, listAccounts, updateAccount } from "./store";
-import { loadRegistered, registeredSet } from "./registered";
+import { loadRegistered, registeredByNumber, registeredSet } from "./registered";
 import { getRequest, listRequests, submitRequest, submitSyncRequest, updateRequest } from "./queue";
 import { notifySlack } from "./slack";
 import { isValidPeriod, loadSheet, saveSheet } from "./sheets";
 import { CardAssertionError, HF_ID_BASE_URL, cardAssertionJwks, verifyCardAssertion } from "./card";
+import { namesAgree } from "./names";
 
 const staticFile = async (path: string, mime: string) => {
   const buf = await readFile(path);
@@ -294,8 +295,15 @@ const app = new Elysia()
 
   .get("/api/accounts", async () => {
     const accounts = await listAccounts();
-    const reg = await registeredSet();
-    return accounts.map((a) => ({ ...a, registered: reg.has(a.accountNumber) }));
+    const reg = await registeredByNumber();
+    return accounts.map((a) => {
+      const bankName = reg.get(a.accountNumber)?.payeeName?.trim() ?? "";
+      // accountName already IS the bank's name — KBIZ is the source of truth.
+      // The flag says the operator's original entry disagreed with it, which
+      // is worth a human look (a bank typo, or the wrong account number).
+      const nameMismatch = !!(bankName && a.enteredName && !namesAgree(a.enteredName, bankName));
+      return { ...a, registered: reg.has(a.accountNumber), bankName, nameMismatch };
+    });
   })
   .get("/api/registered", async () => (await loadRegistered()) ?? { fetchedAt: null, count: 0, accounts: [] })
   .post("/api/accounts", ({ body }) => addAccount(body), { body: accountBody })

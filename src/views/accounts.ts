@@ -64,6 +64,7 @@ export const ACCOUNTS_HTML = `<!doctype html>
   .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
   .badge-ok { background: color-mix(in srgb, var(--hf-success) 15%, white); color: var(--hf-success); }
   .badge-pending { background: color-mix(in srgb, var(--hf-warning) 18%, white); color: var(--hf-warning); }
+  .badge-mismatch { background: color-mix(in srgb, var(--hf-error) 12%, white); color: var(--hf-error); margin-left: 6px; cursor: help; }
   tr.registered td { color: var(--hf-text-muted); }
   tr.registered td input.select { opacity: 0.4; }
 </style>
@@ -149,11 +150,17 @@ function viewRow(a, idx) {
   const statusBadge = a.registered
     ? '<span class="badge badge-ok">ลงทะเบียนแล้ว</span>'
     : '<span class="badge badge-pending">ยังไม่ลง</span>';
+  // ชื่อบัญชี always shows KBIZ's record. The badge means the name originally
+  // typed here disagreed with it — a bank typo, or the wrong account number.
+  // Re-saving the row with the correct name clears it.
+  const mismatchBadge = a.nameMismatch
+    ? \`<span class="badge badge-mismatch" title="ที่กรอกไว้: \${escapeHtml(a.enteredName || "")} — ธนาคารบันทึกว่า: \${escapeHtml(a.bankName || "")} · แก้ไขแถวนี้เพื่อยืนยัน">⚠ ต่างจากที่กรอก</span>\`
+    : "";
   tr.innerHTML = \`
     <td><input type="checkbox" class="select"\${a.registered ? "" : ""}></td>
     <td>\${idx + 1}</td>
     <td class="acct">\${escapeHtml(formatAccount(a.accountNumber))}</td>
-    <td>\${escapeHtml(a.accountName)}</td>
+    <td>\${escapeHtml(a.accountName)}\${mismatchBadge}</td>
     <td>\${statusBadge}</td>
     <td class="row-actions">
       <button type="button" class="edit">แก้ไข</button>
