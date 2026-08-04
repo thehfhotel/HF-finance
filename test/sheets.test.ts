@@ -158,6 +158,29 @@ describe("loadSheet reconciliation", () => {
     expect(row?.accountName).toBe("ทดสอบ (ครัว)");
   });
 
+  it("links a kept row even when the roster account was dismissed", async () => {
+    // The workaround operators actually used for the duplicate: delete the
+    // roster row, keep the hand-typed one. That row still gets linked+renamed.
+    const period = "2031-07";
+    writeFileSync(
+      join(dir, "sheets", `${period}.json`),
+      JSON.stringify({
+        period,
+        effectiveDate: "",
+        rows: [structuredClone(handTypedRow)],
+        generalNotes: "",
+        dismissed: ["21"],
+        updatedAt: "2026-08-04T00:00:00.000Z",
+      })
+    );
+    const sheet = await loadSheet(period);
+    const rows = sheet.rows.filter((r) => r.accountNumber.replace(/-/g, "") === REGISTERED_NUMBER);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].accountId).toBe("21");
+    expect(rows[0].accountName).toBe("นางสาวทดสอบ ยี่สิบเอ็ด");
+    expect(rows[0].salary).toBe(12000);
+  });
+
   it("does not resurrect a dismissed account", async () => {
     const period = "2031-05";
     writeFileSync(
