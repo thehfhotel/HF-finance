@@ -28,6 +28,33 @@ import { serializeUser } from '../serializers';
 const CF_ACCESS_TEAM_DOMAIN =
   process.env.CF_ACCESS_TEAM_DOMAIN ?? 'laikaexpress.cloudflareaccess.com';
 const CF_ACCESS_AUD = process.env.CF_ACCESS_AUD;
+
+/**
+ * Shared-terminal identities, in HF One's format: `email=kiosk-id,email2=id2`.
+ *
+ * A kiosk is a PLACE, not a person (HF-erp CONTEXT.md: "A Kiosk is a place, not
+ * a person — it must never be treated as an employee"). The office/reception PCs
+ * clear Cloudflare Access as a shared Google account, so without this map their
+ * verified email either resolves to some employee row — attributing every
+ * receipt typed at that PC to a place — or fails closed with a 403 that reads as
+ * a bug to whoever is standing there.
+ *
+ * Unset or empty ⇒ no session is ever a kiosk, i.e. the feature is dark and
+ * every identity takes the ordinary employee path. Same fail-closed posture as
+ * CF_ACCESS_AUD and READER_RESOLVE_SECRET.
+ */
+const KIOSK_EMAILS = parseKioskEmails(process.env.KIOSK_EMAILS);
+
+function parseKioskEmails(raw: string | undefined): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const pair of (raw ?? '').split(',')) {
+    const [email, kioskId] = pair.split('=');
+    const key = email?.trim().toLowerCase();
+    const id = kioskId?.trim();
+    if (key && id) map.set(key, id);
+  }
+  return map;
+}
 const CF_ACCESS_CERTS_URL =
   process.env.CF_ACCESS_CERTS_URL ??
   `https://${CF_ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`;
@@ -114,6 +141,18 @@ export const authCfRoutes = new Elysia().group('/auth', (group) =>
       return status(403, {
         message: 'บัญชีนี้ยังไม่ได้ผูกกับพนักงานในระบบเบิกค่าใช้จ่าย — ติดต่อผู้ดูแลระบบ',
       });
+    }
+
+    // Kiosk check comes BEFORE the user lookup, deliberately. The office PC's
+    // shared Google is also present on an employee row, and the kiosk identity
+    // has to win — otherwise that terminal keeps signing itself in as a person.
+    // Ordering it this way also means switching a terminal to kiosk mode is a
+    // pure env change, with no row to migrate and nothing to undo.
+    const kioskId = KIOSK_EMAILS.get(rawEmail.trim().toLowerCase());
+    if (kioskId) {
+      // Not an error: a place has no session. The SPA reads this as "show the
+      // card-tap screen" so an employee can attach themselves to the terminal.
+      return { kiosk: true as const, kioskId };
     }
 
     const user = await resolveUserByCfEmail(rawEmail);

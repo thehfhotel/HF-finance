@@ -230,6 +230,22 @@ export interface CfLoginResponse {
 }
 
 /**
+ * The other successful shape of `POST /api/auth/cf-login`: the verified
+ * Cloudflare identity is a shared terminal, not a person. A kiosk gets no
+ * session — the SPA shows the card-tap screen so an employee can attach
+ * themselves, and every receipt is then attributed to whoever tapped.
+ */
+export interface CfKioskResponse {
+  kiosk: true;
+  kioskId: string;
+}
+
+export type CfLoginResult = CfLoginResponse | CfKioskResponse;
+
+export const isKioskResponse = (r: CfLoginResult): r is CfKioskResponse =>
+  'kiosk' in r && r.kiosk === true;
+
+/**
  * Result of a successful `GET /api/auth/card-login/wait` (HTTP 200). A 204 is
  * surfaced as `null` by the request helper (keep polling); a 4xx throws.
  */
@@ -249,8 +265,8 @@ export const api = {
     // The SPA sits behind a CF Access wall in prod; the edge injects a
     // `Cf-Access-Jwt-Assertion` header on every request. This exchanges that
     // header (read server-side) for an app-issued JWT + the bound User.
-    cfLogin: (): Promise<CfLoginResponse> =>
-      request<CfLoginResponse>('/api/auth/cf-login', { method: 'POST' }),
+    cfLogin: (): Promise<CfLoginResult> =>
+      request<CfLoginResult>('/api/auth/cf-login', { method: 'POST' }),
     // ── NFC staff-card login ──
     // start opens a claim against the central HF-ID service for this terminal;
     // the claim_token is kept server-side in an HttpOnly cookie, so wait() takes

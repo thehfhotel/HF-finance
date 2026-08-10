@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Theme } from '../../lib/types';
 import { FONT_DISPLAY, FONT_UI, getTheme, HF_BRAND } from '../../lib/theme';
-import { ApiError, api, setAuthToken } from '../../lib/api';
+import { ApiError, api, setAuthToken, isKioskResponse } from '../../lib/api';
 
 /** Per-terminal reader id, paired once and remembered in this browser. */
 const READER_ID_STORAGE_KEY = 'reimbursement_reader_id';
 /** Poll cadence + overall deadline for waiting on a card tap. */
 const CARD_POLL_INTERVAL_MS = 1500;
 const CARD_WAIT_TIMEOUT_MS = 60_000;
+/** Pause before a kiosk re-arms after a failed tap — long enough for the person
+ *  standing there to read why it failed, short enough to be ready for the next. */
+const KIOSK_REARM_DELAY_MS = 6_000;
 
 function readReaderId(): string | null {
   if (typeof window === 'undefined') return null;
@@ -52,6 +55,10 @@ interface LoginProps {
   /** Thai error message from a failed silent Cloudflare Access exchange that
    *  ran during app bootstrap, if any — seeds the screen's error banner. */
   cfError?: string | null;
+  /** Set when the Cloudflare identity is a shared terminal rather than a
+   *  person. A kiosk has no session of its own, so the screen drops the
+   *  personal sign-in affordances and just waits for a card tap. */
+  kioskId?: string | null;
 }
 
 /** Maps a failed `api.auth.cfLogin()` to the Thai message shown on this
@@ -64,7 +71,11 @@ function cfLoginErrorMessage(error: unknown): string {
   return 'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
 }
 
-export function Login({ theme = getTheme(false, HF_BRAND[500]), cfError = null }: LoginProps) {
+export function Login({
+  theme = getTheme(false, HF_BRAND[500]),
+  cfError = null,
+  kioskId = null,
+}: LoginProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(cfError);
   const [submitting, setSubmitting] = useState<boolean>(false);
 
@@ -73,6 +84,13 @@ export function Login({ theme = getTheme(false, HF_BRAND[500]), cfError = null }
     setErrorMessage(null);
     try {
       const result = await api.auth.cfLogin();
+      if (isKioskResponse(result)) {
+        // Pressed on a shared terminal: there is no personal session behind the
+        // Cloudflare identity, so point at the card reader instead of failing.
+        setErrorMessage('เครื่องนี้เป็นเครื่องส่วนกลาง — กรุณาแตะบัตรพนักงานเพื่อเข้าสู่ระบบ');
+        setSubmitting(false);
+        return;
+      }
       setAuthToken(result.token);
       window.location.assign('/');
     } catch (error) {
@@ -160,7 +178,7 @@ export function Login({ theme = getTheme(false, HF_BRAND[500]), cfError = null }
 
       <div style={{ padding: '0 20px 30px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <CfLoginButton theme={theme} onClick={handleCfLogin} submitting={submitting} />
-        <CardLoginSection theme={theme} />
+        <CardLoginSection theme={theme} kioskId={kioskId} />
         <a
           href={ADMIN_CONTACT}
           style={{
@@ -223,6 +241,10 @@ type CardMode = 'idle' | 'pairing' | 'waiting';
 
 interface CardLoginSectionProps {
   theme: Theme;
+  /** Terminal id when this browser is a kiosk. Arms the reader on mount and
+   *  re-arms it after every timeout, so the terminal sits waiting for a tap
+   *  indefinitely instead of needing someone to press a button first. */
+  kioskId?: string | null;
 }
 
 /**
@@ -232,7 +254,8 @@ interface CardLoginSectionProps {
  * success we store the minted session JWT and reload into the app — exactly
  * like the LINE OAuth success path.
  */
-function CardLoginSection({ theme }: CardLoginSectionProps) {
+function CardLoginSection({ theme, kioskId = null }: CardLoginSectionProps) {
+  const isKiosk = kioskId !== null;
   const [mode, setMode] = useState<CardMode>('idle');
   const [error, setError] = useState<string | null>(null);
   const [readerId, setReaderId] = useState<string | null>(() => readReaderId());
@@ -266,8 +289,12 @@ function CardLoginSection({ theme }: CardLoginSectionProps) {
       await api.auth.cardLoginStart(id);
     } catch (err) {
       if (cancelledRef.current) return;
-      setMode('idle');
       setError(cardErrorText(err));
+      if (isKiosk) {
+        timerRef.current = setTimeout(() => void beginWaiting(id), KIOSK_REARM_DELAY_MS);
+        return;
+      }
+      setMode('idle');
       return;
     }
 
@@ -275,6 +302,13 @@ function CardLoginSection({ theme }: CardLoginSectionProps) {
     const tick = async () => {
       if (cancelledRef.current) return;
       if (Date.now() > deadline) {
+        // A person gave up waiting; a terminal never does. On a kiosk the claim
+        // is simply renewed, so the screen stays armed overnight rather than
+        // stranding the next employee on a timeout message.
+        if (isKiosk) {
+          void beginWaiting(id);
+          return;
+        }
         setMode('idle');
         setError('หมดเวลารอแตะบัตร กรุณาลองใหม่อีกครั้ง');
         return;
@@ -293,12 +327,34 @@ function CardLoginSection({ theme }: CardLoginSectionProps) {
         window.location.assign(result.redirect || '/');
       } catch (err) {
         if (cancelledRef.current) return;
-        setMode('idle');
         setError(cardErrorText(err));
+        // Show the reason (an unlinked card, central unreachable) but re-arm:
+        // the message is for the person who just tapped, and the terminal has
+        // to be ready for the next one without staff intervention.
+        if (isKiosk) {
+          timerRef.current = setTimeout(() => void beginWaiting(id), KIOSK_REARM_DELAY_MS);
+          return;
+        }
+        setMode('idle');
       }
     };
     void tick();
   };
+
+  // A kiosk arms itself. Only once, and only when the terminal has already been
+  // paired — an unpaired kiosk still needs a human to type the reader id, which
+  // is the one piece of per-device state that cannot be derived.
+  const armedRef = useRef(false);
+  useEffect(() => {
+    if (!isKiosk || armedRef.current) return;
+    const id = readReaderId();
+    if (id === null) return;
+    armedRef.current = true;
+    void beginWaiting(id);
+    // beginWaiting is stable for the component's lifetime; re-running this on
+    // every render would open a new claim each time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isKiosk]);
 
   const handleTap = () => {
     setError(null);

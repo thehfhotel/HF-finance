@@ -11,6 +11,7 @@ import {
   getDevUserId,
   setAuthToken,
   setDevUserId,
+  isKioskResponse,
 } from './lib/api';
 import { IOSDevice } from './components/IOSDevice';
 import { Icon } from './components/icons';
@@ -85,6 +86,8 @@ export function App() {
   const [loading, setLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [cfError, setCfError] = useState<string | null>(null);
+  // Non-null when the Cloudflare identity is a shared terminal — see cf-login.
+  const [kioskId, setKioskId] = useState<string | null>(null);
 
   // ── Bootstrap auth + initial data load ──────────────────────────
   const refetch = useCallback(async (): Promise<void> => {
@@ -166,6 +169,14 @@ export function App() {
         try {
           const response = await api.auth.cfLogin();
           if (cancelled) return;
+          if (isKioskResponse(response)) {
+            // A shared terminal — a place, not a person, so there is no session
+            // to restore. Land on the login screen in kiosk mode, which arms the
+            // card reader immediately and keeps it armed.
+            setKioskId(response.kioskId);
+            setRoute({ name: 'login' });
+            return;
+          }
           setAuthToken(response.token);
           currentUserRef.current = response.user;
           setCurrentUser(response.user);
@@ -259,7 +270,7 @@ export function App() {
 
   // ── Public auth screen — no IOSDevice frame, no tweaks panel ─────
   if (route.name === 'login') {
-    const inner = <Login theme={theme} cfError={cfError} />;
+    const inner = <Login theme={theme} cfError={cfError} kioskId={kioskId} />;
 
     // On desktop: center a ~420px column on the paper background.
     if (viewportPlatform === 'desktop') {
