@@ -133,7 +133,7 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
       // The bundle no longer exists, so drop it rather than patching it.
       setState((s) => ({ ...s, bundles: s.bundles.filter((b) => b.id !== id) }));
       setSelectedId(null);
-      showToast('ดึงคำขอกลับมาแก้ไขแล้ว — ใบเสร็จอยู่ในฉบับร่าง');
+      showToast('ดึงคำขอกลับมาแก้ไขแล้ว — ใบเสร็จอยู่ในรายการใหม่');
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
     } finally {

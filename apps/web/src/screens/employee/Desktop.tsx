@@ -104,6 +104,14 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
     .filter((b) => b.status === 'pending' || b.status === 'approved')
     .reduce((sum, b) => sum + b.receipts.reduce((acc, r) => acc + r.amount, 0), 0);
 
+  /** Select every loose receipt, or clear the selection when all are already on. */
+  const allDraftsSelected =
+    looseReceipts.length > 0 && looseReceipts.every((r) => selected.has(r.id));
+
+  const toggleSelectAll = (): void => {
+    setSelected(allDraftsSelected ? new Set() : new Set(looseReceipts.map((r) => r.id)));
+  };
+
   const toggleReceipt = (id: string): void => {
     const next = new Set(selected);
     if (next.has(id)) {
@@ -276,7 +284,7 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
         theme={theme}
         bundle={selectedBundle}
         onBack={backFromDetail}
-        backLabel={detailOrigin === 'bundle-list' ? '← รายการคำขอ' : '← ฉบับร่าง'}
+        backLabel={detailOrigin === 'bundle-list' ? '← รายการคำขอ' : '← รายการใหม่'}
       />
     ) : view === 'bundle-list' ? (
       <BundleListPane
@@ -289,6 +297,8 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
       <DraftsPane
         theme={theme}
         looseReceipts={looseReceipts}
+        onToggleSelectAll={toggleSelectAll}
+        allSelected={allDraftsSelected}
         selected={selected}
         selectedReceipts={selectedReceipts}
         selectedTotal={selectedTotal}
@@ -349,7 +359,7 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
       {deleteTargetId !== null && (
         <ConfirmDialog
           theme={theme}
-          title="ลบฉบับร่างนี้?"
+          title="ลบรายการนี้?"
           message={deleteError ?? 'ใบเสร็จนี้จะถูกลบถาวรและไม่สามารถกู้คืนได้'}
           confirmLabel="ลบ"
           danger
@@ -378,6 +388,8 @@ interface DraftsPaneProps {
   photoIdx: number | null;
   onPhotoIdxChange: (next: number | null) => void;
   onToggleReceipt: (id: string) => void;
+  onToggleSelectAll: () => void;
+  allSelected: boolean;
   onSubmitBundle: () => void;
   onCameraClick: () => void;
   onDeleteReceipt: (id: string) => void;
@@ -398,6 +410,8 @@ function DraftsPane({
   photoIdx,
   onPhotoIdxChange,
   onToggleReceipt,
+  onToggleSelectAll,
+  allSelected,
   onSubmitBundle,
   onCameraClick,
   onDeleteReceipt,
@@ -444,9 +458,34 @@ function DraftsPane({
                 color: theme.ink,
               }}
             >
-              ฉบับร่าง · {looseReceipts.length}
+              รายการใหม่ · {looseReceipts.length}
             </h1>
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* Bundling a month of receipts one tick at a time is the slowest part
+              of submitting; the common case is "all of them". */}
+          {looseReceipts.length > 0 && (
+            <button
+              onClick={onToggleSelectAll}
+              style={{
+                padding: '10px 16px',
+                borderRadius: 100,
+                background: 'transparent',
+                border: `0.5px solid ${theme.hairlineStrong}`,
+                fontFamily: FONT_UI,
+                fontSize: 13,
+                color: theme.ink,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {allSelected ? Icon.close(theme.ink) : Icon.check(theme.ink)}
+              {allSelected ? 'ล้างที่เลือก' : `เลือกทั้งหมด · ${looseReceipts.length}`}
+            </button>
+          )}
           <button
             onClick={onCameraClick}
             style={{
@@ -465,6 +504,7 @@ function DraftsPane({
           >
             {Icon.camera(theme.ink)} ถ่ายใบเสร็จ
           </button>
+          </div>
         </div>
 
         {looseReceipts.length === 0 ? (
@@ -765,7 +805,7 @@ function ReceiptCard({ theme, receipt, isSelected, onToggle, onOpenPhoto, onDele
         <>
           <button
             onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            title="ลบฉบับร่าง"
+            title="ลบรายการใหม่"
             style={{
               position: 'absolute',
               top: 10,
@@ -1184,7 +1224,7 @@ interface BundleDetailPaneProps {
   backLabel?: string;
 }
 
-function BundleDetailPane({ theme, bundle, onBack, backLabel = '← ฉบับร่าง' }: BundleDetailPaneProps) {
+function BundleDetailPane({ theme, bundle, onBack, backLabel = '← รายการใหม่' }: BundleDetailPaneProps) {
   const items: Receipt[] = bundle.receipts;
   const total = items.reduce((sum, r) => sum + r.amount, 0);
   const [totalWhole, totalFrac] = fmtN(total).split('.');
@@ -1517,7 +1557,7 @@ function BundleStatusBlock({ theme, bundle, total }: BundleStatusBlockProps) {
             </div>
           )}
           <div style={{ fontFamily: FONT_UI, fontSize: 12, color: theme.inkSoft, marginTop: 6, lineHeight: 1.5 }}>
-            ใบเสร็จถูกส่งกลับไปยังฉบับร่างแล้ว — แก้ไขและส่งใหม่ได้จากหน้าฉบับร่าง
+            ใบเสร็จถูกส่งกลับไปยังรายการใหม่แล้ว — แก้ไขและส่งใหม่ได้จากหน้ารายการใหม่
           </div>
         </div>
       </div>
