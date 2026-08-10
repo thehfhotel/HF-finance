@@ -228,16 +228,18 @@ jobs:
           # secret — they are the same "Kiosk: <id>" Access policies checked
           # into HF-erp's hostnames.json.
           #
-          # Deliberately EMPTY for now, which keeps kiosk mode dark. Turning it
-          # on makes a terminal identify the person before it can be used, and
-          # the only two ways to do that are an NFC reader (no hardware is
-          # deployed yet) or the LINE QR scan (not built here yet). Enabling it
-          # early just locks the office PC out of the app.
+          # The two reception PCs only. They were unusable before this (they
+          # clear Cloudflare Access as shared Google accounts and then hit a
+          # fail-closed 403), so making them kiosks can only improve them.
           #
-          # Set the secret to
-          #   sdyoffice66@gmail.com=office-1,theharbourfront.hotel@gmail.com=reception-1,hfville.hotel@gmail.com=hfville-reception-1
-          # once an authenticator actually works on those terminals.
-          KIOSK_EMAILS: ${{ secrets.KIOSK_EMAILS || '' }}
+          # office-1 is deliberately NOT here. It signs in as แอดมิน สำนักงาน
+          # today and that works; adding it swaps a working auto-login for a
+          # QR screen, which is a regression until someone has actually used
+          # the kiosk at reception. Add it once that is proven.
+          #
+          # Kiosk login was verified end to end against production on
+          # 2026-08-10: a LINE scan minted a real session via badge 421.
+          KIOSK_EMAILS: ${{ secrets.KIOSK_EMAILS || 'theharbourfront.hotel@gmail.com=reception-1,hfville.hotel@gmail.com=hfville-reception-1' }}
           IMAGE_TAG: sha-${{ github.sha }}
         run: |
           set -euo pipefail
