@@ -55,10 +55,15 @@ Dockerfile.api, Dockerfile.web, docker-compose.production.yml
   `hf-hotel`.
 - **JWT-only auth** in production. Dev mode honors `X-Dev-User-Id` header for
   faster iteration without a Cloudflare round-trip (gated by `NODE_ENV !== 'production'`).
-- **Identity mapping**: no self-signup — admin manages `badge` + `email` on the
-  User row. On login, the verified identity resolves by `email` exact match
-  first, else via the synthetic `<badge>@emp.thehfhotel.org` address → `badge`
-  match. No match → fail-closed 403.
+- **Identity mapping**: HF-ID owns identity, this app owns roles.
+  - **Signed HF-ID assertion** (NFC card tap, kiosk QR scan): once the assertion
+    verifies and carries the `reimbursement` grant, the employee is upserted on
+    `badge` — created as `EMPLOYEE`, and thereafter only `name` is refreshed, so
+    a role set here survives every later login. No second employee list to keep.
+  - **Cloudflare Access** (Google): resolves by `email` exact match, else via the
+    synthetic `<badge>@emp.thehfhotel.org` address → `badge` match. No badge to
+    anchor on, so this path still fails closed with a 403 on no match.
+  - See `docs/change-requests/CR-2026-08-10-hfid-owns-identity.md`.
 - **No tests yet** — Phase 6 territory. Don't add a test framework without asking.
 
 ## Important commands

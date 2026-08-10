@@ -97,6 +97,23 @@ async function verifyCardAssertion(assertion: string, issuer: string): Promise<J
 // ─── Assertion → session ─────────────────────────────────────────────────────
 
 /**
+ * Avatar initials for an auto-provisioned employee.
+ *
+ * Thai names have no case distinction and are often a single word, so the Latin
+ * "first letter of each word" rule degrades badly. Two words → first character
+ * of each; one word → its first two characters. Capped at the 4 the admin form
+ * enforces. An approver can always correct it on the พนักงาน screen.
+ */
+function initialsFor(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const raw =
+    words.length >= 2
+      ? [...words[0]][0] + [...words[1]][0]
+      : [...(words[0] ?? '')].slice(0, 2).join('');
+  return (raw || '??').slice(0, 4);
+}
+
+/**
  * The ONE admission step for every authenticator.
  *
  * A card tap and a kiosk QR scan both end here, so the two produce identical
@@ -138,17 +155,26 @@ async function sessionFromAssertion(
     return { ok: false, status: 401, message: 'Card assertion missing badge' };
   }
 
-  // Map badge → this app's employee row. No auto-provisioning: a badge that
-  // isn't linked to a User can't log in (surfaces the impedance mismatch
-  // rather than silently minting a stray account).
-  const user = await prisma.user.findUnique({ where: { badge } });
-  if (!user) {
-    return {
-      ok: false,
-      status: 403,
-      message: 'บัตรนี้ยังไม่ได้ผูกกับพนักงานในระบบเบิกค่าใช้จ่าย',
-    };
-  }
+  // Identity comes from HF-ID; only ROLES are managed here.
+  //
+  // HF-ID already owns the LINE ↔ employee-id linkage and just proved, in a
+  // signed assertion, both who this is and that they hold the `reimbursement`
+  // grant. Requiring an admin to pre-create a matching row here duplicated that
+  // list and made the grant useless on its own: a properly-granted employee
+  // still bounced off a 403 until someone typed their badge into this app.
+  //
+  // So the badge is upserted instead. `role` is set only on create and never
+  // touched afterwards — promoting someone to approver is this app's decision
+  // and must survive every subsequent login.
+  const displayName = typeof payload.name === 'string' ? payload.name.trim() : '';
+  const name = displayName.length > 0 ? displayName : `พนักงาน ${badge}`;
+
+  const user = await prisma.user.upsert({
+    where: { badge },
+    // Keep the display name fresh from central, which is the authority for it.
+    update: { name },
+    create: { badge, name, initials: initialsFor(name), role: 'EMPLOYEE' },
+  });
 
   // Mint the app's own session — identical shape to the Cloudflare Access
   // path, keyed on the internal User.id. `badge` is informational only.
