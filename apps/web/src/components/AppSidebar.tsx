@@ -193,7 +193,7 @@ export function AppSidebar({
       )}
 
       <Section theme={theme} label="คำขอของฉัน" />
-      {item('my-drafts', 'ฉบับร่าง', Icon.draft, { count: counts.myDrafts })}
+      {item('my-drafts', 'รายการใหม่', Icon.draft, { count: counts.myDrafts })}
       {item('my-pending', 'รออนุมัติ', Icon.clock, { count: counts.myPending, dot: theme.statusPending })}
       {item('my-approved', 'อนุมัติแล้ว', Icon.checkCircle, { count: counts.myApproved, dot: theme.statusApproved })}
       {item('my-paid', 'จ่ายแล้ว', Icon.bank, { count: counts.myPaid, dot: theme.statusPaid })}

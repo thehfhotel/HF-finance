@@ -98,7 +98,7 @@ export function RecordDetail({ theme, state, setState, nav, recordId }: RecordDe
           <DetailRow
             theme={theme}
             label="สถานะ"
-            value={parentBundle ? `อยู่ในชุด · ${parentBundle.name}` : 'ฉบับร่าง · ยังไม่ได้รวม'}
+            value={parentBundle ? `อยู่ในชุด · ${parentBundle.name}` : 'รายการใหม่ · ยังไม่ได้รวม'}
             last
           />
         </Card>
@@ -163,7 +163,7 @@ export function RecordDetail({ theme, state, setState, nav, recordId }: RecordDe
                 letterSpacing: 0.1,
               }}
             >
-              ลบฉบับร่าง
+              ลบรายการใหม่
             </button>
             {deleteError && (
               <div
@@ -185,7 +185,7 @@ export function RecordDetail({ theme, state, setState, nav, recordId }: RecordDe
       {showDeleteDialog && (
         <ConfirmDialog
           theme={theme}
-          title="ลบฉบับร่างนี้?"
+          title="ลบรายการนี้?"
           message="ใบเสร็จนี้จะถูกลบถาวรและไม่สามารถกู้คืนได้"
           confirmLabel="ลบ"
           danger

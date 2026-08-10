@@ -190,7 +190,7 @@ export function Home({ theme, state, nav, currentUser, isApprover, onLogout }: H
               }}
             >
               <span>
-                {loose.length} ฉบับร่าง · {fmt(looseTotal)}
+                {loose.length} รายการใหม่ · {fmt(looseTotal)}
               </span>
               <span style={{ opacity: 0.4 }}>·</span>
               <span>{pending.length} รออนุมัติ</span>
@@ -203,7 +203,7 @@ export function Home({ theme, state, nav, currentUser, isApprover, onLogout }: H
       <div style={{ padding: '0 20px' }}>
         <SectionHeader
           theme={theme}
-          title={`ฉบับร่าง · ${loose.length}`}
+          title={`รายการใหม่ · ${loose.length}`}
           action={loose.length >= 1 ? <span onClick={() => nav({ name: 'bundle-new' })}>รวมชุด →</span> : null}
         />
 

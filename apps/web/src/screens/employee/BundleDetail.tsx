@@ -120,7 +120,7 @@ export function BundleDetail({ theme, state, nav, bundleId }: BundleDetailProps)
                   marginTop: 6,
                 }}
               >
-                ใบเสร็จถูกส่งกลับไปยังฉบับร่างแล้ว — แก้ไขและส่งใหม่ได้จากหน้าหลัก
+                ใบเสร็จถูกส่งกลับไปยังรายการใหม่แล้ว — แก้ไขและส่งใหม่ได้จากหน้าหลัก
               </div>
             </div>
           </div>

@@ -118,7 +118,7 @@ export const Icon: Record<string, IconFn> = {
       <path d="M7.6 7.6l4.8 4.8M12.4 7.6l-4.8 4.8" stroke={c} strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   ),
-  /** ฉบับร่าง — a sheet with a folded corner. */
+  /** รายการใหม่ — a sheet with a folded corner. */
   draft: (c = 'currentColor') => (
     <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
       <path d="M5 3h6l4 4v10H5V3z" stroke={c} strokeWidth="1.4" strokeLinejoin="round" />
