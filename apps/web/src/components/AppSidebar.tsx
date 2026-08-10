@@ -18,13 +18,20 @@ import { Icon } from './icons';
  */
 
 export type SidebarKey =
-  | 'overview'
+  // Approval box — other people's requests, approver only.
   | 'pending'
   | 'approved'
   | 'paid'
   | 'rejected'
-  | 'drafts'
-  | 'my-requests'
+  // Your own requests. Laid out as their own four rows rather than collapsed
+  // behind one "my requests" link: an approver is also an employee, and hiding
+  // their own work one click deeper is the mode switch this menu exists to kill.
+  | 'my-drafts'
+  | 'my-pending'
+  | 'my-approved'
+  | 'my-paid'
+  | 'my-rejected'
+  | 'overview'
   | 'employees';
 
 export interface SidebarCounts {
@@ -32,8 +39,11 @@ export interface SidebarCounts {
   approved?: number;
   paid?: number;
   rejected?: number;
-  drafts?: number;
-  myRequests?: number;
+  myDrafts?: number;
+  myPending?: number;
+  myApproved?: number;
+  myPaid?: number;
+  myRejected?: number;
 }
 
 interface AppSidebarProps {
@@ -183,11 +193,18 @@ export function AppSidebar({
       )}
 
       <Section theme={theme} label="คำขอของฉัน" />
-      {item('drafts', 'ฉบับร่าง', Icon.draft, { count: counts.drafts })}
-      {item('my-requests', 'คำขอที่ฉันส่ง', Icon.receipt, { count: counts.myRequests })}
+      {item('my-drafts', 'ฉบับร่าง', Icon.draft, { count: counts.myDrafts })}
+      {item('my-pending', 'รออนุมัติ', Icon.clock, { count: counts.myPending, dot: theme.statusPending })}
+      {item('my-approved', 'อนุมัติแล้ว', Icon.checkCircle, { count: counts.myApproved, dot: theme.statusApproved })}
+      {item('my-paid', 'จ่ายแล้ว', Icon.bank, { count: counts.myPaid, dot: theme.statusPaid })}
+      {item('my-rejected', 'ปฏิเสธ', Icon.xCircle, { count: counts.myRejected, dot: theme.statusRejected })}
 
-      <Section theme={theme} label="การจัดการ" />
-      {isApprover && item('employees', 'พนักงาน', Icon.user)}
+      {isApprover && (
+        <>
+          <Section theme={theme} label="การจัดการ" />
+          {item('employees', 'พนักงาน', Icon.user)}
+        </>
+      )}
       {onLogout && (
         <Item theme={theme} icon={Icon.logout} label="ออกจากระบบ" active={false} onClick={onLogout} />
       )}

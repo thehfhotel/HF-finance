@@ -498,6 +498,9 @@ export function App() {
             currentUser={currentUser}
             onBackToInbox={() => setRoute({ name: 'approver-home' })}
             onLogout={handleLogout}
+            onNavigateApprover={(key) =>
+              setRoute(key === 'employees' ? { name: 'admin-employees' } : { name: 'approver-home' })
+            }
           />
         ) : (
           <DesktopEmployee
