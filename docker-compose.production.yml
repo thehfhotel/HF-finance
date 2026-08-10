@@ -117,9 +117,14 @@ services:
     networks:
       - reimbursement_v2_internal
     healthcheck:
+      # Probe THROUGH the /api proxy path (nginx → api /health), not nginx's
+      # own static /healthz. A static probe stays green when the api upstream
+      # is dead or stale, which is exactly how the 2026-08-10 login outage hid
+      # itself: all three containers reported healthy while every /api/ request
+      # returned 502. See apps/web/nginx.conf.
       test:
         - CMD-SHELL
-        - wget --quiet --tries=1 --spider http://127.0.0.1/healthz || exit 1
+        - wget --quiet --tries=1 --spider http://127.0.0.1/healthz/upstream || exit 1
       interval: 30s
       timeout: 5s
       retries: 3
