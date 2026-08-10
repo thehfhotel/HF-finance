@@ -91,7 +91,7 @@ const EMP_EMAIL_DOMAIN = 'emp.thehfhotel.org';
  * 2. synthetic employee address: local part = HF-ID badge (case-insensitive)
  * 3. no match → caller responds 403 (fail closed, no auto-provisioning)
  */
-async function resolveUserByCfEmail(rawEmail: string) {
+async function resolveUserByCfEmail(rawEmail: string, displayName?: string) {
   const email = rawEmail.trim().toLowerCase();
   const byEmail = await prisma.user.findUnique({ where: { email } });
   if (byEmail) return byEmail;
@@ -99,9 +99,38 @@ async function resolveUserByCfEmail(rawEmail: string) {
   const local = at > 0 ? email.slice(0, at) : '';
   const domain = at > 0 ? email.slice(at + 1) : '';
   if (domain === EMP_EMAIL_DOMAIN && local.length > 0) {
-    return prisma.user.findFirst({ where: { badge: { equals: local, mode: 'insensitive' } } });
+    const byBadge = await prisma.user.findFirst({
+      where: { badge: { equals: local, mode: 'insensitive' } },
+    });
+    if (byBadge) return byBadge;
+
+    // Same rule as the card/QR paths: HF-ID owns identity, this app owns roles.
+    //
+    // Only the synthetic `<badge>@emp.thehfhotel.org` domain reaches here, and
+    // Cloudflare only ever mints that address through the HF ID provider, whose
+    // policy on this app already requires `apps contains reimbursement`. So the
+    // grant has been verified upstream and a matching row is pure bookkeeping —
+    // without this, an employee central has explicitly authorised still bounces
+    // off a 403 with no way to fix it themselves.
+    //
+    // A Google address can never match this domain, so managers are unaffected
+    // and that path still fails closed below.
+    const name = displayName?.trim() || `พนักงาน ${local}`;
+    return prisma.user.create({
+      data: { badge: local, name, initials: initialsFor(name), role: 'EMPLOYEE' },
+    });
   }
   return null;
+}
+
+/** Avatar initials — mirrors the rule used for card/QR provisioning. */
+function initialsFor(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const raw =
+    words.length >= 2
+      ? [...words[0]][0] + [...words[1]][0]
+      : [...(words[0] ?? '')].slice(0, 2).join('');
+  return (raw || '??').slice(0, 4);
 }
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -155,7 +184,12 @@ export const authCfRoutes = new Elysia().group('/auth', (group) =>
       return { kiosk: true as const, kioskId };
     }
 
-    const user = await resolveUserByCfEmail(rawEmail);
+    // Cloudflare forwards the IdP's display name when it has one; HF-ID's own
+    // fallback (`พนักงาน <badge>`) is used when it doesn't, and the next card or
+    // QR login refreshes it from central either way.
+    const cfName = typeof payload.name === 'string' ? payload.name : undefined;
+
+    const user = await resolveUserByCfEmail(rawEmail, cfName);
     if (!user) {
       return status(403, {
         message: 'บัญชีนี้ยังไม่ได้ผูกกับพนักงานในระบบเบิกค่าใช้จ่าย — ติดต่อผู้ดูแลระบบ',
