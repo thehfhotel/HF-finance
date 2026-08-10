@@ -5,7 +5,8 @@ import { fmt, fmt0, fmtN, formatThaiDate } from '../../lib/format';
 import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../../lib/theme';
 import { api, payFormFromFields } from '../../lib/api';
 import { dataUrlToFile } from '../../lib/photoUpload';
-import { DesktopShell, SidebarItem, SidebarSection } from '../../components/DesktopShell';
+import { DesktopShell } from '../../components/DesktopShell';
+import { AppSidebar } from '../../components/AppSidebar';
 import { ApproverOverview } from './Overview';
 import { Card, GhostButton, Money, PrimaryButton, StatusPill } from '../../components/primitives';
 import { Icon } from '../../components/icons';
@@ -118,6 +119,24 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
     }
   };
 
+  /** Pull your own pending request back; its receipts return to your drafts. */
+  const handleWithdraw = async (id: string): Promise<void> => {
+    if (submitting) return;
+    setActionError(null);
+    setSubmitting(true);
+    try {
+      await api.bundles.withdraw(id);
+      // The bundle no longer exists, so drop it rather than patching it.
+      setState((s) => ({ ...s, bundles: s.bundles.filter((b) => b.id !== id) }));
+      setSelectedId(null);
+      showToast('ดึงคำขอกลับมาแก้ไขแล้ว — ใบเสร็จอยู่ในฉบับร่าง');
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const closePaySheet = (): void => {
     setPayOpen(false);
     setTransferRefInput('');
@@ -159,16 +178,24 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
   };
 
   const sidebar = (
-    <SidebarContent
+    <AppSidebar
       theme={theme}
-      filter={filter}
-      pendingCount={pendingBundles.length}
-      approvedCount={approvedBundles.length}
-      paidCount={paidBundles.length}
-      rejectedCount={rejectedBundles.length}
-      onSelectFilter={selectFilter}
-      onNavigate={onNavigate}
       currentUser={currentUser}
+      isApprover
+      active={filter}
+      counts={{
+        pending: pendingBundles.length,
+        approved: approvedBundles.length,
+        paid: paidBundles.length,
+        rejected: rejectedBundles.length,
+      }}
+      onSelect={(key) => {
+        // Destinations that live on other screens hand off; the rest are panes
+        // of this one, so the sidebar itself never changes shape.
+        if (key === 'employees') onNavigate?.('admin-employees');
+        else if (key === 'my-requests' || key === 'drafts') onNavigate?.('my-requests');
+        else selectFilter(key);
+      }}
       onLogout={onLogout}
     />
   );
@@ -210,6 +237,11 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
               total={total}
               onApprove={() => setConfirmState({ open: true, kind: 'approve' })}
               onReject={() => setConfirmState({ open: true, kind: 'reject' })}
+              onWithdraw={
+                selectedBundle.userId === currentUser?.id
+                  ? () => void handleWithdraw(selectedBundle.id)
+                  : undefined
+              }
               onPay={() => setPayOpen(true)}
               onPhoto={(i) => setPhotoIdx(i)}
               submitting={submitting}
@@ -328,138 +360,6 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
   );
 }
 
-// ── Sidebar ─────────────────────────────────────────────────────────
-
-interface SidebarContentProps {
-  theme: Theme;
-  filter: FilterKey;
-  pendingCount: number;
-  approvedCount: number;
-  paidCount: number;
-  rejectedCount: number;
-  onSelectFilter: (next: FilterKey) => void;
-  onNavigate?: (target: 'admin-employees' | 'my-requests') => void;
-  currentUser: User | null;
-  onLogout?: () => void;
-}
-
-function SidebarContent({
-  theme,
-  filter,
-  pendingCount,
-  approvedCount,
-  paidCount,
-  rejectedCount,
-  onSelectFilter,
-  onNavigate,
-  currentUser,
-  onLogout,
-}: SidebarContentProps): JSX.Element {
-  return (
-    <>
-      <div style={{ padding: '8px 16px 14px' }}>
-        <div style={{ fontFamily: FONT_DISPLAY, fontSize: 22, color: theme.ink, letterSpacing: -0.4 }}>
-          เบิกค่าใช้จ่าย
-        </div>
-        <div style={{ fontFamily: FONT_UI, fontSize: 11, color: theme.inkSoft, marginTop: 2 }}>
-          การเงิน · ผู้อนุมัติ
-        </div>
-      </div>
-
-      {/* Overview first — the "where do I start" pane, above the status silos. */}
-      <SidebarItem
-        theme={theme}
-        label="ภาพรวม"
-        active={filter === 'overview'}
-        onClick={() => onSelectFilter('overview')}
-      />
-
-      <SidebarSection theme={theme} label="กล่องอนุมัติ" />
-      <SidebarItem
-        theme={theme}
-        label="รออนุมัติ"
-        count={pendingCount}
-        active={filter === 'pending'}
-        accent
-        onClick={() => onSelectFilter('pending')}
-      />
-      <SidebarItem
-        theme={theme}
-        label="อนุมัติแล้ว"
-        count={approvedCount}
-        active={filter === 'approved'}
-        onClick={() => onSelectFilter('approved')}
-      />
-      <SidebarItem
-        theme={theme}
-        label="จ่ายแล้ว"
-        count={paidCount}
-        active={filter === 'paid'}
-        onClick={() => onSelectFilter('paid')}
-      />
-      <SidebarItem
-        theme={theme}
-        label="ปฏิเสธ"
-        count={rejectedCount}
-        active={filter === 'rejected'}
-        onClick={() => onSelectFilter('rejected')}
-      />
-
-      {/* An approver is also an employee. Their own requests used to live behind
-          a mode switch; surfacing them here means every function this account
-          has — approving and submitting — is reachable without leaving. */}
-      <SidebarSection theme={theme} label="คำขอของฉัน" />
-      <SidebarItem
-        theme={theme}
-        label="คำขอที่ฉันส่ง"
-        onClick={onNavigate ? () => onNavigate('my-requests') : undefined}
-      />
-
-      <SidebarSection theme={theme} label="การจัดการ" />
-      <SidebarItem
-        theme={theme}
-        label="พนักงาน"
-        onClick={onNavigate ? () => onNavigate('admin-employees') : undefined}
-      />
-      {onLogout && <SidebarItem theme={theme} label="ออกจากระบบ" onClick={onLogout} />}
-
-      <div style={{ flex: 1 }} />
-
-      <div
-        style={{
-          margin: '0 8px 12px',
-          padding: '8px 10px',
-          borderRadius: 10,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-        }}
-      >
-        <div
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 14,
-            background: theme.accent,
-            color: '#fff',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontFamily: FONT_UI,
-            fontSize: 11,
-            fontWeight: 600,
-          }}
-        >
-          {currentUser?.initials ?? ''}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontFamily: FONT_UI, fontSize: 13, color: theme.ink, fontWeight: 500 }}>{currentUser?.name ?? ''}</div>
-          <div style={{ fontFamily: FONT_UI, fontSize: 11, color: theme.inkSoft }}>การเงิน</div>
-        </div>
-      </div>
-    </>
-  );
-}
 
 // ── Middle list column ─────────────────────────────────────────────
 
@@ -625,6 +525,8 @@ interface DesktopDetailProps {
   total: number;
   onApprove: () => void;
   onReject: () => void;
+  /** Present only when the signed-in user owns this pending request. */
+  onWithdraw?: () => void;
   onPay: () => void;
   onPhoto: (i: number) => void;
   submitting: boolean;
@@ -638,6 +540,7 @@ function DesktopDetail({
   total,
   onApprove,
   onReject,
+  onWithdraw,
   onPay,
   onPhoto,
   submitting,
@@ -970,6 +873,13 @@ function DesktopDetail({
           <GhostButton theme={theme} onClick={onReject}>
             ปฏิเสธ
           </GhostButton>
+          {/* Only on your own request. Rejecting your own to fix a typo leaves a
+              rejection on the record for something that was never wrong. */}
+          {onWithdraw && (
+            <GhostButton theme={theme} onClick={onWithdraw}>
+              ดึงกลับมาแก้ไข
+            </GhostButton>
+          )}
           <div style={{ flex: 1 }} />
           {actionError && (
             <span style={{ fontFamily: FONT_UI, fontSize: 13, color: theme.danger }}>{actionError}</span>

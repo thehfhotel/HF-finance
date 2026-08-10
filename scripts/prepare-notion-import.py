@@ -151,6 +151,25 @@ def decode_photo_relpath(s: str) -> str | None:
     return "/".join(parts) if parts else None
 
 
+def bundle_status(raw: str) -> str:
+    """Map Notion's สถานะการเบิก onto a BundleStatus.
+
+    The first import ignored this column and hardcoded PAID for every row, so
+    eight items Notion still listed as รายการใหม่ arrived marked approved and
+    paid. Carrying the column through is what stops that recurring on the next
+    import.
+
+    Anything unrecognised — including blank — stays PAID, because the archive is
+    overwhelmingly historical settled expenses and that was the old behaviour;
+    a new value showing up should not silently reopen a thousand paid rows.
+    Unknown values are reported at the end of the run so they can be mapped.
+    """
+    value = (raw or "").strip()
+    if value == "รายการใหม่":
+        return "PENDING"
+    return "PAID"
+
+
 def stable_id(title: str, amount: float, date: str | None, photo: str | None) -> str:
     """Deterministic id so re-runs are idempotent."""
     seed = f"{title}|{amount:.2f}|{date or ''}|{photo or ''}"
@@ -222,12 +241,27 @@ def main() -> int:
             "date": date,
             "items": sub_items,
             "photoFile": photo_out_name,
+            "status": bundle_status(row["สถานะการเบิก"]),
         })
 
     OUT_JSON.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
 
     bundle_size = sum(p.stat().st_size for p in OUT_PHOTOS.iterdir() if p.is_file())
+    status_counts: dict[str, int] = {}
+    for rec in records:
+        status_counts[rec["status"]] = status_counts.get(rec["status"], 0) + 1
+    raw_statuses = {
+        (row["สถานะการเบิก"] or "").strip() or "(blank)"
+        for row in rows
+        if not row["Parent item"].strip() and row["รายการเบิก"].strip()
+    }
+    unmapped = sorted(raw_statuses - {"จ่ายแล้ว", "รายการใหม่"})
+
     print(f"records:        {len(records)}")
+    print(f"  by status:    {status_counts}")
+    if unmapped:
+        # Loud, because these silently fall through to PAID.
+        print(f"::warning::unmapped สถานะการเบิก -> treated as PAID: {unmapped}")
     print(f"photos copied:  {photo_copied}")
     print(f"photos missing: {photo_missing}")
     print(f"skipped (empty title): {skipped_no_data}")

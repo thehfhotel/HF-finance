@@ -45,6 +45,9 @@ interface NotionRecord {
   date: string;
   items: string[];
   photoFile: string | null;
+  /** From Notion's สถานะการเบิก. Absent in manifests built before the column
+   *  was carried through — those are treated as PAID, the old assumption. */
+  status?: 'PAID' | 'PENDING';
 }
 
 const PALETTE: ReadonlyArray<readonly [string, string]> = [
@@ -100,6 +103,9 @@ async function ensureOwner(): Promise<void> {
 async function importOne(record: NotionRecord): Promise<'created' | 'updated' | 'skipped'> {
   const bundleId = bundleIdFor(record.id);
   const submittedAt = isoDate(record.date);
+  // Older manifests have no `status` field; treat those as PAID, which is what
+  // this script assumed for every row before the column was carried through.
+  const isPending = record.status === 'PENDING';
   const [color, accent] = paletteFor(record.id);
 
   const photoPath = record.photoFile ? copyPhoto(record.photoFile) : null;
@@ -126,13 +132,16 @@ async function importOne(record: NotionRecord): Promise<'created' | 'updated' | 
         id: bundleId,
         userId: OWNER_ID,
         name: record.title,
-        status: 'PAID',
+        // Carried from Notion's สถานะการเบิก. The first import hardcoded PAID,
+        // so rows still listed as รายการใหม่ arrived approved and paid; a
+        // pending row must land with no approval and no payment against it.
+        status: isPending ? 'PENDING' : 'PAID',
         submittedAt,
-        approvedAt: submittedAt,
-        approvedById: OWNER_ID,
-        paidAt: submittedAt,
+        approvedAt: isPending ? null : submittedAt,
+        approvedById: isPending ? null : OWNER_ID,
+        paidAt: isPending ? null : submittedAt,
         transferRef: null,
-        transferAmount: record.amount,
+        transferAmount: isPending ? null : record.amount,
         transferProofPath: null,
         note: '',
       },
