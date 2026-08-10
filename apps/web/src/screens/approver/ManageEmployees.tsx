@@ -3,9 +3,10 @@ import type { CSSProperties, ReactNode } from 'react';
 import { ApiError, api } from '../../lib/api';
 import { formatThaiDate } from '../../lib/format';
 import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../../lib/theme';
-import type { AdminUser, CreateUserRequest, Role, Theme, UpdateUserRequest } from '../../lib/types';
+import type { AdminUser, CreateUserRequest, Role, Theme, UpdateUserRequest, User } from '../../lib/types';
 import { useViewportPlatform } from '../../lib/useViewportPlatform';
-import { DesktopShell, SidebarItem } from '../../components/DesktopShell';
+import { AppSidebar } from '../../components/AppSidebar';
+import { DesktopShell } from '../../components/DesktopShell';
 import { AppBar } from '../../components/AppBar';
 import { Avatar, Card, GhostButton, IconBtn, PrimaryButton } from '../../components/primitives';
 import { Icon } from '../../components/icons';
@@ -16,6 +17,12 @@ interface ManageEmployeesProps {
   theme: Theme;
   /** Optional — when set, the back action navigates via the app's router instead of `window.history.back()`. */
   onBack?: () => void;
+  /** Shown in the sidebar footer; the sidebar is the same one every screen renders. */
+  currentUser?: User | null;
+  /** Lets the shared sidebar reach the other screens, so this page is a
+   *  destination in the menu rather than a dead end with a back link. */
+  onNavigate?: (target: 'approver-home' | 'my-requests') => void;
+  onLogout?: () => void;
 }
 
 interface ToastMessage {
@@ -24,7 +31,13 @@ interface ToastMessage {
   tone: 'error' | 'info';
 }
 
-export function ManageEmployees({ theme, onBack }: ManageEmployeesProps): JSX.Element {
+export function ManageEmployees({
+  theme,
+  onBack,
+  currentUser,
+  onNavigate,
+  onLogout,
+}: ManageEmployeesProps): JSX.Element {
   const platform = useViewportPlatform();
   const isMobile = platform === 'mobile';
 
@@ -254,7 +267,18 @@ export function ManageEmployees({ theme, onBack }: ManageEmployeesProps): JSX.El
   }
 
   const sidebar = (
-    <SidebarContent theme={theme} onBack={handleBack} />
+    <AppSidebar
+      theme={theme}
+      currentUser={currentUser ?? null}
+      isApprover
+      active="employees"
+      onSelect={(key) => {
+        if (key === 'my-requests' || key === 'drafts') onNavigate?.('my-requests');
+        // Every approval-box destination lives on the approver console.
+        else onNavigate?.('approver-home');
+      }}
+      onLogout={onLogout}
+    />
   );
 
   return (
@@ -292,61 +316,6 @@ export function ManageEmployees({ theme, onBack }: ManageEmployeesProps): JSX.El
 
 // ── Sidebar ─────────────────────────────────────────────────────────
 
-interface SidebarContentProps {
-  theme: Theme;
-  onBack: () => void;
-}
-
-function SidebarContent({ theme, onBack }: SidebarContentProps): JSX.Element {
-  return (
-    <>
-      <div style={{ padding: '8px 16px 14px' }}>
-        <div style={{ fontFamily: FONT_DISPLAY, fontSize: 22, color: theme.ink, letterSpacing: -0.4 }}>
-          เบิกค่าใช้จ่าย
-        </div>
-        <div style={{ fontFamily: FONT_UI, fontSize: 11, color: theme.inkSoft, marginTop: 2 }}>
-          การเงิน · ผู้อนุมัติ
-        </div>
-      </div>
-
-      <div
-        onClick={onBack}
-        style={{
-          margin: '1px 8px 8px',
-          padding: '7px 12px',
-          borderRadius: 8,
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          fontFamily: FONT_UI,
-          fontSize: 13,
-          color: theme.inkSoft,
-        }}
-      >
-        <span style={{ fontSize: 15, lineHeight: 1 }}>←</span>
-        <span>กลับ</span>
-      </div>
-
-      <div
-        style={{
-          padding: '6px 16px 6px',
-          fontFamily: FONT_UI,
-          fontSize: 10,
-          fontWeight: 600,
-          color: theme.inkSofter,
-          letterSpacing: 1.2,
-          textTransform: 'uppercase',
-        }}
-      >
-        การจัดการ
-      </div>
-      <SidebarItem theme={theme} label="พนักงาน" active />
-
-      <div style={{ flex: 1 }} />
-    </>
-  );
-}
 
 // ── Top bar ─────────────────────────────────────────────────────────
 

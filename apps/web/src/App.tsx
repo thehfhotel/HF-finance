@@ -348,6 +348,9 @@ export function App() {
           <ManageEmployees
             theme={theme}
             onBack={() => setRoute({ name: 'approver-home' })}
+            currentUser={currentUser}
+            onNavigate={(target) => setRoute({ name: target } as Route)}
+            onLogout={handleLogout}
           />
         </div>
         {showAdminBottomNav && (
@@ -366,6 +369,9 @@ export function App() {
           <ManageEmployees
             theme={theme}
             onBack={() => setRoute({ name: 'approver-home' })}
+            currentUser={currentUser}
+            onNavigate={(target) => setRoute({ name: target } as Route)}
+            onLogout={handleLogout}
           />
           {IS_DEV && <TweaksPanel tweaks={tweaks} onChange={setTweak} onJump={onJump} />}
         </>

@@ -28,11 +28,19 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
   .get(
     '/',
     async ({ user, query, status }) => {
-      const isApprover = user.role === 'APPROVER';
+      // Requests are visible to every signed-in employee, in every status.
+      //
+      // This is a small hotel team that already discusses these expenses out
+      // loud, and hiding each other's requests actively got in the way: work
+      // could not be handed over, because the person picking it up could not
+      // see it. `?mine=1` still gives the personal view that "คำขอของฉัน"
+      // renders. Acting on a request is unchanged and still restricted —
+      // approve/reject/pay remain approver-only, and editing a receipt still
+      // requires owning it.
       const mine = query.mine === '1' || query.mine === 'true';
       const filters: Record<string, unknown> = {};
 
-      if (!isApprover || mine) {
+      if (mine) {
         filters.userId = user.id;
       }
 
@@ -136,7 +144,7 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
     },
   )
 
-  .get('/:id', async ({ user, params, status }) => {
+  .get('/:id', async ({ params, status }) => {
     const bundle = await prisma.bundle.findUnique({
       where: { id: params.id },
       include: { receipts: true, user: true, approver: true },
@@ -146,10 +154,8 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
       return status(404, { message: 'Bundle not found' });
     }
 
-    if (user.role !== 'APPROVER' && bundle.userId !== user.id) {
-      return status(403, { message: 'Forbidden' });
-    }
-
+    // Readable by any signed-in employee — same reasoning as the list above.
+    // The actions on this bundle are still gated below.
     return serializeBundleWithDetails(bundle);
   })
 
@@ -193,6 +199,62 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
     });
 
     return serializeBundleWithDetails(updated);
+  })
+
+  /**
+   * Pull a still-pending request back for more edits.
+   *
+   * Submitting used to be one-way: the only route back out of PENDING was for
+   * an approver to reject it, which leaves a rejected record and a reason for
+   * something that was never actually wrong. Someone who spots their own
+   * mistake should be able to take the request back themselves.
+   *
+   * The receipts return to the draft pool exactly as they do on reject, and the
+   * bundle is removed rather than parked in some withdrawn state — there is no
+   * such status, and inventing one would put an entry in every approver's list
+   * that nobody needs to act on. The audit event is what records that it
+   * happened.
+   */
+  .post('/:id/withdraw', async ({ user, params, status }) => {
+    const bundle = await prisma.bundle.findUnique({ where: { id: params.id } });
+    if (!bundle) {
+      return status(404, { message: 'Bundle not found' });
+    }
+
+    // The submitter, or an approver acting on their behalf.
+    if (bundle.userId !== user.id && user.role !== 'APPROVER') {
+      return status(403, { message: 'Forbidden' });
+    }
+
+    // Only while it is still pending. Once approved or paid the money has
+    // moved on and unpicking it is an approver decision, not a self-service one.
+    if (bundle.status !== 'PENDING') {
+      return status(409, {
+        message: `ดึงกลับได้เฉพาะคำขอที่ยังรออนุมัติ (สถานะปัจจุบัน: ${bundle.status.toLowerCase()})`,
+      });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.receipt.updateMany({
+        where: { bundleId: params.id },
+        data: { bundleId: null },
+      });
+
+      // Audit first: the row is about to disappear, and the event carries
+      // bundleId with onDelete: Cascade, so writing it after the delete would
+      // silently lose it.
+      await tx.auditEvent.create({
+        data: {
+          type: 'withdraw',
+          actorId: user.id,
+          metadata: { bundleId: params.id, name: bundle.name },
+        },
+      });
+
+      await tx.bundle.delete({ where: { id: params.id } });
+    });
+
+    return { ok: true as const };
   })
 
   .post(

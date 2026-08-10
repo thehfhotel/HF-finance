@@ -89,4 +89,47 @@ export const Icon: Record<string, IconFn> = {
       <path d="M3 5h14M5 10h10M8 15h4" stroke={c} strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   ),
+  // ── Sidebar set ────────────────────────────────────────────────────────────
+  /** ภาพรวม — bars, the overview page's own shape. */
+  chart: (c = 'currentColor') => (
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+      <path d="M3 17h14" stroke={c} strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M6 17V9M10 17V4M14 17v-5" stroke={c} strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  ),
+  /** รออนุมัติ — a clock: something waiting on someone. */
+  clock: (c = 'currentColor') => (
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+      <circle cx="10" cy="10" r="7" stroke={c} strokeWidth="1.4" />
+      <path d="M10 6v4.2l2.6 1.6" stroke={c} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  /** อนุมัติแล้ว — a ticked circle. */
+  checkCircle: (c = 'currentColor') => (
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+      <circle cx="10" cy="10" r="7" stroke={c} strokeWidth="1.4" />
+      <path d="M6.8 10.2l2.1 2.1 4.3-4.4" stroke={c} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  /** ปฏิเสธ — a crossed circle, deliberately not a bare X. */
+  xCircle: (c = 'currentColor') => (
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+      <circle cx="10" cy="10" r="7" stroke={c} strokeWidth="1.4" />
+      <path d="M7.6 7.6l4.8 4.8M12.4 7.6l-4.8 4.8" stroke={c} strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  ),
+  /** ฉบับร่าง — a sheet with a folded corner. */
+  draft: (c = 'currentColor') => (
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+      <path d="M5 3h6l4 4v10H5V3z" stroke={c} strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M11 3v4h4" stroke={c} strokeWidth="1.4" strokeLinejoin="round" />
+    </svg>
+  ),
+  /** ออกจากระบบ — door with an arrow leaving it. */
+  logout: (c = 'currentColor') => (
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+      <path d="M8 3H4.5v14H8" stroke={c} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M12 6.5L15.5 10 12 13.5M15 10H7.5" stroke={c} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
 };

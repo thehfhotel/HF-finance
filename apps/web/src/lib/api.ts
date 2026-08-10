@@ -316,6 +316,11 @@ export const api = {
       request<BundleWithDetails>(`/api/bundles/${encodeURIComponent(id)}/approve`, {
         method: 'POST',
       }),
+    /** Pull a still-pending request back for more edits. The receipts return to
+     *  the draft pool and the bundle is removed, so there is nothing to return
+     *  but an ack — the caller drops it from local state. */
+    withdraw: (id: string): Promise<{ ok: true }> =>
+      request<{ ok: true }>(`/api/bundles/${encodeURIComponent(id)}/withdraw`, { method: 'POST' }),
     reject: (id: string, reason?: string): Promise<BundleWithDetails> =>
       request<BundleWithDetails>(`/api/bundles/${encodeURIComponent(id)}/reject`, {
         method: 'POST',
