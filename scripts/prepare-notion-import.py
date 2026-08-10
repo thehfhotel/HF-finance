@@ -34,7 +34,12 @@ import urllib.parse
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-EXPORT_ROOT = REPO_ROOT / "Private & Shared 2" / "เบิกเงิน"
+# Each Notion export lands in its own folder ("Private & Shared 2", "… 4", …),
+# so the root is overridable instead of pinned to whichever one came first.
+# Point EXPORT_ROOT at the 'เบิกเงิน' directory inside the export.
+EXPORT_ROOT = Path(
+    os.environ.get("EXPORT_ROOT", str(REPO_ROOT / "Private & Shared 2" / "เบิกเงิน"))
+)
 CSV_PATH = EXPORT_ROOT / "รายการเบิกเงิน 1acda95a2f8280f0bae9c42f69a67b66_all.csv"
 OUT_DIR = REPO_ROOT / "out" / "notion-import"
 OUT_PHOTOS = OUT_DIR / "photos"
@@ -118,6 +123,34 @@ def decode_photo_path(s: str) -> str | None:
     return name if name.lower().endswith((".jpg", ".jpeg", ".png", ".heic", ".webp")) else None
 
 
+def decode_photo_relpath(s: str) -> str | None:
+    """Path to the image FILE, relative to EXPORT_ROOT.
+
+    Separate from decode_photo_path because the two answer different questions
+    and must not be merged: this one locates the file on disk, while
+    decode_photo_path returns the bare filename that seeds stable_id. The
+    filename is what Notion keeps constant between exports; the directory
+    layout is not. The April export put images flat in 'เบิกเงิน/', the August
+    one nests them under 'เบิกเงิน/รายการเบิกเงิน/<row>/'. Feeding the full
+    path into stable_id would therefore re-hash every record and duplicate the
+    entire archive on the next import.
+
+    The CSV stores a URL-encoded path rooted at the export folder
+    ('เบิกเงิน/…'), so the leading segment is dropped when it repeats
+    EXPORT_ROOT's own name. Handles both layouts.
+    """
+    s = (s or "").strip()
+    if not s:
+        return None
+    decoded = urllib.parse.unquote(s)
+    if not decoded.lower().endswith((".jpg", ".jpeg", ".png", ".heic", ".webp", ".jfif")):
+        return None
+    parts = decoded.split("/")
+    if parts and parts[0] == EXPORT_ROOT.name:
+        parts = parts[1:]
+    return "/".join(parts) if parts else None
+
+
 def stable_id(title: str, amount: float, date: str | None, photo: str | None) -> str:
     """Deterministic id so re-runs are idempotent."""
     seed = f"{title}|{amount:.2f}|{date or ''}|{photo or ''}"
@@ -162,10 +195,12 @@ def main() -> int:
         quantity = parse_quantity(row["จำนวนชิ้น"])
         sub_items = parse_subitems(row["Sub-item"])
 
+        # Filename seeds the id (stable across exports); relpath finds the file.
         photo_filename = decode_photo_path(row["รูปบิล"])
+        photo_relpath = decode_photo_relpath(row["รูปบิล"])
         photo_out_name: str | None = None
-        if photo_filename:
-            src = EXPORT_ROOT / photo_filename
+        if photo_filename and photo_relpath:
+            src = EXPORT_ROOT / photo_relpath
             if src.exists():
                 # New name: derived from record id so it's stable + safe.
                 rec_id = stable_id(title, amount, date, photo_filename)
