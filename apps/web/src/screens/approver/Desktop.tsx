@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, CSSProperties, ReactNode } from 'react';
 import type { AppState, BundleStatus, BundleWithDetails, Receipt, Theme, User } from '../../lib/types';
+import type { Route } from '../../lib/router';
 import { fmt, fmt0, fmtN, formatThaiDate } from '../../lib/format';
 import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../../lib/theme';
 import { api, payFormFromFields } from '../../lib/api';
 import { dataUrlToFile } from '../../lib/photoUpload';
 import { DesktopShell } from '../../components/DesktopShell';
 import { AppSidebar } from '../../components/AppSidebar';
+import type { SidebarCounts } from '../../components/AppSidebar';
 import { ApproverOverview } from './Overview';
 import { Card, GhostButton, Money, PrimaryButton, StatusPill } from '../../components/primitives';
 import { Icon } from '../../components/icons';
@@ -27,12 +29,14 @@ interface DesktopApproverProps {
   setState: (updater: (s: AppState) => AppState) => void;
   /** Which pane to open on first render; the sidebar drives it afterwards. */
   initialFilter?: FilterKey;
-  onNavigate?: (target: 'admin-employees' | 'my-requests') => void;
+  onNavigate?: (route: Route) => void;
+  /** Shared across every screen so the menu's numbers never change shape. */
+  sidebarCounts?: SidebarCounts;
   currentUser: User | null;
   onLogout?: () => void;
 }
 
-export function DesktopApprover({ theme, state, setState, initialFilter, onNavigate, currentUser, onLogout }: DesktopApproverProps): JSX.Element {
+export function DesktopApprover({ theme, state, setState, initialFilter, onNavigate, currentUser, onLogout, sidebarCounts }: DesktopApproverProps): JSX.Element {
   const [filter, setFilter] = useState<FilterKey>(initialFilter ?? 'pending');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [photoIdx, setPhotoIdx] = useState<number | null>(null);
@@ -183,20 +187,19 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
       currentUser={currentUser}
       isApprover
       active={filter}
-      counts={{
-        pending: pendingBundles.length,
-        approved: approvedBundles.length,
-        paid: paidBundles.length,
-        rejected: rejectedBundles.length,
-      }}
+      counts={sidebarCounts}
       onSelect={(key) => {
         // Destinations that live on other screens hand off; the rest are panes
         // of this one, so the sidebar itself never changes shape.
-        if (key === 'employees') onNavigate?.('admin-employees');
+        if (key === 'employees') return onNavigate?.({ name: 'admin-employees' });
         // Your own requests live on the requestor console; the menu there is
-        // this same component, so only the highlighted row changes.
-        else if (key.startsWith('my-')) onNavigate?.('my-requests');
-        else selectFilter(key as FilterKey);
+        // this same component, so only the highlighted row changes — and the
+        // pane it opens is the one that was actually clicked.
+        if (key.startsWith('my-')) {
+          const view = key.slice(3) as 'drafts' | 'pending' | 'approved' | 'paid' | 'rejected';
+          return onNavigate?.({ name: 'my-requests', view });
+        }
+        selectFilter(key as FilterKey);
       }}
       onLogout={onLogout}
     />

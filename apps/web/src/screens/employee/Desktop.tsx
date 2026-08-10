@@ -6,7 +6,7 @@ import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../../lib/theme';
 import { api, receiptFormFromFields } from '../../lib/api';
 import { dataUrlToFile } from '../../lib/photoUpload';
 import { AppSidebar } from '../../components/AppSidebar';
-import type { SidebarKey } from '../../components/AppSidebar';
+import type { SidebarCounts, SidebarKey } from '../../components/AppSidebar';
 import { DesktopShell } from '../../components/DesktopShell';
 import { Card, GhostButton, Money, PrimaryButton, StatusPill } from '../../components/primitives';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
@@ -55,13 +55,21 @@ interface DesktopEmployeeProps {
   /** Approvers see the approval box and พนักงาน in the shared sidebar; this
    *  carries those clicks back to the approver console. */
   onNavigateApprover?: (key: SidebarKey) => void;
+  /** Which pane the click that brought us here actually meant. */
+  initialView?: 'drafts' | 'pending' | 'approved' | 'paid' | 'rejected';
+  /** Shared across every screen so the menu's numbers never change shape. */
+  sidebarCounts?: SidebarCounts;
 }
 
-export function DesktopEmployee({ theme, state, setState, currentUser, onBackToInbox, onLogout, onNavigateApprover }: DesktopEmployeeProps): JSX.Element {
+export function DesktopEmployee({ theme, state, setState, currentUser, onBackToInbox, onLogout, onNavigateApprover, initialView, sidebarCounts }: DesktopEmployeeProps): JSX.Element {
   // onBackToInbox is only supplied for approvers, so it doubles as the role flag.
   const isApprover = onBackToInbox !== undefined;
-  const [view, setView] = useState<View>('drafts');
-  const [listFilter, setListFilter] = useState<BundleFilter>('pending');
+  const [view, setView] = useState<View>(
+    initialView && initialView !== 'drafts' ? 'bundle-list' : 'drafts',
+  );
+  const [listFilter, setListFilter] = useState<BundleFilter>(
+    initialView && initialView !== 'drafts' ? initialView : 'pending',
+  );
   const [detailOrigin, setDetailOrigin] = useState<Exclude<View, 'bundle-detail'>>('drafts');
   const [selectedBundleId, setSelectedBundleId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -250,13 +258,7 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
       currentUser={currentUser ?? null}
       isApprover={isApprover}
       active={view === 'drafts' ? 'my-drafts' : (`my-${listFilter}` as SidebarKey)}
-      counts={{
-        myDrafts: looseReceipts.length,
-        myPending: totalsByStatus.pending,
-        myApproved: totalsByStatus.approved,
-        myPaid: totalsByStatus.paid,
-        myRejected: totalsByStatus.rejected,
-      }}
+      counts={sidebarCounts}
       onSelect={(key) => {
         if (key === 'my-drafts') return goToDrafts();
         if (key.startsWith('my-')) return openBundleList(key.slice(3) as BundleFilter);
