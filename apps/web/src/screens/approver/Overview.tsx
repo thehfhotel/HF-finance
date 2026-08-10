@@ -22,6 +22,23 @@ import {
   sumTotals,
 } from '../../lib/stats';
 import type { AgeBand, MonthPoint, NamedTotal } from '../../lib/stats';
+import type { BundleStats } from '../../lib/api';
+
+const THAI_MONTHS = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+
+/** Server rows are sparse — a quiet month is simply absent — so fill the window
+ *  to keep the line continuous rather than letting it skip. */
+function monthPointsFrom(rows: Array<{ month: string; amount: number }>, months: number): MonthPoint[] {
+  const byKey = new Map(rows.map((r) => [r.month, r.amount]));
+  const now = new Date();
+  const out: MonthPoint[] = [];
+  for (let i = months - 1; i >= 0; i -= 1) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    out.push({ key, label: THAI_MONTHS[d.getMonth()], amount: byKey.get(key) ?? 0 });
+  }
+  return out;
+}
 
 /** Filters the sidebar/tabs understand — 'draft' is never a bundle status. */
 export type OverviewFilter = Exclude<BundleStatus, 'draft'>;
@@ -199,6 +216,10 @@ function TrendChart({ theme, points }: { theme: Theme; points: MonthPoint[] }) {
 interface OverviewProps {
   theme: Theme;
   bundles: BundleWithDetails[];
+  /** Server-computed totals and charts. The page used to derive these from the
+   *  full bundle array, which is why the client downloaded the whole archive;
+   *  `bundles` is now only a page and cannot answer them. */
+  stats?: BundleStats | null;
   /** Open a bundle for review. */
   onOpenBundle: (id: string) => void;
   /** Jump the sidebar/tab to a status list. Omitted on mobile. */
@@ -207,21 +228,27 @@ interface OverviewProps {
   padding?: string;
 }
 
-export function ApproverOverview({ theme, bundles, onOpenBundle, onSelectFilter, padding = '24px 28px 48px' }: OverviewProps) {
+export function ApproverOverview({ theme, bundles, stats, onOpenBundle, onSelectFilter, padding = '24px 28px 48px' }: OverviewProps) {
   const pending = bundles.filter((b) => b.status === 'pending');
   const approved = bundles.filter((b) => b.status === 'approved');
   const paid = bundles.filter((b) => b.status === 'paid');
   const rejected = bundles.filter((b) => b.status === 'rejected');
 
-  const totalPending = sumTotals(pending);
-  const totalApproved = sumTotals(approved);
+  const totalPending = stats ? stats.pending.total : sumTotals(pending);
+  const totalApproved = stats ? stats.approved.total : sumTotals(approved);
   const triage = oldestPending(pending, TRIAGE_LIMIT);
   const buckets = agingBuckets(pending);
   const bucketMax = Math.max(1, ...buckets.map((b) => b.count));
-  const trend = paidByMonth(bundles, TREND_MONTHS);
-  const categories: NamedTotal[] = byCategory(bundles, 6);
-  const people: NamedTotal[] = bySubmitter(bundles, 5);
-  const props = byProperty(bundles);
+  const trend: MonthPoint[] = stats
+    ? monthPointsFrom(stats.paidByMonth, TREND_MONTHS)
+    : paidByMonth(bundles, TREND_MONTHS);
+  const categories: NamedTotal[] = stats
+    ? stats.byCategory.map((r) => ({ key: r.label, label: r.label, amount: r.amount }))
+    : byCategory(bundles, 6);
+  const people: NamedTotal[] = stats
+    ? stats.bySubmitter.map((r) => ({ key: r.label, label: r.label, amount: r.amount }))
+    : bySubmitter(bundles, 5);
+  const props = stats ? stats.byProperty : byProperty(bundles);
   const propTotal = props['hf-hotel'] + props['hf-ville'];
 
   // Sequential ink ramp — darkest = largest. Magnitude, not identity.
@@ -235,7 +262,7 @@ export function ApproverOverview({ theme, bundles, onOpenBundle, onSelectFilter,
           theme={theme}
           label="รออนุมัติ"
           dot={theme.statusPending}
-          value={String(pending.length)}
+          value={String(stats ? stats.pending.count : pending.length)}
           sub={`${fmt(totalPending)} ค้าง`}
           emphasis={pending.length > 0}
           onClick={onSelectFilter ? () => onSelectFilter('pending') : undefined}
@@ -244,7 +271,7 @@ export function ApproverOverview({ theme, bundles, onOpenBundle, onSelectFilter,
           theme={theme}
           label="พร้อมจ่าย"
           dot={theme.statusApproved}
-          value={String(approved.length)}
+          value={String(stats ? stats.approved.count : approved.length)}
           sub={approved.length > 0 ? `${fmt(totalApproved)} ต้องโอน` : 'ไม่มีค้าง'}
           emphasis={approved.length > 0}
           onClick={onSelectFilter ? () => onSelectFilter('approved') : undefined}
@@ -254,14 +281,14 @@ export function ApproverOverview({ theme, bundles, onOpenBundle, onSelectFilter,
           label="จ่ายเดือนนี้"
           dot={theme.statusPaid}
           value={fmt0(paidThisMonth(bundles))}
-          sub={`${paid.length} คำขอสะสม`}
+          sub={`${stats ? stats.paid.count : paid.length} คำขอสะสม`}
           onClick={onSelectFilter ? () => onSelectFilter('paid') : undefined}
         />
         <StatTile
           theme={theme}
           label="ปฏิเสธ"
           dot={theme.statusRejected}
-          value={String(rejected.length)}
+          value={String(stats ? stats.rejected.count : rejected.length)}
           sub="รอพนักงานส่งใหม่"
           onClick={onSelectFilter ? () => onSelectFilter('rejected') : undefined}
         />
@@ -493,9 +520,10 @@ interface OverviewScreenProps {
   state: AppState;
   nav: Nav;
   currentUser: User | null;
+  stats?: BundleStats | null;
 }
 
-export function Overview({ theme, state, nav, currentUser }: OverviewScreenProps) {
+export function Overview({ theme, state, nav, currentUser, stats }: OverviewScreenProps) {
   const bundles = state.bundles;
   return (
     <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', paddingBottom: 72, background: theme.paper }}>
@@ -512,6 +540,7 @@ export function Overview({ theme, state, nav, currentUser }: OverviewScreenProps
         <ApproverOverview
           theme={theme}
           bundles={bundles}
+          stats={stats}
           onOpenBundle={(id) => nav({ name: 'approver-review', id })}
           padding="4px 20px 32px"
         />
