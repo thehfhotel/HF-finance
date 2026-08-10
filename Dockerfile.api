@@ -64,7 +64,7 @@ LABEL org.opencontainers.image.licenses=Proprietary
 # image but Prisma's query engine wants libssl at runtime — bun:slim already
 # carries it, so no extra install.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && apt-get install -y --no-install-recommends curl ca-certificates imagemagick \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

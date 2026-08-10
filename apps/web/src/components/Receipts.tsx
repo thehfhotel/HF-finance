@@ -1,6 +1,18 @@
 import { fmt0, fmtN } from '../lib/format';
 import type { Receipt } from '../lib/types';
 
+/**
+ * Ask the API for a thumbnail instead of the original camera photo.
+ *
+ * Receipt photos are multi-megabyte originals; a list rendering them at 32px
+ * was downloading and decoding all of it. Widths must match the API's
+ * allowlist (96 / 320 / 800) — anything else silently serves the original.
+ * Pass no width when the user is actually looking at the photo.
+ */
+export function photoSrc(path: string, width?: 96 | 320 | 800): string {
+  return width ? `${path}?w=${width}` : path;
+}
+
 interface ReceiptPhotoProps {
   receipt: Receipt;
   height?: number;
@@ -29,8 +41,12 @@ export function ReceiptPhoto({ receipt, height = 200, rotate = 0, slim = false }
         }}
       >
         <img
-          src={receipt.photoPath}
+          src={photoSrc(receipt.photoPath, 320)}
           alt={receipt.merchant}
+          loading="lazy"
+          decoding="async"
+          width={w}
+          height={h}
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
         />
       </div>
@@ -178,8 +194,12 @@ export function ReceiptThumb({ receipt, size = 56 }: ReceiptThumbProps) {
     >
       {receipt.photoPath ? (
         <img
-          src={receipt.photoPath}
+          src={photoSrc(receipt.photoPath, 96)}
           alt={receipt.merchant}
+          loading="lazy"
+          decoding="async"
+          width={size}
+          height={size}
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
         />
       ) : (

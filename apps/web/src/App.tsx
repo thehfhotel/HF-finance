@@ -243,13 +243,42 @@ export function App() {
   }, [route, refetch]);
 
   // ── URL sync — keep the address bar in step with the route name ─
+  // ── Browser history ─────────────────────────────────────────────
+  //
+  // Navigation used to replaceState, so the app never added history entries and
+  // Back left the app entirely — landing on the login screen or the previous
+  // site. Every in-app move now pushes an entry, and the whole route object
+  // rides along in history.state because most routes share the "/" path and
+  // could not otherwise be told apart on the way back.
+  const isPopping = useRef(false);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const path = pathForRoute(route);
-    if (window.location.pathname !== path) {
-      window.history.replaceState(null, '', path + window.location.search + window.location.hash);
+    // Restoring a route from a popstate must not push it back on.
+    if (isPopping.current) {
+      isPopping.current = false;
+      return;
     }
+    const path = pathForRoute(route);
+    const url = path + window.location.search + window.location.hash;
+    if (window.history.state?.route === undefined) {
+      // First render: adopt the current entry rather than adding a duplicate.
+      window.history.replaceState({ route }, '', url);
+      return;
+    }
+    window.history.pushState({ route }, '', url);
   }, [route]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onPop = (event: PopStateEvent) => {
+      const restored = (event.state as { route?: Route } | null)?.route;
+      isPopping.current = true;
+      setRoute(restored ?? initialRouteFromUrl());
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   // ── Dev role-tweak swap → switch dev user id, reload ─────────────
   const prevRoleRef = useRef(tweaks.role);
