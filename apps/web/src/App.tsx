@@ -13,6 +13,7 @@ import {
   setDevUserId,
   isKioskResponse,
 } from './lib/api';
+import type { BundleStats } from './lib/api';
 import { IOSDevice } from './components/IOSDevice';
 import { Icon } from './components/icons';
 import { TweaksPanel } from './components/TweaksPanel';
@@ -41,6 +42,8 @@ const TWEAK_DEFAULTS: Tweaks = {
 };
 
 const EMPTY_STATE: AppState = { receipts: [], bundles: [] };
+/** Rows per list request. The lists are browsable; the numbers come from /stats. */
+const PAGE_SIZE = 50;
 const IS_DEV = import.meta.env.DEV;
 
 function initialRouteFromUrl(): Route {
@@ -88,43 +91,48 @@ export function App() {
   const [cfError, setCfError] = useState<string | null>(null);
   // Non-null when the Cloudflare identity is a shared terminal — see cf-login.
   const [kioskId, setKioskId] = useState<string | null>(null);
+  const [stats, setStats] = useState<BundleStats | null>(null);
+  const [myStats, setMyStats] = useState<BundleStats | null>(null);
   // One set of numbers for the sidebar, computed once and given to every
   // desktop screen. Each screen used to pass only the counts it happened to
   // own, so numbers appeared and vanished as you navigated and the "identical"
   // menu visibly changed shape. Box counts are company-wide; the คำขอของฉัน
   // rows and drafts are the personal scope.
-  const countBy = (bundles: AppState['bundles'], status: string) =>
-    bundles.filter((b) => b.status === status).length;
+  // Counts come from the server now. Deriving them from the in-memory array is
+  // exactly what forced the whole archive down the wire.
   const sidebarCounts = {
-    pending: countBy(state.bundles, 'pending'),
-    approved: countBy(state.bundles, 'approved'),
-    paid: countBy(state.bundles, 'paid'),
-    rejected: countBy(state.bundles, 'rejected'),
-    myDrafts: myState.receipts.filter((r) => r.bundleId === null).length,
-    myPending: countBy(myState.bundles, 'pending'),
-    myApproved: countBy(myState.bundles, 'approved'),
-    myPaid: countBy(myState.bundles, 'paid'),
-    myRejected: countBy(myState.bundles, 'rejected'),
+    pending: stats?.pending.count,
+    approved: stats?.approved.count,
+    paid: stats?.paid.count,
+    rejected: stats?.rejected.count,
+    myDrafts: myStats?.drafts,
+    myPending: myStats?.pending.count,
+    myApproved: myStats?.approved.count,
+    myPaid: myStats?.paid.count,
+    myRejected: myStats?.rejected.count,
   };
 
   // ── Bootstrap auth + initial data load ──────────────────────────
   const refetch = useCallback(async (): Promise<void> => {
     setErrorMessage(null);
     try {
-      const [receipts, bundles] = await Promise.all([
+      // A page, not the archive. Production holds ~1,500 bundles and this used
+      // to pull all of them TWICE before first paint — the unscoped list and
+      // the ?mine=1 list, each joined to receipts, submitter and approver.
+      // Counts and charts come from /stats now, so the lists only need enough
+      // rows to fill a screen.
+      const [receipts, bundles, stats, myReceipts, myBundles, myStats] = await Promise.all([
         api.receipts.list(),
-        api.bundles.list(),
+        api.bundles.list(undefined, { limit: PAGE_SIZE }),
+        api.bundles.stats(),
+        api.receipts.list({ mine: true }),
+        api.bundles.list(undefined, { mine: true, limit: PAGE_SIZE }),
+        api.bundles.stats({ mine: true }),
       ]);
       setState({ receipts, bundles });
-      // Everyone needs the personal scope now, not just approvers. Requests
-      // became visible to all, so the unfiltered list is no longer "mine" for
-      // an employee — without this their คำขอของฉัน counted the whole company's
-      // requests as their own.
-      const [myReceipts, myBundles] = await Promise.all([
-        api.receipts.list({ mine: true }),
-        api.bundles.list(undefined, { mine: true }),
-      ]);
       setMyState({ receipts: myReceipts, bundles: myBundles });
+      setStats(stats);
+      setMyStats(myStats);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Unknown error');
     }
@@ -479,6 +487,7 @@ export function App() {
     role,
     currentUser,
     onLogout: handleLogout,
+    stats,
   });
 
   // Bottom nav is visible on top-level screens only (not sub-screens or auth).
@@ -507,6 +516,7 @@ export function App() {
             state={state}
             setState={setState}
             sidebarCounts={sidebarCounts}
+            stats={stats}
             initialFilter={
               route.name === 'overview'
                 ? 'overview'
@@ -646,9 +656,10 @@ interface RenderArgs {
   role: Tweaks['role'];
   currentUser: User | null;
   onLogout: () => void;
+  stats: BundleStats | null;
 }
 
-function renderScreen({ route, theme, state, setState, reqState, reqSetState, nav, reqNav, role, currentUser, onLogout }: RenderArgs) {
+function renderScreen({ route, theme, state, setState, reqState, reqSetState, nav, reqNav, role, currentUser, onLogout, stats }: RenderArgs) {
   // Requestor flow — available to any signed-in user (owner-scoped data)
   if (route.name === 'upload') return <Upload theme={theme} state={reqState} nav={reqNav} setState={reqSetState} editId={route.editId} />;
   if (route.name === 'record') return <RecordDetail theme={theme} state={reqState} setState={reqSetState} nav={reqNav} recordId={route.id} />;
@@ -667,7 +678,7 @@ function renderScreen({ route, theme, state, setState, reqState, reqSetState, na
   if (route.name === 'approver-home')
     return <Inbox theme={theme} state={state} nav={nav} currentUser={currentUser} onLogout={onLogout} />;
   if (route.name === 'overview')
-    return <Overview theme={theme} state={state} nav={nav} currentUser={currentUser} />;
+    return <Overview theme={theme} state={state} nav={nav} currentUser={currentUser} stats={stats} />;
 
   // 'home': employee → requestor Home; approver → inbox
   if (role === 'employee')

@@ -1,6 +1,7 @@
 import { Elysia, t } from 'elysia';
 import { auth } from '../auth';
 import { prisma } from '../db';
+import { Prisma } from '../generated/prisma';
 import { saveUploadedFile } from '../uploads';
 import { bundleStatusFromShared, serializeBundleWithDetails } from '../serializers';
 import type { BundleStatus } from '@reimbursement/shared';
@@ -21,6 +22,12 @@ function sumReceiptAmounts(amounts: ReadonlyArray<{ amount: { toString(): string
   const total = amounts.reduce((accumulator, { amount }) => accumulator + Number(amount), 0);
   return Number(total.toFixed(2));
 }
+
+/** Enough to fill a long screen without another round trip; a caller that wants
+ *  more asks for it explicitly. */
+const DEFAULT_PAGE_SIZE = 50;
+/** Ceiling so a stray ?limit=100000 cannot resurrect the original problem. */
+const MAX_PAGE_SIZE = 200;
 
 export const bundleRoutes = new Elysia({ prefix: '/bundles' })
   .use(auth)
@@ -57,10 +64,22 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
       // Include receipts + approver so list items are full BundleWithDetails —
       // the UI sums receipt amounts and shows the approver, so omitting these
       // produced an undefined `receipts` crash once real bundles existed.
+      // Paginated. Production holds ~1,500 bundles, each joined to its
+      // receipts, submitter and approver; returning all of them was several MB
+      // per request, and the client fetched the list twice on boot. A phone on
+      // hotel wifi spent that entire download before first paint.
+      //
+      // Counts and totals now come from /api/bundles/stats, so a caller never
+      // needs the whole array just to render a number.
+      const take = Math.min(Math.max(Number(query.limit ?? DEFAULT_PAGE_SIZE) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+      const skip = Math.max(Number(query.offset ?? 0) || 0, 0);
+
       const bundles = await prisma.bundle.findMany({
         where: filters,
         include: { receipts: true, user: true, approver: true },
         orderBy: { submittedAt: 'desc' },
+        take,
+        skip,
       });
 
       return bundles.map(serializeBundleWithDetails);
@@ -69,8 +88,96 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
       query: t.Object({
         status: t.Optional(t.String()),
         mine: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+        offset: t.Optional(t.String()),
       }),
     },
+  )
+
+  /**
+   * Everything the UI needs as a NUMBER, without shipping the rows.
+   *
+   * Sidebar counts, the approval-box totals and the whole ภาพรวม page used to be
+   * derived in the browser from the complete bundle array — which is why the
+   * client downloaded all ~1,500 of them (twice) before it could render "1".
+   * Postgres does this in one round trip over indexed columns; the response is
+   * a couple of KB regardless of how big the archive grows.
+   */
+  .get(
+    '/stats',
+    async ({ user, query }) => {
+      const mine = query.mine === '1' || query.mine === 'true';
+      const scope = mine ? { userId: user.id } : {};
+
+      const [byStatus, sums, drafts, catRows, submitterRows, propRows, monthRows] =
+        await Promise.all([
+        prisma.bundle.groupBy({ by: ['status'], where: scope, _count: { _all: true } }),
+        // Bundles carry no total of their own — transferAmount is only written
+        // at pay time — so the money has to come from the receipts joined to
+        // each status.
+        prisma.$queryRaw<Array<{ status: string; total: string | null }>>`
+          SELECT b."status"::text AS status, SUM(r."amount")::text AS total
+          FROM bundles b JOIN receipts r ON r."bundleId" = b.id
+          ${mine ? Prisma.sql`WHERE b."userId" = ${user.id}` : Prisma.empty}
+          GROUP BY b."status"
+        `,
+        prisma.receipt.count({ where: { userId: user.id, bundleId: null } }),
+
+        // ── ภาพรวม aggregates ────────────────────────────────────────────
+        // These are the charts. Computing them in the browser is what forced
+        // the whole archive down the wire in the first place.
+        prisma.$queryRaw<Array<{ category: string; total: string }>>`
+          SELECT r."category" AS category, SUM(r."amount")::text AS total
+          FROM receipts r
+          GROUP BY r."category" ORDER BY SUM(r."amount") DESC LIMIT 6
+        `,
+        prisma.$queryRaw<Array<{ name: string; total: string }>>`
+          SELECT u."name" AS name, SUM(r."amount")::text AS total
+          FROM receipts r
+          JOIN bundles b ON r."bundleId" = b.id
+          JOIN users u ON b."userId" = u.id
+          GROUP BY u."name" ORDER BY SUM(r."amount") DESC LIMIT 5
+        `,
+        prisma.$queryRaw<Array<{ property: string; total: string }>>`
+          SELECT r."property" AS property, SUM(r."amount")::text AS total
+          FROM receipts r GROUP BY r."property"
+        `,
+        // Paid baht per calendar month for the trailing year, bucketed on
+        // paidAt — when the money actually left.
+        prisma.$queryRaw<Array<{ month: string; total: string }>>`
+          SELECT to_char(date_trunc('month', b."paidAt"), 'YYYY-MM') AS month,
+                 SUM(r."amount")::text AS total
+          FROM bundles b JOIN receipts r ON r."bundleId" = b.id
+          WHERE b."status" = 'PAID' AND b."paidAt" >= (now() - interval '12 months')
+          GROUP BY 1 ORDER BY 1
+        `,
+      ]);
+
+      const counts: Record<string, number> = {};
+      for (const row of byStatus) counts[row.status.toLowerCase()] = row._count._all;
+
+      const totals: Record<string, number> = {};
+      for (const row of sums) totals[row.status.toLowerCase()] = Number(row.total ?? 0);
+
+      const pick = (s: string) => ({ count: counts[s] ?? 0, total: totals[s] ?? 0 });
+
+      return {
+        pending: pick('pending'),
+        approved: pick('approved'),
+        paid: pick('paid'),
+        rejected: pick('rejected'),
+        /** Loose receipts — always the caller's own, whatever the scope. */
+        drafts,
+        byCategory: catRows.map((r) => ({ label: r.category, amount: Number(r.total) })),
+        bySubmitter: submitterRows.map((r) => ({ label: r.name, amount: Number(r.total) })),
+        byProperty: {
+          'hf-hotel': Number(propRows.find((r) => r.property === 'hf-hotel')?.total ?? 0),
+          'hf-ville': Number(propRows.find((r) => r.property === 'hf-ville')?.total ?? 0),
+        },
+        paidByMonth: monthRows.map((r) => ({ month: r.month, amount: Number(r.total) })),
+      };
+    },
+    { query: t.Object({ mine: t.Optional(t.String()) }) },
   )
 
   .post(

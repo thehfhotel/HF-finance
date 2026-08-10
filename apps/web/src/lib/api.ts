@@ -229,6 +229,29 @@ export interface CfLoginResponse {
   user: User;
 }
 
+export interface StatSlice {
+  count: number;
+  total: number;
+}
+
+export interface NamedAmount {
+  label: string;
+  amount: number;
+}
+
+/** Shape of GET /api/bundles/stats. */
+export interface BundleStats {
+  pending: StatSlice;
+  approved: StatSlice;
+  paid: StatSlice;
+  rejected: StatSlice;
+  drafts: number;
+  byCategory: NamedAmount[];
+  bySubmitter: NamedAmount[];
+  byProperty: Record<'hf-hotel' | 'hf-ville', number>;
+  paidByMonth: Array<{ month: string; amount: number }>;
+}
+
 /**
  * The other successful shape of `POST /api/auth/cf-login`: the verified
  * Cloudflare identity is a shared terminal, not a person. A kiosk gets no
@@ -301,10 +324,11 @@ export const api = {
   },
 
   bundles: {
-    list: (status?: BundleStatus, opts?: { mine?: boolean }): Promise<BundleWithDetails[]> => {
+    list: (status?: BundleStatus, opts?: { mine?: boolean; limit?: number }): Promise<BundleWithDetails[]> => {
       const params = new URLSearchParams();
       if (status) params.set('status', status);
       if (opts?.mine) params.set('mine', '1');
+      if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
       const qs = params.toString();
       return request<BundleWithDetails[]>(qs ? `/api/bundles?${qs}` : '/api/bundles');
     },
@@ -316,6 +340,10 @@ export const api = {
       request<BundleWithDetails>(`/api/bundles/${encodeURIComponent(id)}/approve`, {
         method: 'POST',
       }),
+    /** Counts, totals and the ภาพรวม aggregates — computed in Postgres so the
+     *  client never downloads the archive just to render a number or a chart. */
+    stats: (opts?: { mine?: boolean }): Promise<BundleStats> =>
+      request<BundleStats>(`/api/bundles/stats${opts?.mine ? '?mine=1' : ''}`),
     /** Pull a still-pending request back for more edits. The receipts return to
      *  the draft pool and the bundle is removed, so there is nothing to return
      *  but an ack — the caller drops it from local state. */

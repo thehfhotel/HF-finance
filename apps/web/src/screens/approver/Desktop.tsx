@@ -9,6 +9,7 @@ import { dataUrlToFile } from '../../lib/photoUpload';
 import { DesktopShell } from '../../components/DesktopShell';
 import { AppSidebar } from '../../components/AppSidebar';
 import type { SidebarCounts } from '../../components/AppSidebar';
+import type { BundleStats } from '../../lib/api';
 import { ApproverOverview } from './Overview';
 import { Card, GhostButton, Money, PrimaryButton, StatusPill } from '../../components/primitives';
 import { Icon } from '../../components/icons';
@@ -32,11 +33,13 @@ interface DesktopApproverProps {
   onNavigate?: (route: Route) => void;
   /** Shared across every screen so the menu's numbers never change shape. */
   sidebarCounts?: SidebarCounts;
+  /** Server-computed totals for the ภาพรวม pane. */
+  stats?: BundleStats | null;
   currentUser: User | null;
   onLogout?: () => void;
 }
 
-export function DesktopApprover({ theme, state, setState, initialFilter, onNavigate, currentUser, onLogout, sidebarCounts }: DesktopApproverProps): JSX.Element {
+export function DesktopApprover({ theme, state, setState, initialFilter, onNavigate, currentUser, onLogout, sidebarCounts, stats }: DesktopApproverProps): JSX.Element {
   const [filter, setFilter] = useState<FilterKey>(initialFilter ?? 'pending');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [photoIdx, setPhotoIdx] = useState<number | null>(null);
@@ -212,6 +215,7 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
           <ApproverOverview
             theme={theme}
             bundles={allBundles}
+            stats={stats}
             onOpenBundle={(id) => {
               // Jump into the status list the bundle actually lives in, with it selected.
               const target = allBundles.find((b) => b.id === id);

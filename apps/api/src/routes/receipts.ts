@@ -137,9 +137,17 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
         filters.bundleId = null;
       }
 
+      // Paginated for the same reason as bundles — ~1,500 rows is not a
+      // payload a phone should carry to show one screen. The drafts view asks
+      // for ?loose=true, which is a handful of rows, so it is unaffected.
+      const take = Math.min(Math.max(Number(query.limit ?? 100) || 100, 1), 500);
+      const skip = Math.max(Number(query.offset ?? 0) || 0, 0);
+
       const receipts = await prisma.receipt.findMany({
         where: filters,
         orderBy: { createdAt: 'desc' },
+        take,
+        skip,
       });
 
       return receipts.map(serializeReceipt);
@@ -149,6 +157,8 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
         bundleId: t.Optional(t.String()),
         loose: t.Optional(t.String()),
         mine: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+        offset: t.Optional(t.String()),
       }),
     },
   )
