@@ -6,6 +6,8 @@ import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../../lib/theme';
 import type { AdminUser, CreateUserRequest, Role, Theme, UpdateUserRequest, User } from '../../lib/types';
 import { useViewportPlatform } from '../../lib/useViewportPlatform';
 import { AppSidebar } from '../../components/AppSidebar';
+import type { SidebarCounts } from '../../components/AppSidebar';
+import type { Route } from '../../lib/router';
 import { DesktopShell } from '../../components/DesktopShell';
 import { AppBar } from '../../components/AppBar';
 import { Avatar, Card, GhostButton, IconBtn, PrimaryButton } from '../../components/primitives';
@@ -21,7 +23,10 @@ interface ManageEmployeesProps {
   currentUser?: User | null;
   /** Lets the shared sidebar reach the other screens, so this page is a
    *  destination in the menu rather than a dead end with a back link. */
-  onNavigate?: (target: 'approver-home' | 'my-requests') => void;
+  onNavigate?: (route: Route) => void;
+  /** The same numbers the other screens show. This page owns no bundle state,
+   *  so without them every count in the "identical" menu silently disappears. */
+  counts?: SidebarCounts;
   onLogout?: () => void;
 }
 
@@ -37,6 +42,7 @@ export function ManageEmployees({
   currentUser,
   onNavigate,
   onLogout,
+  counts,
 }: ManageEmployeesProps): JSX.Element {
   const platform = useViewportPlatform();
   const isMobile = platform === 'mobile';
@@ -272,10 +278,16 @@ export function ManageEmployees({
       currentUser={currentUser ?? null}
       isApprover
       active="employees"
+      counts={counts}
       onSelect={(key) => {
-        if (key.startsWith('my-')) onNavigate?.('my-requests');
-        // Every approval-box destination lives on the approver console.
-        else onNavigate?.('approver-home');
+        if (key === 'overview') return onNavigate?.({ name: 'overview' });
+        if (key.startsWith('my-')) {
+          const view = key.slice(3) as 'drafts' | 'pending' | 'approved' | 'paid' | 'rejected';
+          return onNavigate?.({ name: 'my-requests', view });
+        }
+        // A box status — open the approver console on that exact tab, rather
+        // than dumping every row onto its default.
+        onNavigate?.({ name: 'approver-home', filter: key as 'pending' });
       }}
       onLogout={onLogout}
     />

@@ -88,6 +88,24 @@ export function App() {
   const [cfError, setCfError] = useState<string | null>(null);
   // Non-null when the Cloudflare identity is a shared terminal — see cf-login.
   const [kioskId, setKioskId] = useState<string | null>(null);
+  // One set of numbers for the sidebar, computed once and given to every
+  // desktop screen. Each screen used to pass only the counts it happened to
+  // own, so numbers appeared and vanished as you navigated and the "identical"
+  // menu visibly changed shape. Box counts are company-wide; the คำขอของฉัน
+  // rows and drafts are the personal scope.
+  const countBy = (bundles: AppState['bundles'], status: string) =>
+    bundles.filter((b) => b.status === status).length;
+  const sidebarCounts = {
+    pending: countBy(state.bundles, 'pending'),
+    approved: countBy(state.bundles, 'approved'),
+    paid: countBy(state.bundles, 'paid'),
+    rejected: countBy(state.bundles, 'rejected'),
+    myDrafts: myState.receipts.filter((r) => r.bundleId === null).length,
+    myPending: countBy(myState.bundles, 'pending'),
+    myApproved: countBy(myState.bundles, 'approved'),
+    myPaid: countBy(myState.bundles, 'paid'),
+    myRejected: countBy(myState.bundles, 'rejected'),
+  };
 
   // ── Bootstrap auth + initial data load ──────────────────────────
   const refetch = useCallback(async (): Promise<void> => {
@@ -98,13 +116,15 @@ export function App() {
         api.bundles.list(),
       ]);
       setState({ receipts, bundles });
-      if (currentUserRef.current?.role === 'approver') {
-        const [myReceipts, myBundles] = await Promise.all([
-          api.receipts.list({ mine: true }),
-          api.bundles.list(undefined, { mine: true }),
-        ]);
-        setMyState({ receipts: myReceipts, bundles: myBundles });
-      }
+      // Everyone needs the personal scope now, not just approvers. Requests
+      // became visible to all, so the unfiltered list is no longer "mine" for
+      // an employee — without this their คำขอของฉัน counted the whole company's
+      // requests as their own.
+      const [myReceipts, myBundles] = await Promise.all([
+        api.receipts.list({ mine: true }),
+        api.bundles.list(undefined, { mine: true }),
+      ]);
+      setMyState({ receipts: myReceipts, bundles: myBundles });
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Unknown error');
     }
@@ -349,7 +369,8 @@ export function App() {
             theme={theme}
             onBack={() => setRoute({ name: 'approver-home' })}
             currentUser={currentUser}
-            onNavigate={(target) => setRoute({ name: target } as Route)}
+            onNavigate={setRoute}
+            counts={sidebarCounts}
             onLogout={handleLogout}
           />
         </div>
@@ -370,7 +391,8 @@ export function App() {
             theme={theme}
             onBack={() => setRoute({ name: 'approver-home' })}
             currentUser={currentUser}
-            onNavigate={(target) => setRoute({ name: target } as Route)}
+            onNavigate={setRoute}
+            counts={sidebarCounts}
             onLogout={handleLogout}
           />
           {IS_DEV && <TweaksPanel tweaks={tweaks} onChange={setTweak} onJump={onJump} />}
@@ -435,8 +457,10 @@ export function App() {
   const role = currentUser?.role ?? tweaks.role;
   const REQUESTOR_ROUTES = new Set(['upload', 'record', 'bundle-new', 'bundle-submitted', 'bundle']);
   const inRequestorMode = role === 'employee' || route.name === 'my-requests' || REQUESTOR_ROUTES.has(route.name);
-  const reqState = role === 'approver' ? myState : state;
-  const reqSetState = role === 'approver' ? setMyState : setState;
+  // The requestor flow is always the personal scope, for every role.
+  const reqState = myState;
+  const reqSetState = setMyState;
+
 
   // For an approver working in requestor mode, "back to home" from a requestor
   // sub-screen should land on their own requests, not the approver inbox.
@@ -482,11 +506,15 @@ export function App() {
             theme={theme}
             state={state}
             setState={setState}
-            initialFilter={route.name === 'overview' ? 'overview' : undefined}
-            onNavigate={(target) => {
-              if (target === 'my-requests') setRoute({ name: 'my-requests' });
-              else setRoute({ name: 'admin-employees' });
-            }}
+            sidebarCounts={sidebarCounts}
+            initialFilter={
+              route.name === 'overview'
+                ? 'overview'
+                : route.name === 'approver-home'
+                  ? route.filter
+                  : undefined
+            }
+            onNavigate={setRoute}
             currentUser={currentUser}
             onLogout={handleLogout}
           />
@@ -498,9 +526,14 @@ export function App() {
             currentUser={currentUser}
             onBackToInbox={() => setRoute({ name: 'approver-home' })}
             onLogout={handleLogout}
-            onNavigateApprover={(key) =>
-              setRoute(key === 'employees' ? { name: 'admin-employees' } : { name: 'approver-home' })
-            }
+            sidebarCounts={sidebarCounts}
+            initialView={route.name === 'my-requests' ? route.view : undefined}
+            onNavigateApprover={(key) => {
+              if (key === 'employees') return setRoute({ name: 'admin-employees' });
+              if (key === 'overview') return setRoute({ name: 'overview' });
+              // A box status — open the approver console on that exact tab.
+              setRoute({ name: 'approver-home', filter: key as 'pending' });
+            }}
           />
         ) : (
           <DesktopEmployee
