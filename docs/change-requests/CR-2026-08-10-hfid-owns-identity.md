@@ -14,6 +14,15 @@ someone to approver survives every subsequent login. `initials` is derived from
 the display name (two words → first character of each; one word → first two
 characters) and an approver can correct it on the พนักงาน screen.
 
+**`name` is deliberately NOT create-only.** Central is the authority for display
+names, so every assertion login refreshes it and names stay consistent across
+every HF app. The accepted consequence: editing a name on the พนักงาน screen is
+not durable for anyone who logs in by card or QR — their next login restores
+central's value. Change the name in HF-ID Employee Management instead. This was
+confirmed live on 2026-08-10: badge 421 was `นัท` here and `วิณัฐ` at central,
+and the first QR login renamed the row to `วิณัฐ` as designed. `initials` was
+untouched, because that one *is* create-only.
+
 This applies to the two paths that carry a **signed HF-ID assertion** — NFC card
 tap and the kiosk QR scan. The Cloudflare Access path is unchanged: a Google
 identity carries no badge to anchor on, and the `managers` tier is a short
