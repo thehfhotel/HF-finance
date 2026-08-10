@@ -224,6 +224,11 @@ jobs:
           READER_RESOLVE_SECRET: ${{ secrets.READER_RESOLVE_SECRET }}
           HF_ID_BASE_URL: ${{ secrets.HF_ID_BASE_URL || 'http://192.168.100.228:5000' }}
           HF_ID_ISSUER: ${{ secrets.HF_ID_ISSUER || 'https://id.thehfhotel.org/oidc' }}
+          # Shared terminals. Not a secret — these same addresses are checked in
+          # as the "Kiosk: <id>" Access policies in HF-erp's hostnames.json, so
+          # the default mirrors the three policies already attached to this
+          # hostname. Override with a secret only to add or retire a terminal.
+          KIOSK_EMAILS: ${{ secrets.KIOSK_EMAILS || 'sdyoffice66@gmail.com=office-1,theharbourfront.hotel@gmail.com=reception-1,hfville.hotel@gmail.com=hfville-reception-1' }}
           IMAGE_TAG: sha-${{ github.sha }}
         run: |
           set -euo pipefail
@@ -258,6 +263,9 @@ jobs:
           READER_RESOLVE_SECRET=${READER_RESOLVE_SECRET}
           HF_ID_BASE_URL=${HF_ID_BASE_URL}
           HF_ID_ISSUER=${HF_ID_ISSUER}
+
+          # Shared terminals (email=kiosk-id,…) — a place, not a person
+          KIOSK_EMAILS=${KIOSK_EMAILS}
           EOF
 
       - name: Log in to GHCR (on remote host)

@@ -78,6 +78,12 @@ services:
       READER_RESOLVE_SECRET: ${READER_RESOLVE_SECRET:-}
       HF_ID_BASE_URL: ${HF_ID_BASE_URL:-http://192.168.100.228:5000}
       HF_ID_ISSUER: ${HF_ID_ISSUER:-https://id.thehfhotel.org/oidc}
+      # Shared terminals, as `email=kiosk-id,…` (HF One's KIOSK_EMAILS format).
+      # These Google accounts clear Cloudflare Access as a PLACE, not a person:
+      # instead of a session they get the card-tap screen, so a receipt is
+      # attributed to whoever taps rather than to the PC. Absent/empty → no
+      # session is ever a kiosk and every identity takes the employee path.
+      KIOSK_EMAILS: ${KIOSK_EMAILS:-}
     volumes:
       # Persistent storage for receipt photos and transfer screenshots.
       # Mount path matches the apps/api/uploads directory inside the image.
