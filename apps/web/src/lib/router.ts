@@ -6,6 +6,7 @@ export type Route =
   | { name: 'bundle-submitted'; id: string }
   | { name: 'bundle'; id: string }
   | { name: 'approver-home' }
+  | { name: 'overview' }
   | { name: 'approver-review'; id: string }
   | { name: 'approver-pay'; id: string }
   | { name: 'login' }

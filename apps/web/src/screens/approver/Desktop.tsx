@@ -5,7 +5,8 @@ import { fmt, fmt0, fmtN, formatThaiDate } from '../../lib/format';
 import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../../lib/theme';
 import { api, payFormFromFields } from '../../lib/api';
 import { dataUrlToFile } from '../../lib/photoUpload';
-import { DesktopShell, SidebarItem } from '../../components/DesktopShell';
+import { DesktopShell, SidebarItem, SidebarSection } from '../../components/DesktopShell';
+import { ApproverOverview } from './Overview';
 import { Card, GhostButton, Money, PrimaryButton, StatusPill } from '../../components/primitives';
 import { Icon } from '../../components/icons';
 import { ReceiptPhoto, ReceiptThumb } from '../../components/Receipts';
@@ -16,19 +17,22 @@ import { Toast, useToast } from '../../components/Toast';
 const TABLE_GRID_COLUMNS = '1.2fr 1fr 1fr 100px';
 const DETAIL_MAX_WIDTH = 840;
 
-type FilterKey = Exclude<BundleStatus, 'draft'>;
+/** 'overview' is a pane, not a bundle status — it replaces the list+detail columns. */
+type FilterKey = Exclude<BundleStatus, 'draft'> | 'overview';
 
 interface DesktopApproverProps {
   theme: Theme;
   state: AppState;
   setState: (updater: (s: AppState) => AppState) => void;
+  /** Which pane to open on first render; the sidebar drives it afterwards. */
+  initialFilter?: FilterKey;
   onNavigate?: (target: 'admin-employees' | 'my-requests') => void;
   currentUser: User | null;
   onLogout?: () => void;
 }
 
-export function DesktopApprover({ theme, state, setState, onNavigate, currentUser, onLogout }: DesktopApproverProps): JSX.Element {
-  const [filter, setFilter] = useState<FilterKey>('pending');
+export function DesktopApprover({ theme, state, setState, initialFilter, onNavigate, currentUser, onLogout }: DesktopApproverProps): JSX.Element {
+  const [filter, setFilter] = useState<FilterKey>(initialFilter ?? 'pending');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [photoIdx, setPhotoIdx] = useState<number | null>(null);
   const [payOpen, setPayOpen] = useState(false);
@@ -57,7 +61,9 @@ export function DesktopApprover({ theme, state, setState, onNavigate, currentUse
         ? approvedBundles
         : filter === 'paid'
           ? paidBundles
-          : rejectedBundles;
+          : filter === 'rejected'
+            ? rejectedBundles
+            : [];
 
   const selectedBundle: BundleWithDetails | undefined =
     allBundles.find((b) => b.id === selectedId) ?? visibleList[0];
@@ -169,6 +175,21 @@ export function DesktopApprover({ theme, state, setState, onNavigate, currentUse
 
   return (
     <DesktopShell theme={theme} sidebar={sidebar}>
+      {filter === 'overview' ? (
+        <div style={{ height: '100%', overflow: 'auto', background: theme.paper }}>
+          <ApproverOverview
+            theme={theme}
+            bundles={allBundles}
+            onOpenBundle={(id) => {
+              // Jump into the status list the bundle actually lives in, with it selected.
+              const target = allBundles.find((b) => b.id === id);
+              if (target && target.status !== 'draft') setFilter(target.status);
+              setSelectedId(id);
+            }}
+            onSelectFilter={(next) => selectFilter(next)}
+          />
+        </div>
+      ) : (
       <div style={{ display: 'flex', height: '100%', background: theme.paper }}>
         <BundleListColumn
           theme={theme}
@@ -231,6 +252,7 @@ export function DesktopApprover({ theme, state, setState, onNavigate, currentUse
           )}
         </div>
       </div>
+      )}
 
       {confirmState.open && selectedBundle && (
         <ConfirmDialog
@@ -344,6 +366,15 @@ function SidebarContent({
         </div>
       </div>
 
+      {/* Overview first — the "where do I start" pane, above the status silos. */}
+      <SidebarItem
+        theme={theme}
+        label="ภาพรวม"
+        active={filter === 'overview'}
+        onClick={() => onSelectFilter('overview')}
+      />
+
+      <SidebarSection theme={theme} label="กล่องอนุมัติ" />
       <SidebarItem
         theme={theme}
         label="รออนุมัติ"
@@ -374,29 +405,21 @@ function SidebarContent({
         onClick={() => onSelectFilter('rejected')}
       />
 
-      <div style={{ height: 16 }} />
-      <div
-        style={{
-          padding: '6px 16px 6px',
-          fontFamily: FONT_UI,
-          fontSize: 10,
-          fontWeight: 600,
-          color: theme.inkSofter,
-          letterSpacing: 1.2,
-          textTransform: 'uppercase',
-        }}
-      >
-        การจัดการ
-      </div>
+      {/* An approver is also an employee. Their own requests used to live behind
+          a mode switch; surfacing them here means every function this account
+          has — approving and submitting — is reachable without leaving. */}
+      <SidebarSection theme={theme} label="คำขอของฉัน" />
+      <SidebarItem
+        theme={theme}
+        label="คำขอที่ฉันส่ง"
+        onClick={onNavigate ? () => onNavigate('my-requests') : undefined}
+      />
+
+      <SidebarSection theme={theme} label="การจัดการ" />
       <SidebarItem
         theme={theme}
         label="พนักงาน"
         onClick={onNavigate ? () => onNavigate('admin-employees') : undefined}
-      />
-      <SidebarItem
-        theme={theme}
-        label="คำขอของฉัน"
-        onClick={onNavigate ? () => onNavigate('my-requests') : undefined}
       />
       {onLogout && <SidebarItem theme={theme} label="ออกจากระบบ" onClick={onLogout} />}
 
@@ -459,7 +482,10 @@ function BundleListColumn({
   sumOfBundle,
   onSelect,
 }: BundleListColumnProps): JSX.Element {
+  // 'overview' never reaches this column — it replaces the list entirely — but
+  // the map is keyed by FilterKey, so it needs an entry to stay exhaustive.
   const filterLabel: Record<FilterKey, string> = {
+    overview: 'ภาพรวม',
     pending: 'รออนุมัติ',
     approved: 'อนุมัติแล้ว',
     paid: 'จ่ายแล้ว',
