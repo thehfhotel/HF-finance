@@ -193,8 +193,10 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
         // Destinations that live on other screens hand off; the rest are panes
         // of this one, so the sidebar itself never changes shape.
         if (key === 'employees') onNavigate?.('admin-employees');
-        else if (key === 'my-requests' || key === 'drafts') onNavigate?.('my-requests');
-        else selectFilter(key);
+        // Your own requests live on the requestor console; the menu there is
+        // this same component, so only the highlighted row changes.
+        else if (key.startsWith('my-')) onNavigate?.('my-requests');
+        else selectFilter(key as FilterKey);
       }}
       onLogout={onLogout}
     />

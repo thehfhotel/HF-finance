@@ -273,7 +273,7 @@ export function ManageEmployees({
       isApprover
       active="employees"
       onSelect={(key) => {
-        if (key === 'my-requests' || key === 'drafts') onNavigate?.('my-requests');
+        if (key.startsWith('my-')) onNavigate?.('my-requests');
         // Every approval-box destination lives on the approver console.
         else onNavigate?.('approver-home');
       }}

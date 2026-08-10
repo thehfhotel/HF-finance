@@ -5,7 +5,9 @@ import { fmt, fmt0, fmtN, formatThaiDate } from '../../lib/format';
 import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../../lib/theme';
 import { api, receiptFormFromFields } from '../../lib/api';
 import { dataUrlToFile } from '../../lib/photoUpload';
-import { DesktopShell, SidebarSection } from '../../components/DesktopShell';
+import { AppSidebar } from '../../components/AppSidebar';
+import type { SidebarKey } from '../../components/AppSidebar';
+import { DesktopShell } from '../../components/DesktopShell';
 import { Card, GhostButton, Money, PrimaryButton, StatusPill } from '../../components/primitives';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Icon } from '../../components/icons';
@@ -50,9 +52,14 @@ interface DesktopEmployeeProps {
   currentUser?: User | null;
   onBackToInbox?: () => void;
   onLogout?: () => void;
+  /** Approvers see the approval box and พนักงาน in the shared sidebar; this
+   *  carries those clicks back to the approver console. */
+  onNavigateApprover?: (key: SidebarKey) => void;
 }
 
-export function DesktopEmployee({ theme, state, setState, currentUser, onBackToInbox, onLogout }: DesktopEmployeeProps): JSX.Element {
+export function DesktopEmployee({ theme, state, setState, currentUser, onBackToInbox, onLogout, onNavigateApprover }: DesktopEmployeeProps): JSX.Element {
+  // onBackToInbox is only supplied for approvers, so it doubles as the role flag.
+  const isApprover = onBackToInbox !== undefined;
   const [view, setView] = useState<View>('drafts');
   const [listFilter, setListFilter] = useState<BundleFilter>('pending');
   const [detailOrigin, setDetailOrigin] = useState<Exclude<View, 'bundle-detail'>>('drafts');
@@ -235,120 +242,29 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
   const selectedBundle = bundles.find((b) => b.id === selectedBundleId) ?? null;
 
   // ── Sidebar ─────────────────────────────────────────────────────────
+  // The same menu every other desktop screen renders. This screen used to
+  // build its own, which is why opening "คำขอของฉัน" replaced the whole menu.
   const sidebar = (
-    <>
-      <div style={{ padding: '8px 16px 14px' }}>
-        <div style={{ fontFamily: FONT_DISPLAY, fontSize: 22, color: theme.ink, letterSpacing: -0.4 }}>
-          เบิกค่าใช้จ่าย
-        </div>
-        <div style={{ fontFamily: FONT_UI, fontSize: 11, color: theme.inkSoft, marginTop: 2 }}>
-          {currentUser?.name ?? currentUser?.initials ?? ''}
-        </div>
-      </div>
-
-      {onBackToInbox && (
-        <DeskNavItem
-          theme={theme}
-          label="กล่องอนุมัติ"
-          onClick={onBackToInbox}
-        />
-      )}
-
-      <DeskNavItem
-        theme={theme}
-        label="ฉบับร่าง"
-        count={looseReceipts.length}
-        active={view === 'drafts'}
-        accent={looseReceipts.length > 0}
-        onClick={goToDrafts}
-      />
-
-      <div style={{ height: 14 }} />
-      <SidebarSectionInline theme={theme} label="คำขอของฉัน" />
-      <DeskNavItem
-        theme={theme}
-        label="รออนุมัติ"
-        count={totalsByStatus.pending}
-        active={view === 'bundle-list' && listFilter === 'pending'}
-        onClick={() => openBundleList('pending')}
-      />
-      <DeskNavItem
-        theme={theme}
-        label="อนุมัติแล้ว"
-        count={totalsByStatus.approved}
-        active={view === 'bundle-list' && listFilter === 'approved'}
-        onClick={() => openBundleList('approved')}
-      />
-      <DeskNavItem
-        theme={theme}
-        label="จ่ายแล้ว"
-        count={totalsByStatus.paid}
-        active={view === 'bundle-list' && listFilter === 'paid'}
-        onClick={() => openBundleList('paid')}
-      />
-      <DeskNavItem
-        theme={theme}
-        label="ปฏิเสธ"
-        count={totalsByStatus.rejected}
-        active={view === 'bundle-list' && listFilter === 'rejected'}
-        onClick={() => openBundleList('rejected')}
-      />
-      {onLogout && <DeskNavItem theme={theme} label="ออกจากระบบ" onClick={onLogout} />}
-
-      <SidebarSection theme={theme} label="ล่าสุด" />
-      {bundles
-        // Server returns newest-first; show the five most recent.
-        .slice(0, 5)
-        .map((b) => {
-          const sum = b.receipts.reduce((acc, r) => acc + r.amount, 0);
-          const statusLabel =
-            b.status === 'pending' ? 'รออนุมัติ' :
-            b.status === 'approved' ? 'อนุมัติ' :
-            b.status === 'rejected' ? 'ปฏิเสธ' :
-            'จ่ายแล้ว';
-          const isActive = selectedBundleId === b.id;
-          return (
-            <div
-              key={b.id}
-              onClick={() => openBundle(b.id)}
-              style={{
-                margin: '1px 8px',
-                padding: '8px 12px',
-                borderRadius: 8,
-                cursor: 'pointer',
-                background: isActive ? 'rgba(0,0,0,0.06)' : 'transparent',
-              }}
-            >
-              <div
-                style={{
-                  fontFamily: FONT_UI,
-                  fontSize: 12,
-                  color: theme.ink,
-                  fontWeight: 500,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {b.name}
-              </div>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  marginTop: 2,
-                  fontFamily: FONT_UI,
-                  fontSize: 11,
-                  color: theme.inkSoft,
-                }}
-              >
-                <span>{statusLabel}</span>
-                <span style={{ fontFamily: FONT_MONO }}>฿{fmt0(sum)}</span>
-              </div>
-            </div>
-          );
-        })}
-    </>
+    <AppSidebar
+      theme={theme}
+      currentUser={currentUser ?? null}
+      isApprover={isApprover}
+      active={view === 'drafts' ? 'my-drafts' : (`my-${listFilter}` as SidebarKey)}
+      counts={{
+        myDrafts: looseReceipts.length,
+        myPending: totalsByStatus.pending,
+        myApproved: totalsByStatus.approved,
+        myPaid: totalsByStatus.paid,
+        myRejected: totalsByStatus.rejected,
+      }}
+      onSelect={(key) => {
+        if (key === 'my-drafts') return goToDrafts();
+        if (key.startsWith('my-')) return openBundleList(key.slice(3) as BundleFilter);
+        // Everything else lives on the approver console.
+        onNavigateApprover?.(key);
+      }}
+      onLogout={onLogout}
+    />
   );
 
   // ── Main pane ───────────────────────────────────────────────────────
@@ -444,80 +360,6 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
   );
 }
 
-// ── Sidebar nav item (matches prototype's DeskNavItem) ────────────────
-interface DeskNavItemProps {
-  theme: Theme;
-  label: string;
-  count?: number;
-  active?: boolean;
-  accent?: boolean;
-  onClick?: () => void;
-}
-
-function DeskNavItem({ theme, label, count, active, accent, onClick }: DeskNavItemProps) {
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        margin: '1px 8px',
-        padding: '7px 12px',
-        borderRadius: 8,
-        cursor: onClick ? 'pointer' : 'default',
-        background: active ? 'rgba(0,0,0,0.06)' : 'transparent',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        fontFamily: FONT_UI,
-        fontSize: 13,
-        color: theme.ink,
-        fontWeight: active ? 500 : 400,
-      }}
-    >
-      {accent && (
-        <div style={{ width: 6, height: 6, borderRadius: 3, background: theme.warn }} />
-      )}
-      <span style={{ flex: 1 }}>{label}</span>
-      {count != null && (
-        <span
-          style={{
-            fontFamily: FONT_UI,
-            fontSize: 11,
-            color: theme.inkSoft,
-            fontVariantNumeric: 'tabular-nums',
-          }}
-        >
-          {count}
-        </span>
-      )}
-    </div>
-  );
-}
-
-// Inline section header used in addition to SidebarSection so we can match
-// the exact prototype padding for "คำขอของฉัน" (no top spacing — it follows
-// a manual 14px spacer rather than the default 14px top padding).
-interface SidebarSectionInlineProps {
-  theme: Theme;
-  label: string;
-}
-
-function SidebarSectionInline({ theme, label }: SidebarSectionInlineProps) {
-  return (
-    <div
-      style={{
-        padding: '6px 16px 6px',
-        fontFamily: FONT_UI,
-        fontSize: 10,
-        fontWeight: 600,
-        color: theme.inkSofter,
-        letterSpacing: 1.2,
-        textTransform: 'uppercase',
-      }}
-    >
-      {label}
-    </div>
-  );
-}
 
 // ── Drafts pane (middle gallery + right composer + lightbox) ──────────
 interface DraftsPaneProps {
