@@ -1,4 +1,6 @@
-import type { AppState, Theme } from '../../lib/types';
+import { useEffect, useState } from 'react';
+import { api } from '../../lib/api';
+import type { AppState, BundleWithDetails, Theme } from '../../lib/types';
 import type { Nav } from '../../lib/router';
 import { fmtN, formatThaiDate } from '../../lib/format';
 import { FONT_DISPLAY, FONT_UI } from '../../lib/theme';
@@ -16,8 +18,31 @@ interface BundleDetailProps {
 }
 
 export function BundleDetail({ theme, state, nav, bundleId }: BundleDetailProps) {
-  const b = state.bundles.find((x) => x.id === bundleId);
-  if (!b) return null;
+  // The list is a page now, not the archive, so a bundle older than the newest
+  // 50 simply is not in state — and this screen used to render nothing at all
+  // for it. Fall back to fetching the one bundle by id, as Review and Pay do.
+  const found = state.bundles.find((x) => x.id === bundleId);
+  const [fetched, setFetched] = useState<BundleWithDetails | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    if (found || fetched || loadFailed) return;
+    let cancelled = false;
+    api.bundles
+      .get(bundleId)
+      .then((res) => { if (!cancelled) setFetched(res); })
+      .catch(() => { if (!cancelled) setLoadFailed(true); });
+    return () => { cancelled = true; };
+  }, [bundleId, found, fetched, loadFailed]);
+
+  const b = found ?? fetched ?? undefined;
+  if (!b) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center', fontFamily: FONT_UI, color: theme.inkSoft }}>
+        {loadFailed ? 'ไม่พบคำขอนี้' : 'กำลังโหลด…'}
+      </div>
+    );
+  }
   const items = b.receipts;
   const total = items.reduce((s, r) => s + r.amount, 0);
   const [whole, frac] = fmtN(total).split('.');
