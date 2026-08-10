@@ -276,6 +276,17 @@ export const api = {
       request<{ ok: boolean }>('/api/auth/card-login/start', jsonBody({ reader_id: readerId })),
     cardLoginWait: (): Promise<CardLoginResult | null> =>
       request<CardLoginResult | null>('/api/auth/card-login/wait').then((r) => r ?? null),
+    // ── Kiosk QR login ──
+    // The reader-free authenticator for shared terminals: start mints a ticket
+    // at HF-ID and returns the URL to render as a QR; wait long-polls until an
+    // employee scans it and confirms in LINE, then yields the same session a
+    // card tap would have. `label` is a cosmetic terminal name (the kiosk id).
+    // wait() resolves to null on 204 (nobody has scanned yet — poll again); a
+    // 410 means the ticket expired and the caller should mint a fresh QR.
+    kioskLoginStart: (label: string): Promise<{ qrUrl: string }> =>
+      request<{ qrUrl: string }>('/api/auth/kiosk-login/start', jsonBody({ label })),
+    kioskLoginWait: (): Promise<CardLoginResult | null> =>
+      request<CardLoginResult | null>('/api/auth/kiosk-login/wait').then((r) => r ?? null),
   },
 
   receipts: {

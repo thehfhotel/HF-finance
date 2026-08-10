@@ -37,6 +37,18 @@ const HF_ID_ISSUER = process.env.HF_ID_ISSUER ?? 'https://id.thehfhotel.org/oidc
 const HF_ID_AUDIENCE = 'reimbursement';
 const APP_GRANT_KEY = 'reimbursement';
 
+/**
+ * Public origin serving HF-ID's `/api/public/reader/elevate/<ticket>` confirm
+ * page. This is a Cloudflare Access BYPASS app (HF-erp
+ * infra/cloudflare/gate-erp-root.ts creates `erp.thehfhotel.org/api/public*`),
+ * which is exactly why the kiosk QR must point here and not at this app's own
+ * hostname: the phone scanning it has no Access session and would otherwise be
+ * bounced into a login it cannot complete.
+ */
+const HF_ID_PUBLIC_BASE_URL = (
+  process.env.HF_ID_PUBLIC_BASE_URL ?? 'https://erp.thehfhotel.org'
+).replace(/\/+$/, '');
+
 const IS_PROD = process.env.NODE_ENV === 'production';
 
 interface ReaderConfig {
@@ -82,6 +94,67 @@ async function verifyCardAssertion(assertion: string, issuer: string): Promise<J
   return payload;
 }
 
+// ─── Assertion → session ─────────────────────────────────────────────────────
+
+/**
+ * The ONE admission step for every authenticator.
+ *
+ * A card tap and a kiosk QR scan both end here, so the two produce identical
+ * sessions by construction — the QR path cannot drift into being weaker than
+ * the card path, because there is only one copy of the checks.
+ *
+ * Returns the minted session, or a `{ status, message }` the caller surfaces
+ * verbatim. Callers are responsible for clearing whatever ticket cookie they
+ * hold, since the two paths cookie differently.
+ */
+type AdmissionFailure = { ok: false; status: 401 | 403; message: string };
+type AdmissionSuccess = { ok: true; token: string };
+
+async function sessionFromAssertion(
+  assertion: string,
+  issuer: string,
+): Promise<AdmissionSuccess | AdmissionFailure> {
+  let payload: JWTPayload;
+  try {
+    payload = await verifyCardAssertion(assertion, issuer);
+  } catch {
+    return { ok: false, status: 401, message: 'Invalid card assertion' };
+  }
+
+  // The assertion must carry a grant for this app.
+  const apps = payload.apps;
+  if (!Array.isArray(apps) || !apps.includes(APP_GRANT_KEY)) {
+    return { ok: false, status: 403, message: 'Card is not granted access to this app' };
+  }
+
+  // `sub` is the badge (the central identity anchor); `badge` mirrors it.
+  const badge =
+    typeof payload.sub === 'string' && payload.sub.length > 0
+      ? payload.sub
+      : typeof payload.badge === 'string' && payload.badge.length > 0
+        ? payload.badge
+        : null;
+  if (!badge) {
+    return { ok: false, status: 401, message: 'Card assertion missing badge' };
+  }
+
+  // Map badge → this app's employee row. No auto-provisioning: a badge that
+  // isn't linked to a User can't log in (surfaces the impedance mismatch
+  // rather than silently minting a stray account).
+  const user = await prisma.user.findUnique({ where: { badge } });
+  if (!user) {
+    return {
+      ok: false,
+      status: 403,
+      message: 'บัตรนี้ยังไม่ได้ผูกกับพนักงานในระบบเบิกค่าใช้จ่าย',
+    };
+  }
+
+  // Mint the app's own session — identical shape to the Cloudflare Access
+  // path, keyed on the internal User.id. `badge` is informational only.
+  return { ok: true, token: await signAuthToken({ userId: user.id, badge }) };
+}
+
 // ─── Claim-token cookie ──────────────────────────────────────────────────────
 
 const CLAIM_COOKIE = 'rb_card_claim';
@@ -105,6 +178,34 @@ function storeClaim(cookie: CookieJar, claimToken: string): void {
     secure: IS_PROD,
     path: CLAIM_COOKIE_PATH,
     maxAge: CLAIM_COOKIE_TTL_S,
+  });
+}
+
+// ─── Kiosk QR ticket cookie ──────────────────────────────────────────────────
+
+const TICKET_COOKIE = 'rb_kiosk_ticket';
+const TICKET_COOKIE_PATH = '/api/auth/kiosk-login';
+const TICKET_COOKIE_TTL_S = 600; // central's elevate ticket lifetime
+
+function storeTicket(cookie: CookieJar, ticket: string): void {
+  cookie[TICKET_COOKIE].set({
+    value: ticket,
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: IS_PROD,
+    path: TICKET_COOKIE_PATH,
+    maxAge: TICKET_COOKIE_TTL_S,
+  });
+}
+
+function clearTicket(cookie: CookieJar): void {
+  cookie[TICKET_COOKIE].set({
+    value: '',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: IS_PROD,
+    path: TICKET_COOKIE_PATH,
+    maxAge: 0,
   });
 }
 
@@ -214,49 +315,113 @@ export const authCardRoutes = new Elysia().group('/auth', (group) =>
         return status(502, { message: 'HF-ID reader wait returned no assertion' });
       }
 
-      // Verify the signed assertion (RS256, issuer + audience pinned).
-      let payload: JWTPayload;
-      try {
-        payload = await verifyCardAssertion(data.assertion, config.issuer);
-      } catch {
-        clearClaim(jar);
-        return status(401, { message: 'Invalid card assertion' });
-      }
-
-      // The assertion must carry a grant for this app.
-      const apps = payload.apps;
-      if (!Array.isArray(apps) || !apps.includes(APP_GRANT_KEY)) {
-        clearClaim(jar);
-        return status(403, { message: 'Card is not granted access to this app' });
-      }
-
-      // `sub` is the badge (the central identity anchor); `badge` mirrors it.
-      const badge =
-        typeof payload.sub === 'string' && payload.sub.length > 0
-          ? payload.sub
-          : typeof payload.badge === 'string' && payload.badge.length > 0
-            ? payload.badge
-            : null;
-      if (!badge) {
-        clearClaim(jar);
-        return status(401, { message: 'Card assertion missing badge' });
-      }
-
-      // Map badge → this app's employee row. No auto-provisioning: a badge that
-      // isn't linked to a User can't log in (surfaces the impedance mismatch
-      // rather than silently minting a stray account).
-      const user = await prisma.user.findUnique({ where: { badge } });
+      const admitted = await sessionFromAssertion(data.assertion, config.issuer);
       clearClaim(jar);
-      if (!user) {
-        return status(403, {
-          message: 'บัตรนี้ยังไม่ได้ผูกกับพนักงานในระบบเบิกค่าใช้จ่าย',
+      if (!admitted.ok) return status(admitted.status, { message: admitted.message });
+
+      return { token: admitted.token, linked: true as const, redirect: '/' };
+    })
+
+    // ── Kiosk QR login ──────────────────────────────────────────────────────
+    //
+    // The reader-free authenticator. A shared terminal shows a QR; the employee
+    // scans it with the phone already in their pocket and confirms in LINE, and
+    // central returns the same RS256 assertion a card tap would have produced.
+    //
+    // This is what makes a kiosk work with no hardware at all: `reader_id`
+    // exists only to name a physical tap buffer, and central's elevate endpoint
+    // takes no reader — `label` is a cosmetic terminal name.
+    .post('/kiosk-login/start', async ({ body, cookie, status }) => {
+      const config = getReaderConfig();
+      if ('missing' in config) {
+        return status(503, {
+          message: `Kiosk login not configured. Missing env: ${config.missing.join(', ')}`,
         });
       }
 
-      // Mint the app's own session — identical shape to the Cloudflare Access
-      // path, keyed on the internal User.id. `badge` is informational only.
-      const token = await signAuthToken({ userId: user.id, badge });
+      let startRes: Response;
+      try {
+        startRes = await fetch(`${config.baseUrl}/api/private/reader/elevate/start`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'X-Reader-Secret': config.readerSecret,
+          },
+          body: JSON.stringify({ app: APP_GRANT_KEY, label: body.label ?? '' }),
+        });
+      } catch {
+        return status(502, { message: 'HF-ID unreachable' });
+      }
+      if (!startRes.ok) return status(502, { message: 'HF-ID elevate start failed' });
 
-      return { token, linked: true as const, redirect: '/' };
+      const data = (await startRes.json().catch(() => null)) as { elevate_token?: unknown } | null;
+      if (typeof data?.elevate_token !== 'string' || data.elevate_token.length === 0) {
+        return status(502, { message: 'HF-ID elevate start returned no token' });
+      }
+
+      // The ticket is inherently public — it is about to be rendered on screen
+      // as a QR. The cookie only keeps /wait parameterless, like the card path.
+      storeTicket(cookie as unknown as CookieJar, data.elevate_token);
+
+      // The QR points at HF-ID's Cloudflare-BYPASSED public path, not at this
+      // app: the scanning phone has no Access session, so any Access-gated URL
+      // would bounce it to a login it cannot complete.
+      return { qrUrl: `${HF_ID_PUBLIC_BASE_URL}/api/public/reader/elevate/${data.elevate_token}` };
+    }, {
+      body: t.Object({ label: t.Optional(t.String({ maxLength: 64 })) }),
+    })
+
+    .get('/kiosk-login/wait', async ({ cookie, status }) => {
+      const config = getReaderConfig();
+      if ('missing' in config) {
+        return status(503, {
+          message: `Kiosk login not configured. Missing env: ${config.missing.join(', ')}`,
+        });
+      }
+
+      const jar = cookie as unknown as CookieJar;
+      const ticket = jar[TICKET_COOKIE]?.value;
+      if (typeof ticket !== 'string' || ticket.length === 0) {
+        return status(400, { message: 'No kiosk ticket — call start first' });
+      }
+
+      let waitRes: Response;
+      try {
+        waitRes = await fetch(`${config.baseUrl}/api/private/reader/elevate/wait`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'X-Reader-Secret': config.readerSecret,
+          },
+          body: JSON.stringify({ elevate_token: ticket }),
+        });
+      } catch {
+        return status(502, { message: 'HF-ID unreachable' });
+      }
+
+      // Nobody has scanned yet — keep polling.
+      if (waitRes.status === 204) return status(204, null);
+      // Scanned, but the employee holds no grant for this app.
+      if (waitRes.status === 403) {
+        clearTicket(jar);
+        return status(403, { message: 'ไม่มีสิทธิ์ใช้งานระบบเบิกค่าใช้จ่าย' });
+      }
+      // Ticket expired — the client mints a fresh QR.
+      if (waitRes.status === 404) {
+        clearTicket(jar);
+        return status(410, { message: 'QR expired' });
+      }
+      if (!waitRes.ok) return status(502, { message: 'HF-ID elevate wait failed' });
+
+      const data = (await waitRes.json().catch(() => null)) as { assertion?: unknown } | null;
+      if (typeof data?.assertion !== 'string' || data.assertion.length === 0) {
+        return status(502, { message: 'HF-ID elevate wait returned no assertion' });
+      }
+
+      const admitted = await sessionFromAssertion(data.assertion, config.issuer);
+      clearTicket(jar);
+      if (!admitted.ok) return status(admitted.status, { message: admitted.message });
+
+      return { token: admitted.token, linked: true as const, redirect: '/' };
     }),
 );

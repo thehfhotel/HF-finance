@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Theme } from '../../lib/types';
-import { FONT_DISPLAY, FONT_UI, getTheme, HF_BRAND } from '../../lib/theme';
+import { FONT_DISPLAY, FONT_MONO, FONT_UI, getTheme, HF_BRAND } from '../../lib/theme';
 import { ApiError, api, setAuthToken, isKioskResponse } from '../../lib/api';
+import { encodeQr, qrSvgPath } from '../../lib/qr';
 
 /** Per-terminal reader id, paired once and remembered in this browser. */
 const READER_ID_STORAGE_KEY = 'reimbursement_reader_id';
@@ -11,6 +12,15 @@ const CARD_WAIT_TIMEOUT_MS = 60_000;
 /** Pause before a kiosk re-arms after a failed tap — long enough for the person
  *  standing there to read why it failed, short enough to be ready for the next. */
 const KIOSK_REARM_DELAY_MS = 6_000;
+/**
+ * Breather between kiosk QR waits — NOT a poll interval.
+ *
+ * `/kiosk-login/wait` is a long poll: HF-ID holds the request open and returns
+ * 204 after ~25s (measured against production), so the waiting happens server
+ * side and this delay only stops a hot loop if central ever answers instantly.
+ * Lowering it does not make a scan register faster.
+ */
+const KIOSK_QR_POLL_MS = 1000;
 
 function readReaderId(): string | null {
   if (typeof window === 'undefined') return null;
@@ -154,7 +164,9 @@ export function Login({
             lineHeight: 1.5,
           }}
         >
-          แตะบัตรพนักงาน หรือเข้าสู่ระบบผ่านระบบกลางของบริษัท
+          {kioskId !== null
+            ? 'เครื่องส่วนกลาง — สแกน QR เพื่อเข้าสู่ระบบด้วยบัญชีของคุณ'
+            : 'แตะบัตรพนักงาน หรือเข้าสู่ระบบผ่านระบบกลางของบริษัท'}
         </div>
         {errorMessage && (
           <div
@@ -177,8 +189,23 @@ export function Login({
       </div>
 
       <div style={{ padding: '0 20px 30px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <CfLoginButton theme={theme} onClick={handleCfLogin} submitting={submitting} />
-        <CardLoginSection theme={theme} kioskId={kioskId} />
+        {kioskId !== null ? (
+          <>
+            {/* A shared terminal has no personal identity to offer, so the
+                Cloudflare button is omitted — pressing it can only ever say
+                "this is a shared terminal". The QR is the way in. */}
+            <KioskQrSection theme={theme} kioskId={kioskId} />
+            {/* Card tap stays available on a terminal that has already been
+                paired to a reader, so deploying NFC later needs no code change.
+                Unpaired terminals don't show a pairing box nobody can satisfy. */}
+            {readReaderId() !== null && <CardLoginSection theme={theme} kioskId={kioskId} />}
+          </>
+        ) : (
+          <>
+            <CfLoginButton theme={theme} onClick={handleCfLogin} submitting={submitting} />
+            <CardLoginSection theme={theme} kioskId={null} />
+          </>
+        )}
         <a
           href={ADMIN_CONTACT}
           style={{
@@ -232,6 +259,134 @@ function CfLoginButton({ theme, submitting, onClick }: CfLoginButtonProps) {
     >
       <span>{submitting ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบผ่านระบบกลาง HF'}</span>
     </button>
+  );
+}
+
+// ─── Kiosk QR login ──────────────────────────────────────────────────────────
+
+/**
+ * The reader-free authenticator for shared terminals.
+ *
+ * Shows a QR minted by HF-ID and long-polls until someone scans it with their
+ * phone and confirms in LINE. Nothing is paired and no hardware is involved —
+ * `reader_id` exists only to name a physical tap buffer, and this path has no
+ * reader, so a terminal is usable the moment Cloudflare Access admits it.
+ *
+ * The QR is re-minted on expiry so the screen is always scannable, which is the
+ * whole point of a kiosk: it has to work for whoever walks up next, with no
+ * staff intervention between them.
+ */
+function KioskQrSection({ theme, kioskId }: { theme: Theme; kioskId: string }) {
+  const [qrUrl, setQrUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const cancelledRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    cancelledRef.current = false;
+
+    const poll = async () => {
+      if (cancelledRef.current) return;
+      try {
+        const result = await api.auth.kioskLoginWait();
+        if (cancelledRef.current) return;
+        if (result === null) {
+          timerRef.current = setTimeout(() => void poll(), KIOSK_QR_POLL_MS);
+          return;
+        }
+        setAuthToken(result.token);
+        window.location.assign(result.redirect || '/');
+      } catch (err) {
+        if (cancelledRef.current) return;
+        // 410 = ticket expired: mint a fresh QR rather than stranding the screen.
+        if (err instanceof ApiError && err.status === 410) {
+          void begin();
+          return;
+        }
+        setError(cardErrorText(err));
+        timerRef.current = setTimeout(() => void begin(), KIOSK_REARM_DELAY_MS);
+      }
+    };
+
+    const begin = async () => {
+      if (cancelledRef.current) return;
+      setError(null);
+      try {
+        const { qrUrl: url } = await api.auth.kioskLoginStart(kioskId);
+        if (cancelledRef.current) return;
+        setQrUrl(url);
+        void poll();
+      } catch (err) {
+        if (cancelledRef.current) return;
+        setQrUrl(null);
+        setError(cardErrorText(err));
+        timerRef.current = setTimeout(() => void begin(), KIOSK_REARM_DELAY_MS);
+      }
+    };
+
+    void begin();
+    return () => {
+      cancelledRef.current = true;
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    };
+  }, [kioskId]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontFamily: FONT_DISPLAY, fontSize: 22, color: theme.ink, letterSpacing: -0.4 }}>
+          สแกนเพื่อเข้าสู่ระบบ
+        </div>
+        <div style={{ fontFamily: FONT_UI, fontSize: 13, color: theme.inkSoft, marginTop: 4 }}>
+          ใช้กล้องมือถือสแกน แล้วยืนยันผ่าน LINE
+        </div>
+      </div>
+
+      <div
+        style={{
+          width: 232,
+          height: 232,
+          display: 'grid',
+          placeItems: 'center',
+          background: '#FFFFFF',
+          border: `0.5px solid ${theme.hairlineStrong}`,
+          borderRadius: 16,
+          padding: 12,
+        }}
+      >
+        {qrUrl ? (
+          <QrImage url={qrUrl} />
+        ) : (
+          <span style={{ fontFamily: FONT_UI, fontSize: 12, color: theme.inkSofter }}>
+            กำลังสร้างรหัส…
+          </span>
+        )}
+      </div>
+
+      <div style={{ fontFamily: FONT_MONO, fontSize: 11, color: theme.inkSofter }}>
+        เครื่อง {kioskId}
+      </div>
+
+      {error && (
+        <div style={{ fontFamily: FONT_UI, fontSize: 13, color: theme.danger, textAlign: 'center' }}>
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Renders a URL as an inline SVG QR — no network, no image, no dependency. */
+function QrImage({ url }: { url: string }) {
+  const qr = useMemo(() => encodeQr(url), [url]);
+  const border = 2;
+  const dim = qr.size + border * 2;
+  return (
+    <svg viewBox={`0 0 ${dim} ${dim}`} style={{ width: '100%', height: '100%', display: 'block' }}
+      role="img" aria-label="QR สำหรับเข้าสู่ระบบ">
+      <rect width={dim} height={dim} fill="#FFFFFF" />
+      <path d={qrSvgPath(qr, border)} fill="#000000" />
+    </svg>
   );
 }
 
