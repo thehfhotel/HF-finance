@@ -53,3 +53,7 @@ CLAUDE.local.md
 /Private & Shared*/
 
 out/
+
+# Python bytecode from the local Notion import tooling
+__pycache__/
+*.pyc

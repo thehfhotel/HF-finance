@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppState, Tweaks, User } from './lib/types';
 import type { Route } from './lib/router';
-import { getTheme } from './lib/theme';
+import { getTheme, HF_BRAND } from './lib/theme';
 import { useViewportPlatform } from './lib/useViewportPlatform';
 import {
   ApiError,
@@ -22,6 +22,7 @@ import { BundleBuilder } from './screens/employee/BundleBuilder';
 import { BundleSubmitted } from './screens/employee/BundleSubmitted';
 import { BundleDetail } from './screens/employee/BundleDetail';
 import { Inbox } from './screens/approver/Inbox';
+import { Overview } from './screens/approver/Overview';
 import { Review } from './screens/approver/Review';
 import { Pay } from './screens/approver/Pay';
 import { DesktopApprover } from './screens/approver/Desktop';
@@ -34,7 +35,7 @@ import type { BottomNavRoute } from './components/BottomNav';
 const TWEAK_DEFAULTS: Tweaks = {
   role: 'employee',
   platform: 'mobile',
-  accent: '#262626',
+  accent: HF_BRAND[500],
   dark: false,
 };
 
@@ -47,6 +48,7 @@ function initialRouteFromUrl(): Route {
   if (path === '/login') return { name: 'login' };
   if (path === '/admin/employees') return { name: 'admin-employees' };
   if (path === '/my-requests') return { name: 'my-requests' };
+  if (path === '/overview') return { name: 'overview' };
   return { name: 'home' };
 }
 
@@ -195,7 +197,7 @@ export function App() {
   // Bootstrap runs once, so returning to a list screen re-syncs server truth
   // in the background (no spinner, no unmount) to pick up status changes.
   useEffect(() => {
-    const REFRESH_ROUTES: ReadonlySet<Route['name']> = new Set(['home', 'approver-home', 'my-requests']);
+    const REFRESH_ROUTES: ReadonlySet<Route['name']> = new Set(['home', 'approver-home', 'overview', 'my-requests']);
     if (!REFRESH_ROUTES.has(route.name)) return;
     if (currentUserRef.current === null) return;
     void refetch();
@@ -439,7 +441,7 @@ export function App() {
   });
 
   // Bottom nav is visible on top-level screens only (not sub-screens or auth).
-  const BOTTOM_NAV_ROUTES = new Set<Route['name']>(['home', 'approver-home', 'my-requests']);
+  const BOTTOM_NAV_ROUTES = new Set<Route['name']>(['home', 'approver-home', 'overview', 'my-requests']);
   const showBottomNav = platform === 'mobile' && BOTTOM_NAV_ROUTES.has(route.name);
   const handleBottomNav = (r: BottomNavRoute) => setRoute({ name: r } as Route);
   // An approver landing at '/' sits on route 'home' but sees the Inbox —
@@ -463,6 +465,7 @@ export function App() {
             theme={theme}
             state={state}
             setState={setState}
+            initialFilter={route.name === 'overview' ? 'overview' : undefined}
             onNavigate={(target) => {
               if (target === 'my-requests') setRoute({ name: 'my-requests' });
               else setRoute({ name: 'admin-employees' });
@@ -610,6 +613,8 @@ function renderScreen({ route, theme, state, setState, reqState, reqSetState, na
     return <Pay theme={theme} state={state} nav={nav} bundleId={route.id} setState={setState} />;
   if (route.name === 'approver-home')
     return <Inbox theme={theme} state={state} nav={nav} currentUser={currentUser} onLogout={onLogout} />;
+  if (route.name === 'overview')
+    return <Overview theme={theme} state={state} nav={nav} currentUser={currentUser} />;
 
   // 'home': employee → requestor Home; approver → inbox
   if (role === 'employee')
@@ -625,6 +630,8 @@ function pathForRoute(route: Route): string {
       return '/admin/employees';
     case 'my-requests':
       return '/my-requests';
+    case 'overview':
+      return '/overview';
     default:
       return '/';
   }

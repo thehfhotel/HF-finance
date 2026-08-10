@@ -6,6 +6,7 @@ export type BottomNavRoute =
   | 'home'
   | 'upload'
   | 'approver-home'
+  | 'overview'
   | 'my-requests'
   | 'admin-employees';
 
@@ -21,6 +22,7 @@ const EMPLOYEE_ITEMS: NavItem[] = [
 ];
 
 const APPROVER_ITEMS: NavItem[] = [
+  { label: 'ภาพรวม', route: 'overview', icon: Icon.filter },
   { label: 'กล่องอนุมัติ', route: 'approver-home', icon: Icon.bundle },
   { label: 'คำขอของฉัน', route: 'my-requests', icon: Icon.receipt },
   { label: 'พนักงาน', route: 'admin-employees', icon: Icon.user },

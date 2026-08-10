@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Theme } from '../../lib/types';
-import { FONT_DISPLAY, FONT_UI, getTheme } from '../../lib/theme';
+import { FONT_DISPLAY, FONT_UI, getTheme, HF_BRAND } from '../../lib/theme';
 import { ApiError, api, setAuthToken } from '../../lib/api';
 
 /** Per-terminal reader id, paired once and remembered in this browser. */
@@ -64,7 +64,7 @@ function cfLoginErrorMessage(error: unknown): string {
   return 'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
 }
 
-export function Login({ theme = getTheme(false, '#262626'), cfError = null }: LoginProps) {
+export function Login({ theme = getTheme(false, HF_BRAND[500]), cfError = null }: LoginProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(cfError);
   const [submitting, setSubmitting] = useState<boolean>(false);
 
