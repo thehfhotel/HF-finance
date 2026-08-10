@@ -23,11 +23,22 @@ confirmed live on 2026-08-10: badge 421 was `นัท` here and `วิณั�
 and the first QR login renamed the row to `วิณัฐ` as designed. `initials` was
 untouched, because that one *is* create-only.
 
-This applies to the two paths that carry a **signed HF-ID assertion** — NFC card
-tap and the kiosk QR scan. The Cloudflare Access path is unchanged: a Google
-identity carries no badge to anchor on, and the `managers` tier is a short
-explicit allowlist, so those still resolve by `User.email` / synthetic
-`<badge>@emp.thehfhotel.org` and still fail closed on no match.
+This applies to every path where **HF-ID vouched for the person**:
+
+- NFC card tap and kiosk QR scan, which carry a signed HF-ID assertion.
+- **Cloudflare Access via HF ID (LINE)**, where the identity arrives as the
+  synthetic `<badge>@emp.thehfhotel.org` address. Cloudflare only mints that
+  address through the HF ID provider, whose policy on this app already requires
+  `apps contains reimbursement`, so the grant is verified upstream.
+
+**Cloudflare Access via Google** (managers) is unchanged and still fails closed:
+a Google address can never match the synthetic domain, and that tier is a short
+explicit allowlist.
+
+The Cloudflare half was added a day later, after it blocked a real employee: they
+held the grant, Cloudflare admitted them, and this app answered 403 because no
+row carried their badge — on the path employees actually use, from a phone,
+with nothing they could do about it.
 
 Supersedes the "No match → fail-closed 403. No auto-provisioning." paragraph of
 [CR-2026-07-29](./CR-2026-07-29-cloudflare-access-login.md) for assertion-based

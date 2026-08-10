@@ -60,9 +60,14 @@ Dockerfile.api, Dockerfile.web, docker-compose.production.yml
     verifies and carries the `reimbursement` grant, the employee is upserted on
     `badge` — created as `EMPLOYEE`, and thereafter only `name` is refreshed, so
     a role set here survives every later login. No second employee list to keep.
-  - **Cloudflare Access** (Google): resolves by `email` exact match, else via the
-    synthetic `<badge>@emp.thehfhotel.org` address → `badge` match. No badge to
-    anchor on, so this path still fails closed with a 403 on no match.
+  - **Cloudflare Access via HF ID (LINE)**: the identity arrives as the synthetic
+    `<badge>@emp.thehfhotel.org` address. Resolves by `email`, then by `badge`,
+    and otherwise provisions on that badge — Cloudflare's `HF ID grant:
+    reimbursement` policy already required the grant, so a missing row is only
+    bookkeeping.
+  - **Cloudflare Access via Google** (managers): resolves by `email` exact match
+    only. A Google address can never match the synthetic domain, so this path
+    still fails closed with a 403 on no match.
   - See `docs/change-requests/CR-2026-08-10-hfid-owns-identity.md`.
 - **No tests yet** — Phase 6 territory. Don't add a test framework without asking.
 
