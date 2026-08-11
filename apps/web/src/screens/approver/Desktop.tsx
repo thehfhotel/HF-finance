@@ -233,6 +233,16 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
           list={visibleList}
           selected={selectedBundle}
           totalPending={totalPending}
+          totalPendingReal={stats?.pending.total}
+          totalCount={
+            filter === 'pending'
+              ? sidebarCounts?.pending
+              : filter === 'approved'
+                ? sidebarCounts?.approved
+                : filter === 'paid'
+                  ? sidebarCounts?.paid
+                  : sidebarCounts?.rejected
+          }
           sumOfBundle={sumOfBundle}
           onSelect={selectBundle}
         />
@@ -378,6 +388,11 @@ interface BundleListColumnProps {
   list: BundleWithDetails[];
   selected: BundleWithDetails | undefined;
   totalPending: number;
+  /** True count from /stats. `list` is only a page, so its length reports how
+   *  much was downloaded rather than how much exists. */
+  totalCount?: number;
+  /** True baht still pending, from /stats. */
+  totalPendingReal?: number;
   sumOfBundle: (b: BundleWithDetails) => number;
   onSelect: (id: string) => void;
 }
@@ -388,6 +403,8 @@ function BundleListColumn({
   list,
   selected,
   totalPending,
+  totalCount,
+  totalPendingReal,
   sumOfBundle,
   onSelect,
 }: BundleListColumnProps): JSX.Element {
@@ -435,11 +452,11 @@ function BundleListColumn({
               letterSpacing: -0.5,
             }}
           >
-            {list.length}
+            {totalCount ?? list.length}
           </div>
           {filter === 'pending' && (
             <div style={{ fontFamily: FONT_UI, fontSize: 12, color: theme.inkSoft }}>
-              · {fmt(totalPending)} ค้าง
+              · {fmt(totalPendingReal ?? totalPending)} ค้าง
             </div>
           )}
         </div>
