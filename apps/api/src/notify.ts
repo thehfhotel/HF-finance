@@ -19,7 +19,15 @@
  */
 
 const NOTIFY_TOKEN = process.env.NOTIFY_INGRESS_TOKEN;
-const HF_ERP_BASE_URL = (process.env.HF_ERP_BASE_URL ?? 'https://erp.thehfhotel.org').replace(
+// The portal over the LAN, not its public hostname.
+//
+// erp.thehfhotel.org sits behind Cloudflare Access, and this container holds no
+// Access session — a POST there is answered with a 302 to a login page, so the
+// notification silently never arrives. Reaching the container directly bypasses
+// the wall the same way HF_ID_BASE_URL already does for the card-login calls.
+// Verified: the LAN endpoint accepts our bearer token (400 "title and body
+// required" on an empty body, rather than 401 or a redirect).
+const HF_ERP_BASE_URL = (process.env.HF_ERP_BASE_URL ?? 'http://192.168.100.228:4020').replace(
   /\/+$/,
   '',
 );

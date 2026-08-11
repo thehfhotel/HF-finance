@@ -243,7 +243,7 @@ jobs:
           # Portal notification ingress. Optional: unset means notifications
           # stay off and nothing else changes.
           NOTIFY_INGRESS_TOKEN: ${{ secrets.NOTIFY_INGRESS_TOKEN }}
-          HF_ERP_BASE_URL: ${{ secrets.HF_ERP_BASE_URL || 'https://erp.thehfhotel.org' }}
+          HF_ERP_BASE_URL: ${{ secrets.HF_ERP_BASE_URL || 'http://192.168.100.228:4020' }}
           IMAGE_TAG: sha-${{ github.sha }}
         run: |
           set -euo pipefail

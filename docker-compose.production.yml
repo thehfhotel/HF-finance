@@ -88,7 +88,7 @@ services:
       # request is submitted. Absent token → no notification is ever sent, same
       # fail-dark posture as the other integrations here.
       NOTIFY_INGRESS_TOKEN: ${NOTIFY_INGRESS_TOKEN:-}
-      HF_ERP_BASE_URL: ${HF_ERP_BASE_URL:-https://erp.thehfhotel.org}
+      HF_ERP_BASE_URL: ${HF_ERP_BASE_URL:-http://192.168.100.228:4020}
     volumes:
       # Persistent storage for receipt photos and transfer screenshots.
       # Mount path matches the apps/api/uploads directory inside the image.
