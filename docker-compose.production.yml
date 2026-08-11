@@ -84,6 +84,11 @@ services:
       # attributed to whoever taps rather than to the PC. Absent/empty → no
       # session is ever a kiosk and every identity takes the employee path.
       KIOSK_EMAILS: ${KIOSK_EMAILS:-}
+      # Push notifications into the HF One portal's notification centre when a
+      # request is submitted. Absent token → no notification is ever sent, same
+      # fail-dark posture as the other integrations here.
+      NOTIFY_INGRESS_TOKEN: ${NOTIFY_INGRESS_TOKEN:-}
+      HF_ERP_BASE_URL: ${HF_ERP_BASE_URL:-https://erp.thehfhotel.org}
     volumes:
       # Persistent storage for receipt photos and transfer screenshots.
       # Mount path matches the apps/api/uploads directory inside the image.

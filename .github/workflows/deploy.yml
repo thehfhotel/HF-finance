@@ -240,6 +240,10 @@ jobs:
           # Kiosk login was verified end to end against production on
           # 2026-08-10: a LINE scan minted a real session via badge 421.
           KIOSK_EMAILS: ${{ secrets.KIOSK_EMAILS || 'theharbourfront.hotel@gmail.com=reception-1,hfville.hotel@gmail.com=hfville-reception-1' }}
+          # Portal notification ingress. Optional: unset means notifications
+          # stay off and nothing else changes.
+          NOTIFY_INGRESS_TOKEN: ${{ secrets.NOTIFY_INGRESS_TOKEN }}
+          HF_ERP_BASE_URL: ${{ secrets.HF_ERP_BASE_URL || 'https://erp.thehfhotel.org' }}
           IMAGE_TAG: sha-${{ github.sha }}
         run: |
           set -euo pipefail
@@ -277,6 +281,10 @@ jobs:
 
           # Shared terminals (email=kiosk-id,…) — a place, not a person
           KIOSK_EMAILS=${KIOSK_EMAILS}
+
+          # HF One portal notifications
+          NOTIFY_INGRESS_TOKEN=${NOTIFY_INGRESS_TOKEN}
+          HF_ERP_BASE_URL=${HF_ERP_BASE_URL}
           EOF
 
       - name: Log in to GHCR (on remote host)
