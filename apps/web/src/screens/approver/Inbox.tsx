@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { AppState, BundleStatus, BundleWithDetails, Theme, User } from '../../lib/types';
+import type { BundleStats } from '../../lib/api';
 import type { Nav } from '../../lib/router';
 import { fmt, formatThaiDate } from '../../lib/format';
 import { FONT_DISPLAY, FONT_UI } from '../../lib/theme';
@@ -15,11 +16,13 @@ interface InboxProps {
   nav: Nav;
   currentUser: User | null;
   onLogout?: () => void;
+  /** Server-computed counts; the list is only a page. */
+  stats?: BundleStats | null;
 }
 
 type TabKey = Extract<BundleStatus, 'pending' | 'approved' | 'paid' | 'rejected'>;
 
-export function Inbox({ theme, state, nav, currentUser, onLogout }: InboxProps) {
+export function Inbox({ theme, state, nav, currentUser, onLogout, stats }: InboxProps) {
   const allBundles: BundleWithDetails[] = state.bundles;
   const pending = allBundles.filter((b) => b.status === 'pending');
   const approved = allBundles.filter((b) => b.status === 'approved');
@@ -40,11 +43,14 @@ export function Inbox({ theme, state, nav, currentUser, onLogout }: InboxProps) 
     0,
   );
 
+  // Counts come from the server. The list is a 50-row page now, so counting it
+  // showed "50" where production holds 1,541 — the tab badge was reporting how
+  // much had been downloaded, not how much exists.
   const tabs: ReadonlyArray<readonly [TabKey, string, number]> = [
-    ['pending', 'รออนุมัติ', pending.length],
-    ['approved', 'อนุมัติแล้ว', approved.length],
-    ['paid', 'จ่ายแล้ว', paid.length],
-    ['rejected', 'ปฏิเสธ', rejected.length],
+    ['pending', 'รออนุมัติ', stats?.pending.count ?? pending.length],
+    ['approved', 'อนุมัติแล้ว', stats?.approved.count ?? approved.length],
+    ['paid', 'จ่ายแล้ว', stats?.paid.count ?? paid.length],
+    ['rejected', 'ปฏิเสธ', stats?.rejected.count ?? rejected.length],
   ];
 
   return (
