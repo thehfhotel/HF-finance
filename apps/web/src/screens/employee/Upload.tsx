@@ -373,6 +373,24 @@ export function Upload({ theme, nav, state, setState, editId }: UploadProps) {
             {saveError}
           </div>
         )}
+        {/* A disabled primary action with no stated reason reads as a broken
+            button: you tap บันทึก, nothing happens, and nothing tells you the
+            amount is still ฿0. Say what is missing. */}
+        {!canSave && !submitting && (
+          <div
+            style={{
+              fontFamily: FONT_UI,
+              fontSize: 12,
+              color: theme.inkSofter,
+              marginBottom: 8,
+              textAlign: 'center',
+            }}
+          >
+            {editId == null && !hasPhoto
+              ? 'ถ่ายรูปใบเสร็จก่อน แล้วใส่จำนวนเงิน'
+              : 'ใส่จำนวนเงินเพื่อบันทึก'}
+          </div>
+        )}
         <PrimaryButton theme={theme} disabled={!canSave} onClick={handleSave}>
           {submitting ? 'กำลังบันทึก...' : `บันทึก · ${amount ? fmt(parseFloat(amount) || 0) : '฿0.00'}`}
         </PrimaryButton>
