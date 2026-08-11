@@ -6,7 +6,7 @@ import { prisma } from './db';
 import { meRoutes } from './routes/me';
 import { receiptRoutes } from './routes/receipts';
 import { bundleRoutes } from './routes/bundles';
-import { authCfRoutes } from './routes/auth_cf';
+import { authCfRoutes, hasValidCfIdentity } from './routes/auth_cf';
 import { authCardRoutes } from './routes/auth_card';
 import { adminRoutes } from './routes/admin';
 
@@ -96,8 +96,21 @@ const app = new Elysia()
   // We hand-roll this instead of @elysiajs/static — that plugin enumerates
   // the directory once at boot and breaks on files added later (e.g. the
   // notion-import backfill, future receipt uploads).
-  .get('/uploads/:filename', async ({ params, query, set, status }) => {
+  .get('/uploads/:filename', async ({ params, query, headers, set, status }) => {
     if (!SAFE_FILENAME.test(params.filename)) {
+      return status(404, 'Not found');
+    }
+
+    // Receipt photos and bank-transfer slips. Until now the only thing in front
+    // of them was the Cloudflare Access wall on the hostname: the route itself
+    // checked nothing, so any leaked URL was the file. Filenames are a 16-hex
+    // hash, but they travel in browser history, referrers, proxy logs and
+    // shared links.
+    //
+    // Verifying the Access assertion here makes the origin enforce what the
+    // edge does, so a URL that escapes is useless without a session. 404 rather
+    // than 401 — an unauthenticated caller learns nothing about what exists.
+    if (!(await hasValidCfIdentity(headers['cf-access-jwt-assertion']))) {
       return status(404, 'Not found');
     }
     const path = resolve(UPLOADS_DIR, params.filename);

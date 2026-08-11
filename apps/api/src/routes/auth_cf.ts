@@ -81,6 +81,34 @@ function getCfAccessConfig(): CfAccessConfig | { missing: string[] } {
 // caches + cooldown-throttles the JWKS internally, so a single instance is fine.
 const jwks = createRemoteJWKSet(new URL(CF_ACCESS_CERTS_URL));
 
+/**
+ * Is this request carrying a valid Cloudflare Access identity?
+ *
+ * Used to gate /uploads, which serves receipt photos and bank-transfer slips.
+ * Those cannot be gated on the app JWT: a browser does not attach an
+ * Authorization header to an <img> request, so the token never arrives. The
+ * Access assertion does — the edge injects it on every proxied request,
+ * including image loads — and it is the same signed identity this app already
+ * trusts to mint sessions.
+ *
+ * Returns false when Access is not configured, so a dev machine without
+ * Cloudflare in front still serves its own uploads.
+ */
+export async function hasValidCfIdentity(assertion: string | undefined): Promise<boolean> {
+  if (!CF_ACCESS_AUD) return true; // not configured (dev) — nothing to verify against
+  if (!assertion) return false;
+  try {
+    await jwtVerify(assertion, jwks, {
+      issuer: `https://${CF_ACCESS_TEAM_DOMAIN}`,
+      audience: CF_ACCESS_AUD,
+      algorithms: ['RS256'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ─── Email → User resolution ─────────────────────────────────────────────────
 
 const EMP_EMAIL_DOMAIN = 'emp.thehfhotel.org';
