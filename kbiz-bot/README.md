@@ -31,6 +31,38 @@ npm run add-payroll -- <file> --observe
                      # can inspect entries before committing
 ```
 
+### Ad-hoc transfer to another person's account (fundtranfer-other)
+
+A single transfer to an unregistered account — used to pay a reimbursement to
+one recipient. Unlike the payroll flow this is not a batch and needs no
+registered beneficiary; it carries a free-text memo and an optional file
+attachment, and it captures the e-slip afterwards (the audit artifact the
+payroll flows never produced).
+
+```sh
+cp transfer-other.config.example.json transfer-other.config.json
+# fill in sourceAccount + the recipient's bank/account (kept out of git)
+
+npm run transfer-other-probe
+                     # READ-ONLY. Opens the transfer page in your session and
+                     # dumps its inputs/selects/buttons so the flow's selectors
+                     # can be pinned to the real DOM. Run this first.
+
+npm run transfer-other -- --amount 1234.50 --memo "REIMB-08 Revew"
+                     # PREVIEW (default): fills the form, stops at KBIZ's review
+                     # screen, screenshots it. Nothing submitted, no phone push.
+
+npm run transfer-other -- --amount 1234.50 --memo "REIMB-08 Revew" --confirm
+                     # arms the transfer; then you approve on your K BIZ phone
+                     # app. On success the slip is saved to ../data/slips/.
+```
+
+**Two gates stand between the script and moved money:** `--confirm` (absent =
+preview only) and your physical phone tap (KBIZ pushes the approval to the app;
+the script waits, it never approves). A `maxTransfer` ceiling in the config is a
+third backstop against a wrong amount. Screenshots (filled form, review, slip)
+land in `../data/slips/`.
+
 ## Session model
 
 All scripts go through `src/lib/session.ts`:
@@ -56,6 +88,8 @@ confirmation flows that still need a phone tap.
 ## Files not in git
 
 - `.env` — credentials
+- `transfer-other.config.json` — the payee book + source account (PII).
+  Only `transfer-other.config.example.json` is committed.
 - `browser-data/` — persistent Chromium profile (cookies, localStorage)
 - `storageState.json` (legacy, no longer written)
-- traces, screenshots, xlsx test files
+- traces, screenshots, xlsx test files, `../data/slips/` e-slips
