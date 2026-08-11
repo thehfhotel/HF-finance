@@ -110,7 +110,7 @@ await withSession(async (_ctx, page) => {
     amount,
     memo,
     attachmentPath,
-    category: config.category,
+    kbizCategoryId: config.kbizCategoryId,
     slug: key,
     maxTransfer: config.maxTransfer,
     confirm,

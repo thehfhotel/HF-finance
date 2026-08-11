@@ -11,13 +11,17 @@
     "transfer-other": "node --import tsx --env-file=.env src/transfer-other.ts",
     "transfer-other-probe": "node --import tsx --env-file=.env src/transfer-other-probe.ts",
     "process-queue": "node --import tsx --env-file=.env src/process-queue.ts",
-    "install-browser": "bunx playwright install chromium"
+    "install-browser": "bunx playwright install chromium",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test"
   },
   "dependencies": {
     "fflate": "^0.8.2",
     "playwright": "1.59.1"
   },
   "devDependencies": {
-    "tsx": "^4.21.0"
+    "@types/node": "^26.2.0",
+    "tsx": "^4.21.0",
+    "typescript": "^7.0.2"
   }
 }

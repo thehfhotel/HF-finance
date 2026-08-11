@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
-import { gotoAuthenticated } from "../lib/session";
-import { captureSlip, ensureSlipsDir, type SlipCapture } from "../lib/capture-slip";
+import { gotoAuthenticated, isUnauthenticatedUrl } from "../lib/session";
+import { captureSlip, ensureSlipsDir, SLIPS_DIR, type SlipCapture } from "../lib/capture-slip";
 
 /**
  * Ad-hoc single transfer on KBIZ's "โอนเงินไปบัญชีบุคคลอื่น" page
@@ -31,7 +31,6 @@ import { captureSlip, ensureSlipsDir, type SlipCapture } from "../lib/capture-sl
  */
 
 const URL = "https://kbiz.kasikornbank.com/menu/fundtranfer/fundtranfer/fundtranfer-other";
-const SLIP_DIR = "../data/slips";
 const APPROVAL_TIMEOUT_MS = 5.5 * 60_000; // KBIZ allows 5:58 for the phone tap
 
 export interface Payee {
@@ -52,8 +51,14 @@ export interface TransferOtherInput {
   /** Raw memo; sanitized to KBIZ's allowed set before typing. May be "". */
   memo: string;
   attachmentPath?: string;
-  /** Transfer category label to select, e.g. "Refund". Omit to leave default. */
-  category?: string;
+  /**
+   * KBIZ's own category picker anchor id (e.g. "30" = Refund) — see
+   * KBIZ_CATEGORIES in reimbursement's packages/shared. Selected by id, never
+   * by label text: the picker's id is what the anchor actually carries, and a
+   * label-text click was the live-verified bug that silently left the
+   * category on "Other". Omit to leave KBIZ's default.
+   */
+  kbizCategoryId?: string;
   slug: string;
   maxTransfer: number;
   /** false = preview (stop BEFORE Next). true = click Next (arm the phone push). */
@@ -116,7 +121,7 @@ async function selectFavoritePayee(page: Page, payee: Payee, slug: string): Prom
   }
   console.log(`   scanned ${n} saved rows, ${matches.length} triple-verified`);
   if (matches.length !== 1) {
-    await page.screenshot({ path: `${SLIP_DIR}/_picker-${slug}.png`, fullPage: true }).catch(() => {});
+    await page.screenshot({ path: `${SLIPS_DIR}/_picker-${slug}.png`, fullPage: true }).catch(() => {});
     throw new Error(
       `Favorite "${nickname}" (${payee.accountNo}, ${payee.bank}): expected exactly one matching ` +
         `saved account, found ${matches.length}. Refusing to select.`,
@@ -129,10 +134,49 @@ async function selectFavoritePayee(page: Page, payee: Payee, slug: string): Prom
 
   const filled = await page.locator('input[name="accountTo"]').first().inputValue().catch(() => "");
   if (digitsOnly(filled) !== acctD) {
-    await page.screenshot({ path: `${SLIP_DIR}/_toMismatch-${slug}.png`, fullPage: true }).catch(() => {});
+    await page.screenshot({ path: `${SLIPS_DIR}/_toMismatch-${slug}.png`, fullPage: true }).catch(() => {});
     throw new Error(`After selecting "${nickname}", To account is "${filled}", expected ${payee.accountNo}.`);
   }
   console.log(`   ✓ To account = ${filled}`);
+}
+
+/**
+ * Select KBIZ's transfer category by picker anchor id — never by label text
+ * (a live-verified bug: clicking on visible text left the category on
+ * "Other" when the popup rendered a translated/mismatched label). Category is
+ * metadata, never a transfer-blocker: any step failing just warns and moves
+ * on, it never throws.
+ */
+async function selectCategory(page: Page, kbizCategoryId: string): Promise<void> {
+  try {
+    const toggle = page.locator("a.popup-content-type").first();
+    if (!(await toggle.isVisible().catch(() => false))) {
+      console.warn(`⚠ category toggle (a.popup-content-type) not found — leaving category as-is (wanted id "${kbizCategoryId}").`);
+      return;
+    }
+    const before = (await toggle.innerText().catch(() => "")).trim();
+
+    await toggle.click();
+    const popup = page.locator(".content-type-list, .type-list").first();
+    await popup.waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
+
+    const opt = page.locator(`a[id="${kbizCategoryId}"]:visible`).first();
+    if (!(await opt.count())) {
+      console.warn(`⚠ no visible category anchor with id "${kbizCategoryId}" — leaving category as-is.`);
+      return;
+    }
+    await opt.click();
+    await page.waitForTimeout(500);
+
+    const after = (await toggle.innerText().catch(() => "")).trim();
+    if (after === before) {
+      console.warn(`⚠ category text unchanged after selecting id "${kbizCategoryId}" (still "${after}") — click may not have registered.`);
+    } else {
+      console.log(`   ✓ category → "${after}"`);
+    }
+  } catch (e) {
+    console.warn(`⚠ category selection failed, continuing without it: ${(e as Error).message}`);
+  }
 }
 
 /** Type the bank + account for a payee NOT in the saved list. */
@@ -171,7 +215,7 @@ async function selectCustomAccount(page: Page, payee: Payee, slug: string): Prom
 
   const filled = await acct.inputValue().catch(() => "");
   if (digitsOnly(filled) !== acctD) {
-    await page.screenshot({ path: `${SLIP_DIR}/_toMismatch-${slug}.png`, fullPage: true }).catch(() => {});
+    await page.screenshot({ path: `${SLIPS_DIR}/_toMismatch-${slug}.png`, fullPage: true }).catch(() => {});
     throw new Error(`Typed account did not stick: field shows "${filled}", expected ${payee.accountNo}.`);
   }
   console.log(`   ✓ To account = ${filled}`);
@@ -209,74 +253,130 @@ export async function runTransferOtherFlow(
     return { success: false, error: (e as Error).message };
   }
 
-  console.log("→ Fill amount");
-  const amt = page.locator('input[name="amount"]').first();
-  await amt.click().catch(() => {});
-  await amt.fill(amountStr);
-  await amt.press("Tab").catch(() => {});
-
-  if (memo) {
-    console.log("→ Fill memo");
-    const m = page.locator('input[name="memo"]').first();
-    await m.fill(memo);
-    await m.press("Tab").catch(() => {});
-  }
-
-  if (input.category) {
-    console.log(`→ Set category "${input.category}"`);
-    const catToggle = page.locator("a.popup-content-type, .category").first();
-    if (await catToggle.isVisible().catch(() => false)) {
-      await catToggle.click().catch(() => {});
-      await page.waitForTimeout(500);
-      const opt = page.locator(`a:has-text("${input.category}"):visible`).first();
-      if (await opt.isVisible().catch(() => false)) await opt.click().catch(() => {});
-      await page.waitForTimeout(300);
-    }
-  }
-
-  if (input.attachmentPath) {
-    console.log("→ Attach file");
-    const fileInput = page.locator('input[name="uploadfile"], input[type="file"]').first();
-    if (!(await fileInput.count())) throw new Error("No file input found for the attachment.");
-    await fileInput.setInputFiles(input.attachmentPath);
-    await page.waitForTimeout(1_000);
-  }
-
-  const formShot = `${SLIP_DIR}/_form-${input.slug}.png`;
-  await page.screenshot({ path: formShot, fullPage: true }).catch(() => {});
-
+  // Built here (never throws — a Locator is a lazy handle, not a DOM query)
+  // so it's reachable both inside the try below (preview return) and after
+  // it closes (the Next click that arms the phone push).
   const next = page
     .locator('a.btn-gradient:has-text("Next"), a.btn:has-text("Next"), button:has-text("Next"), a:has-text("ต่อไป")')
     .filter({ hasNot: page.locator(".disabled-button") })
     .first();
 
-  // PREVIEW: stop here. "Next" arms the push, so we never click it in preview.
-  if (!input.confirm) {
-    const ready = await next.isVisible().catch(() => false);
-    console.log(`\n   PREVIEW — filled form captured (${formShot}). Next ${ready ? "is ready" : "NOT ready — check the form"}.`);
-    console.log("   Nothing submitted, no phone push. Re-run with confirm to arm.\n");
-    return { success: true, finalUrl: page.url(), previewOnly: true, formShot };
+  // Everything through the Next-visibility wait can fail closed: nothing has
+  // been submitted to KBIZ yet, so any throw in this block returns
+  // { success: false } with no `outcome` — mapFlowOutcomeToPatch files that
+  // as "failed"/retryable, never "unconfirmed". Only next.click() below
+  // (outside this try) arms the phone push and starts genuine ambiguity.
+  try {
+    console.log("→ Fill amount");
+    const amt = page.locator('input[name="amount"]').first();
+    await amt.click().catch(() => {});
+    await amt.fill(amountStr);
+    await amt.press("Tab").catch(() => {});
+    await page.waitForTimeout(500);
+
+    // fill() proves the DOM call succeeded, not that KBIZ's input mask kept
+    // what we typed — read it back the same way selectFavoritePayee /
+    // selectCustomAccount already verify accountTo, so a mask that reformats
+    // (e.g. drops the decimal point) fails closed instead of arming with the
+    // wrong sum.
+    const filledAmount = await amt.inputValue().catch(() => "");
+    const strippedAmount = filledAmount.replace(/,/g, "").trim();
+    if (strippedAmount !== amountStr) {
+      await page.screenshot({ path: `${SLIPS_DIR}/_amountMismatch-${input.slug}.png`, fullPage: true }).catch(() => {});
+      throw new Error(`Amount did not stick: field shows "${filledAmount}", expected ฿${amountStr}.`);
+    }
+    console.log(`   ✓ amount = ${filledAmount}`);
+
+    if (memo) {
+      console.log("→ Fill memo");
+      const m = page.locator('input[name="memo"]').first();
+      await m.fill(memo);
+      await m.press("Tab").catch(() => {});
+    }
+
+    if (input.kbizCategoryId) {
+      console.log(`→ Set category (id "${input.kbizCategoryId}")`);
+      await selectCategory(page, input.kbizCategoryId);
+    }
+
+    if (input.attachmentPath) {
+      console.log("→ Attach file");
+      // Best-effort, matching html-to-pdf's contract: a voucher problem is
+      // metadata, never a transfer-blocker, so warn and continue instead of
+      // throwing (which would otherwise escape as a mid-flow crash and file
+      // needs-review for a payment that was never even attempted).
+      try {
+        const fileInput = page.locator('input[name="uploadfile"], input[type="file"]').first();
+        if (!(await fileInput.count())) throw new Error("No file input found for the attachment.");
+        await fileInput.setInputFiles(input.attachmentPath);
+        await page.waitForTimeout(1_000);
+      } catch (e) {
+        console.warn(`⚠ attachment failed, continuing without it: ${(e as Error).message}`);
+      }
+    }
+
+    const formShot = `${SLIPS_DIR}/_form-${input.slug}.png`;
+    await page.screenshot({ path: formShot, fullPage: true }).catch(() => {});
+
+    // PREVIEW: stop here. "Next" arms the push, so we never click it in preview.
+    if (!input.confirm) {
+      const ready = await next.isVisible().catch(() => false);
+      console.log(`\n   PREVIEW — filled form captured (${formShot}). Next ${ready ? "is ready" : "NOT ready — check the form"}.`);
+      console.log("   Nothing submitted, no phone push. Re-run with confirm to arm.\n");
+      return { success: true, finalUrl: page.url(), previewOnly: true, formShot };
+    }
+
+    await next.waitFor({ state: "visible", timeout: 15_000 });
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
   }
 
   // CONFIRM: clicking Next sends the phone push.
   console.log("→ Click Next — KBIZ sends the approval push to your phone");
-  await next.waitFor({ state: "visible", timeout: 15_000 });
   await next.click();
   await page.waitForTimeout(2_500);
-  await page.screenshot({ path: `${SLIP_DIR}/_waiting-${input.slug}.png`, fullPage: true }).catch(() => {});
+  await page.screenshot({ path: `${SLIPS_DIR}/_waiting-${input.slug}.png`, fullPage: true }).catch(() => {});
   console.log(`   armed — waiting for your phone tap (up to ${Math.floor(APPROVAL_TIMEOUT_MS / 60000)} min)…`);
 
   // Success is ONLY the final slip page. The waiting screen also contains
   // "successfully", so we key on tokens unique to the success page.
   const SUCCESS_RE = /Transfer successfully|โอนเงินสำเร็จ|ทำรายการสำเร็จ|Transaction ID|TRBS[0-9]{6}/i;
-  const ERROR_RE = /ไม่สำเร็จ|unsuccessful|เกิดข้อผิดพลาด|หมดเวลา|expired|session has expired|signed in on another/i;
+  // KBIZ's own transaction-level rejection text ONLY — the bank explicitly
+  // saying the transfer did not go through. This is the sole condition safe
+  // to file as "confirmed-failed" (nothing moved, safe to retry).
+  //
+  // "เกิดข้อผิดพลาด" is deliberately NOT here: it is KBIZ's generic "an error
+  // occurred" (system/500/maintenance pages say it too), and a generic error
+  // rendered after the push was armed proves nothing about the transaction —
+  // it may still be approvable on the phone. It classifies as unconfirmed via
+  // AMBIGUOUS_RE below, so nothing ever auto-retries against it.
+  const FAILED_RE = /ไม่สำเร็จ|unsuccessful/i;
+  // Generic error page mid-wait: break out early as unconfirmed (fresh
+  // screenshot, human verifies in K BIZ) instead of looping to the timeout.
+  const AMBIGUOUS_RE = /เกิดข้อผิดพลาด/i;
+  // Session-level signals — OUR desktop session died mid-wait (bounced to
+  // /login|/authen, or hit the exact "session expired" text session.ts's
+  // gotoAuthenticated already probes for to mean "re-login", not "transfer
+  // failed"). This proves NOTHING about the pending transaction: the phone
+  // push lives server-side at KBIZ, not in the killed browser session, so it
+  // may already be approved. Must resolve to "unconfirmed" (needs-review,
+  // human checks K BIZ before anyone re-pays), never "confirmed-failed"
+  // (auto-retried by process-queue) — see decision 3 in
+  // docs/adr/0001-kbiz-transfer-automation.md.
+  const SESSION_DEAD_RE = /หมดเวลา|expired|session has expired|signed in on another|session expired or you are signed in/i;
   const started = Date.now();
   let outcome: TransferOutcome = "unconfirmed";
   while (Date.now() - started < APPROVAL_TIMEOUT_MS) {
     await page.waitForTimeout(4_000);
     const txt = (await page.evaluate(() => (document.body as any).innerText).catch(() => "")) as string;
-    if (/\/error|\/login|\/authen/.test(page.url()) || ERROR_RE.test(txt)) { outcome = "confirmed-failed"; break; }
+    if (isUnauthenticatedUrl(page.url()) || SESSION_DEAD_RE.test(txt)) { outcome = "unconfirmed"; break; }
+    // FAILED before SUCCESS: a rejection page may well render a "Transaction
+    // ID" for the failed attempt (which SUCCESS_RE would match), while the
+    // live-verified success page carries none of the failure tokens — the two
+    // ฿1 test transfers classified correctly under exactly this order.
+    if (FAILED_RE.test(txt)) { outcome = "confirmed-failed"; break; }
     if (SUCCESS_RE.test(txt)) { outcome = "success"; break; }
+    if (AMBIGUOUS_RE.test(txt)) { outcome = "unconfirmed"; break; }
     const s = Math.floor((Date.now() - started) / 1000);
     if (s % 20 < 4) console.log(`   …waiting ${s}s`);
   }

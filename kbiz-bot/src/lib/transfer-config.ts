@@ -36,8 +36,12 @@ export interface TransferConfig {
    * — a backstop against a wrong amount. Raise it here, deliberately.
    */
   maxTransfer: number;
-  /** Transfer category to tag in KBIZ, e.g. "Refund". Optional. */
-  category?: string;
+  /**
+   * KBIZ's own category picker anchor id to tag the transfer with (e.g. "30"
+   * = Refund). Selected by id, not label text — see KBIZ_CATEGORIES in
+   * reimbursement's packages/shared for the full id/label table. Optional.
+   */
+  kbizCategoryId?: string;
   /** Payee book, keyed by a short handle passed with --to (e.g. "revew"). */
   recipients: Record<string, RecipientConfig>;
 }
@@ -86,7 +90,7 @@ export function loadTransferConfig(): TransferConfig {
 
   return {
     maxTransfer: typeof c.maxTransfer === "number" && c.maxTransfer > 0 ? c.maxTransfer : 50_000,
-    category: typeof c.category === "string" ? c.category : undefined,
+    kbizCategoryId: typeof c.kbizCategoryId === "string" ? c.kbizCategoryId : undefined,
     recipients,
   };
 }

@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    // DOM is needed for page.evaluate() callback bodies (they type-check as
+    // if running in a browser), even though this whole codebase is a Node
+    // process — Playwright's own pattern, not a sign this runs in a browser.
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true
+  },
+  // Only src/ is type-checked: test/ imports "bun:test", which is a Bun
+  // runtime module with no installed type declarations, and `bun test` type-
+  // strips + runs it directly without needing tsc's blessing.
+  "include": ["src/**/*.ts"]
+}

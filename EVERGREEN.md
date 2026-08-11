@@ -134,3 +134,76 @@ profile (cookies/localStorage); rebuilds preserve the KBIZ session.
 
 After the stack is up, port `3002` on evergreen is exposed via the
 Cloudflare tunnel public hostname (configured in the Cloudflare web console).
+
+## Reimbursement → KBIZ shared queue dir (not yet switched on)
+
+`kbiz-bot` also drives ad-hoc `transfer-other` payments queued by the
+**reimbursement** app (a separate repo/stack) — see
+`docs/adr/0001-kbiz-transfer-automation.md` there. That intent JSON, its
+rendered voucher HTML, and the captured e-slip need to live in a dir shared
+by `kbiz-bot`, `payroll-form`, and `reimbursement-api`, three containers that
+may belong to different compose stacks.
+
+The bot side reads three env vars, each independently defaulted so nothing
+changes until they're set:
+
+| env var           | default (today)      | meaning                                              |
+| ------------------ | --------------------- | ----------------------------------------------------- |
+| `KBIZ_QUEUE_DIR`   | `../data/queue`       | where `process-queue.ts` watches for approved items    |
+| `KBIZ_SLIPS_DIR`   | `../data/slips`       | where captured e-slip screenshots are written          |
+| `KBIZ_SHARED_DIR`  | `../data`             | root a `transfer-other` intent's relative paths (`voucherFile`) resolve against |
+
+`docker-compose.yml` has the switch-over already drafted, commented out, as
+**nested binds** — subpaths of `${KBIZ_QUEUE_HOST_DIR:-/srv/kbiz-queue}`
+mounted OVER `./data/queue`, `./data/slips` and `./data/vouchers` in the
+`kbiz-bot` service, plus the matching `queue` bind in the `payroll` service.
+Every default in-container path keeps working in both containers, so the env
+vars above stay UNSET in production.
+
+> **Why nested binds and not `KBIZ_QUEUE_DIR`:** the bot watches exactly ONE
+> queue dir, and payroll-form writes its `add-payroll` / `transfer-payroll` /
+> `list-registered` items to `/app/data/queue` (its own `QUEUE_DIR` default).
+> Repointing only the bot's `KBIZ_QUEUE_DIR` at a different tree makes it stop
+> reading payroll's queue: every payroll request then sits at "approved"
+> forever with no error anywhere. The nested binds move the PHYSICAL location
+> of the one shared queue while every path both producers use stays the same.
+> Tradeoff accepted: payroll queue items (salary xlsx + results) live in the
+> shared dir and are readable by the reimbursement-api container (same host,
+> same owner, CF-gated apps).
+
+To flip it on:
+
+```sh
+# On evergreen, once (creates the subdirs the contract expects):
+sudo mkdir -p /srv/kbiz-queue/{queue,queue/archive,vouchers,slips}
+sudo chown -R deploy:deploy /srv/kbiz-queue   # or whichever uid the containers run as
+
+# Move the EXISTING payroll queue contents into the shared dir so history and
+# any pending items survive the switch (do this while the stack is stopped):
+docker compose down
+sudo rsync -a data/queue/ /srv/kbiz-queue/queue/
+
+# transfer-other.config.json (the payee book: real bank account numbers) is
+# PII and must NOT live under /srv/kbiz-queue above — that dir is also
+# bind-mounted into reimbursement-api, and reimbursement never sends bank
+# details (see kbiz-bot/README.md). Give it its own kbiz-bot-only dir:
+sudo mkdir -p /srv/kbiz-bot
+sudo cp path/to/kbiz-bot/transfer-other.config.example.json \
+  /srv/kbiz-bot/transfer-other.config.json   # then edit in the real payee(s)
+sudo chown -R deploy:deploy /srv/kbiz-bot
+
+# Uncomment ALL FOUR nested binds (three on kbiz-bot + one on payroll) and the
+# payee-book mount in docker-compose.yml, then also bind-mount /srv/kbiz-queue
+# into reimbursement-api (a different repo/stack) — see that repo's
+# docs/change-requests/CR-2026-08-12-kbiz-payment-automation.md.
+
+docker compose up -d
+```
+
+Until this is done, `transfer-other` queue items simply never appear (nothing
+writes them into `../data/queue` on this side); payroll's own items keep
+flowing through the un-switched `./data/queue`. The payee-book mount matters
+only once `transfer-other` items start arriving:
+`runTransferOtherQueueItem` calls `loadTransferConfig()` on every
+`transfer-other` item, so skipping that mount turns every one of them into an
+immediate, repeating `config: transfer-other.config.json: not found` failure.
