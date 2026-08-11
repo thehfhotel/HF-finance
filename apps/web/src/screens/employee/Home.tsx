@@ -3,7 +3,7 @@ import type { Nav } from '../../lib/router';
 import { fmt, fmtN } from '../../lib/format';
 import { FONT_DISPLAY, FONT_UI } from '../../lib/theme';
 import { AppBar } from '../../components/AppBar';
-import { Avatar, Card, Money, SectionHeader } from '../../components/primitives';
+import { Avatar, Card, Money, PrimaryButton, SectionHeader } from '../../components/primitives';
 import { Icon } from '../../components/icons';
 import { FONT_UI as FONT } from '../../lib/theme';
 import { ReceiptPhoto } from '../../components/Receipts';
@@ -201,11 +201,19 @@ export function Home({ theme, state, nav, currentUser, isApprover, onLogout }: H
 
       {/* Drafts */}
       <div style={{ padding: '0 20px' }}>
-        <SectionHeader
-          theme={theme}
-          title={`รายการใหม่ · ${loose.length}`}
-          action={loose.length >= 1 ? <span onClick={() => nav({ name: 'bundle-new' })}>รวมชุด →</span> : null}
-        />
+        <SectionHeader theme={theme} title={`รายการใหม่ · ${loose.length}`} />
+
+        {/* Submitting was hidden behind a "รวมชุด →" link in the section header,
+            which is where you put a filter, not the main action of the screen.
+            Everything above it is preparation; this is the step that actually
+            files the expense, so it gets a real button. */}
+        {loose.length >= 1 && (
+          <div style={{ marginBottom: 14 }}>
+            <PrimaryButton theme={theme} onClick={() => nav({ name: 'bundle-new' })}>
+              {`เลือกและส่งขออนุมัติ · ${loose.length} รายการ`}
+            </PrimaryButton>
+          </div>
+        )}
 
         {loose.length === 0 && (
           <Card theme={theme} padding={28}>

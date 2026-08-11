@@ -39,6 +39,12 @@ export function BundleBuilder({ theme, state, nav, setState, preselectId }: Bund
   // Only loose receipts are submittable — a stale preselect (e.g. a receipt
   // that got bundled elsewhere) must not poison the request.
   const selectedLoose = loose.filter((r) => selected.has(r.id));
+  // Ticking a month of receipts one at a time is the slowest part of submitting,
+  // and the common case is "all of them".
+  const allSelected = loose.length > 0 && loose.every((r) => selected.has(r.id));
+  const toggleSelectAll = (): void => {
+    setSelected(allSelected ? new Set() : new Set(loose.map((r) => r.id)));
+  };
   const total = selectedLoose.reduce((s, r) => s + r.amount, 0);
 
   const toggle = (id: string) => {
@@ -102,7 +108,20 @@ export function BundleBuilder({ theme, state, nav, setState, preselectId }: Bund
       </div>
 
       <div style={{ padding: '0 20px' }}>
-        <SectionHeader theme={theme} title={`ใบเสร็จ · ${selectedLoose.length} จาก ${loose.length}`} />
+        <SectionHeader
+          theme={theme}
+          title={`ใบเสร็จ · ${selectedLoose.length} จาก ${loose.length}`}
+          action={
+            loose.length > 0 ? (
+              <span
+                onClick={toggleSelectAll}
+                style={{ color: theme.accent, fontWeight: 600, cursor: 'pointer' }}
+              >
+                {allSelected ? 'ล้างที่เลือก' : 'เลือกทั้งหมด'}
+              </span>
+            ) : null
+          }
+        />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {loose.map((r) => (
             <SelectableReceiptRow

@@ -705,7 +705,7 @@ function renderScreen({ route, theme, state, setState, reqState, reqSetState, na
   if (route.name === 'approver-pay')
     return <Pay theme={theme} state={state} nav={nav} bundleId={route.id} setState={setState} />;
   if (route.name === 'approver-home')
-    return <Inbox theme={theme} state={state} nav={nav} currentUser={currentUser} onLogout={onLogout} />;
+    return <Inbox theme={theme} state={state} nav={nav} currentUser={currentUser} onLogout={onLogout} stats={stats} />;
   if (route.name === 'overview')
     return <Overview theme={theme} state={state} nav={nav} currentUser={currentUser} stats={stats} />;
 
@@ -725,7 +725,7 @@ function renderScreen({ route, theme, state, setState, reqState, reqSetState, na
         onLogout={onLogout}
       />
     );
-  return <Inbox theme={theme} state={state} nav={nav} currentUser={currentUser} onLogout={onLogout} />;
+  return <Inbox theme={theme} state={state} nav={nav} currentUser={currentUser} onLogout={onLogout} stats={stats} />;
 }
 
 function pathForRoute(route: Route): string {
