@@ -25,7 +25,9 @@ type TabKey = Extract<BundleStatus, 'pending' | 'approved' | 'paid' | 'rejected'
 export function Inbox({ theme, state, nav, currentUser, onLogout, stats }: InboxProps) {
   const allBundles: BundleWithDetails[] = state.bundles;
   const pending = allBundles.filter((b) => b.status === 'pending');
-  const approved = allBundles.filter((b) => b.status === 'approved');
+  // 'paying' bundles surface on the approved tab (with their own badge) —
+  // there is no separate paying bucket in this console.
+  const approved = allBundles.filter((b) => b.status === 'approved' || b.status === 'paying');
   const paid = allBundles.filter((b) => b.status === 'paid');
   const rejected = allBundles.filter((b) => b.status === 'rejected');
   const [tab, setTab] = useState<TabKey>('pending');
@@ -48,7 +50,10 @@ export function Inbox({ theme, state, nav, currentUser, onLogout, stats }: Inbox
   // much had been downloaded, not how much exists.
   const tabs: ReadonlyArray<readonly [TabKey, string, number]> = [
     ['pending', 'รออนุมัติ', stats?.pending.count ?? pending.length],
-    ['approved', 'อนุมัติแล้ว', stats?.approved.count ?? approved.length],
+    // 'approved' merges 'paying' bundles into this tab's list (above), so the
+    // badge has to merge the same two server slices or it disagrees with the
+    // rows underneath it.
+    ['approved', 'อนุมัติแล้ว', stats ? stats.approved.count + stats.paying.count : approved.length],
     ['paid', 'จ่ายแล้ว', stats?.paid.count ?? paid.length],
     ['rejected', 'ปฏิเสธ', stats?.rejected.count ?? rejected.length],
   ];

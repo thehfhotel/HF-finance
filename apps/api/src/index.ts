@@ -9,6 +9,7 @@ import { bundleRoutes } from './routes/bundles';
 import { authCfRoutes, hasValidCfIdentity } from './routes/auth_cf';
 import { authCardRoutes } from './routes/auth_card';
 import { adminRoutes } from './routes/admin';
+import { startKbizPoller } from './kbiz-poller';
 
 const PORT = Number(process.env.API_PORT ?? 3001);
 const UPLOADS_DIR = resolve(process.cwd(), 'uploads');
@@ -158,5 +159,11 @@ const app = new Elysia()
   .listen(PORT);
 
 console.log(`API listening on http://localhost:${PORT}`);
+
+// Reconcile finished KBIZ payments out of the shared queue directory. Starts
+// only when that directory is actually mounted, so a dev machine (and any host
+// without the mount) runs exactly as before. Not awaited: the server is already
+// listening, and a queue that cannot be read must never delay /health.
+void startKbizPoller();
 
 export type App = typeof app;

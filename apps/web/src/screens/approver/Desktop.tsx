@@ -3,6 +3,7 @@ import type { ChangeEvent, CSSProperties, ReactNode } from 'react';
 import type { AppState, BundleStatus, BundleWithDetails, Receipt, Theme, User } from '../../lib/types';
 import type { Route } from '../../lib/router';
 import { fmt, fmt0, fmtN, formatThaiDate } from '../../lib/format';
+import { isPaymentStuck } from '../../lib/stats';
 import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../../lib/theme';
 import { api, payFormFromFields } from '../../lib/api';
 import { dataUrlToFile } from '../../lib/photoUpload';
@@ -20,9 +21,17 @@ import { Toast, useToast } from '../../components/Toast';
 
 const TABLE_GRID_COLUMNS = '1.2fr 1fr 1fr 100px';
 const DETAIL_MAX_WIDTH = 840;
+/** How often to re-fetch the selected bundle while it's 'paying' — the panel
+ *  promises to update itself once the transfer settles, so it has to poll. */
+const PAYMENT_POLL_MS = 8000;
 
-/** 'overview' is a pane, not a bundle status — it replaces the list+detail columns. */
-type FilterKey = Exclude<BundleStatus, 'draft'> | 'overview';
+/**
+ * 'overview' is a pane, not a bundle status — it replaces the list+detail
+ * columns. 'paying' is deliberately excluded too: it has no sidebar bucket of
+ * its own (see Bundle status 'paying' in packages/shared) and instead surfaces
+ * inside the 'approved' pane with its own badge.
+ */
+type FilterKey = Exclude<BundleStatus, 'draft' | 'paying'> | 'overview';
 
 interface DesktopApproverProps {
   theme: Theme;
@@ -49,7 +58,10 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
-  const [confirmState, setConfirmState] = useState<{ open: boolean; kind: 'approve' | 'pay' | 'reject' }>({
+  const [confirmState, setConfirmState] = useState<{
+    open: boolean;
+    kind: 'approve' | 'pay' | 'reject' | 'pay-kbiz' | 'retry' | 'force-retry';
+  }>({
     open: false,
     kind: 'approve',
   });
@@ -58,7 +70,8 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
   const allBundles: BundleWithDetails[] = state.bundles;
 
   const pendingBundles = allBundles.filter((b) => b.status === 'pending');
-  const approvedBundles = allBundles.filter((b) => b.status === 'approved');
+  // 'paying' bundles ride along on the approved pane — see the FilterKey note.
+  const approvedBundles = allBundles.filter((b) => b.status === 'approved' || b.status === 'paying');
   const paidBundles = allBundles.filter((b) => b.status === 'paid');
   const rejectedBundles = allBundles.filter((b) => b.status === 'rejected');
 
@@ -90,6 +103,23 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
       bundles: s.bundles.map((x) => (x.id === updated.id ? updated : x)),
     }));
   };
+
+  // The in-flight panel tells the approver it will update itself once the
+  // KBIZ transfer settles — poll the selected bundle while that's true, or
+  // the promise is a lie until they navigate away and back.
+  useEffect(() => {
+    if (selectedBundle?.status !== 'paying') return;
+    const id = selectedBundle.id;
+    const timer = window.setInterval(() => {
+      api.bundles
+        .get(id)
+        .then(applyServerUpdate)
+        .catch(() => {
+          // Transient network hiccup — the next tick tries again.
+        });
+    }, PAYMENT_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [selectedBundle?.id, selectedBundle?.status]);
 
   const handleApprove = async (): Promise<void> => {
     if (!selectedBundle || submitting) return;
@@ -157,14 +187,57 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
     setSubmitting(true);
     try {
       const proofFile = await dataUrlToFile(proof, 'proof.jpg');
+      // A 'paying' bundle closed by hand overrules the automation — either it
+      // came back needing verification, or it is stranded with no result at
+      // all. The API refuses the flag on any other status and audits the
+      // override, so it is safe to send whenever the bundle is in flight.
       const updated = await api.bundles.pay(
         selectedBundle.id,
-        payFormFromFields(transferRefInput.trim(), proofFile),
+        payFormFromFields(transferRefInput.trim(), proofFile, {
+          force: selectedBundle.status === 'paying',
+        }),
       );
       applyServerUpdate(updated);
       setConfirmState((s) => ({ ...s, open: false }));
       closePaySheet();
       showToast('บันทึกการจ่ายสำเร็จ');
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
+      setConfirmState((s) => ({ ...s, open: false }));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handlePayViaKbiz = async (): Promise<void> => {
+    if (!selectedBundle || submitting) return;
+    setActionError(null);
+    setSubmitting(true);
+    try {
+      const updated = await api.bundles.payViaKbiz(selectedBundle.id);
+      applyServerUpdate(updated);
+      setConfirmState((s) => ({ ...s, open: false }));
+      showToast('ส่งคำสั่งโอนแล้ว — ยืนยันบนแอป K BIZ ในมือถือ');
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
+      setConfirmState((s) => ({ ...s, open: false }));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // `force` comes from the stuck-payment action, where the approver has just
+  // been told to check K BIZ first: it overrules an intent kbiz-bot still owns.
+  // Without it the API releases only what the queue proves never armed.
+  const handlePaymentRetry = async (force = false): Promise<void> => {
+    if (!selectedBundle || submitting) return;
+    setActionError(null);
+    setSubmitting(true);
+    try {
+      const updated = await api.bundles.paymentRetry(selectedBundle.id, { force });
+      applyServerUpdate(updated);
+      setConfirmState((s) => ({ ...s, open: false }));
+      showToast('ย้อนกลับไปสถานะอนุมัติแล้ว — ลองโอนผ่าน KBIZ ใหม่ได้');
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
       setConfirmState((s) => ({ ...s, open: false }));
@@ -195,6 +268,7 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
         // Destinations that live on other screens hand off; the rest are panes
         // of this one, so the sidebar itself never changes shape.
         if (key === 'employees') return onNavigate?.({ name: 'admin-employees' });
+        if (key === 'admin-kbiz') return onNavigate?.({ name: 'admin-kbiz' });
         // Your own requests live on the requestor console; the menu there is
         // this same component, so only the highlighted row changes — and the
         // pane it opens is the one that was actually clicked.
@@ -217,12 +291,15 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
             bundles={allBundles}
             stats={stats}
             onOpenBundle={(id) => {
-              // Jump into the status list the bundle actually lives in, with it selected.
+              // Jump into the status list the bundle actually lives in, with it
+              // selected. 'paying' has no pane of its own — it lives on 'approved'.
               const target = allBundles.find((b) => b.id === id);
-              if (target && target.status !== 'draft') setFilter(target.status);
+              if (target && target.status !== 'draft') {
+                setFilter(target.status === 'paying' ? 'approved' : target.status);
+              }
               setSelectedId(id);
             }}
-            onSelectFilter={(next) => selectFilter(next)}
+            onSelectFilter={(next) => selectFilter(next === 'paying' ? 'approved' : next)}
           />
         </div>
       ) : (
@@ -262,6 +339,9 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
                   : undefined
               }
               onPay={() => setPayOpen(true)}
+              onPayViaKbiz={() => setConfirmState({ open: true, kind: 'pay-kbiz' })}
+              onPaymentRetry={() => setConfirmState({ open: true, kind: 'retry' })}
+              onForcePaymentRetry={() => setConfirmState({ open: true, kind: 'force-retry' })}
               onPhoto={(i) => setPhotoIdx(i)}
               submitting={submitting}
               actionError={actionError}
@@ -313,7 +393,13 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
               ? `อนุมัติคำขอนี้?`
               : confirmState.kind === 'reject'
                 ? `ปฏิเสธคำขอนี้?`
-                : `ยืนยันการจ่าย ฿${fmtN(total)}?`
+                : confirmState.kind === 'pay'
+                  ? `ยืนยันการจ่าย ฿${fmtN(total)}?`
+                  : confirmState.kind === 'pay-kbiz'
+                    ? `โอน ฿${fmtN(total)} ผ่าน KBIZ?`
+                    : confirmState.kind === 'force-retry'
+                      ? `ปล่อยกลับไปสถานะอนุมัติ?`
+                      : `ลองโอนใหม่?`
           }
           message={
             confirmState.kind === 'approve'
@@ -356,16 +442,49 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
                     />
                   </span>
                 )
-                : `จ่ายให้ ${selectedBundle.submitter.name} — การดำเนินการนี้ไม่สามารถยกเลิกได้`
+                : confirmState.kind === 'pay-kbiz'
+                  ? (
+                    <span>
+                      <span style={{ display: 'block', marginBottom: 8 }}>
+                        โอนเข้าบัญชีที่บันทึกไว้ใน KBIZ ให้ {selectedBundle.submitter.name}
+                      </span>
+                      <span style={{ display: 'block', color: theme.warn }}>
+                        ต้องกดยืนยันในแอป K BIZ บนมือถือ — หากไม่ยืนยัน การโอนจะไม่สำเร็จ
+                      </span>
+                    </span>
+                  )
+                  : confirmState.kind === 'retry'
+                    ? 'ตรวจสอบในแอป K BIZ แล้วว่ารายการก่อนหน้าไม่สำเร็จ'
+                    : confirmState.kind === 'force-retry'
+                      ? 'ยืนยันว่าเปิดแอป K BIZ ดูแล้วและยังไม่มีการโอนออกจริง — ถ้าโอนไปแล้วให้กด "โอนไปแล้ว — แนบสลิปเอง" แทน ไม่อย่างนั้นอาจโอนซ้ำ'
+                      : `จ่ายให้ ${selectedBundle.submitter.name} — การดำเนินการนี้ไม่สามารถยกเลิกได้`
           }
-          confirmLabel={confirmState.kind === 'approve' ? 'อนุมัติ' : confirmState.kind === 'reject' ? 'ปฏิเสธ' : 'ยืนยัน'}
-          danger={confirmState.kind === 'reject'}
+          confirmLabel={
+            confirmState.kind === 'approve'
+              ? 'อนุมัติ'
+              : confirmState.kind === 'reject'
+                ? 'ปฏิเสธ'
+                : confirmState.kind === 'pay-kbiz'
+                  ? 'โอนผ่าน KBIZ'
+                  : confirmState.kind === 'retry'
+                    ? 'ลองใหม่'
+                    : confirmState.kind === 'force-retry'
+                      ? 'ยังไม่ได้โอน'
+                      : 'ยืนยัน'
+          }
+          danger={confirmState.kind === 'reject' || confirmState.kind === 'force-retry'}
           loading={submitting}
           onConfirm={() => {
             if (confirmState.kind === 'approve') {
               void handleApprove();
             } else if (confirmState.kind === 'reject') {
               void handleReject(rejectReason);
+            } else if (confirmState.kind === 'pay-kbiz') {
+              void handlePayViaKbiz();
+            } else if (confirmState.kind === 'retry') {
+              void handlePaymentRetry();
+            } else if (confirmState.kind === 'force-retry') {
+              void handlePaymentRetry(true);
             } else {
               void confirmPay();
             }
@@ -518,6 +637,13 @@ function BundleListRow({ theme, bundle, sum, isSelected, onClick }: BundleListRo
           {formatThaiDate(bundle.submittedAt)}
         </div>
       </div>
+      {/* The approved pane also holds 'paying' bundles (no sidebar bucket of
+          its own) — a badge is the only thing that tells the two apart. */}
+      {bundle.status === 'paying' && (
+        <div style={{ marginTop: 4 }}>
+          <StatusPill status="paying" theme={theme} size="sm" />
+        </div>
+      )}
       <div
         style={{
           fontFamily: FONT_UI,
@@ -554,6 +680,13 @@ interface DesktopDetailProps {
   /** Present only when the signed-in user owns this pending request. */
   onWithdraw?: () => void;
   onPay: () => void;
+  /** Opens the "โอน ... ผ่าน KBIZ?" confirm dialog. */
+  onPayViaKbiz: () => void;
+  /** Opens the "ลองโอนใหม่?" confirm dialog. */
+  onPaymentRetry: () => void;
+  /** Opens the stronger "ปล่อยกลับไปสถานะอนุมัติ?" dialog, for a payment the
+   *  bot never reported back on at all. */
+  onForcePaymentRetry: () => void;
   onPhoto: (i: number) => void;
   submitting: boolean;
   actionError: string | null;
@@ -568,11 +701,17 @@ function DesktopDetail({
   onReject,
   onWithdraw,
   onPay,
+  onPayViaKbiz,
+  onPaymentRetry,
+  onForcePaymentRetry,
   onPhoto,
   submitting,
   actionError,
 }: DesktopDetailProps): JSX.Element {
   const [whole, frac] = fmtN(total).split('.');
+  // Recomputed on every render, and the pane re-renders on each payment poll,
+  // so an in-flight bundle grows its own way out while the approver watches.
+  const stuck = isPaymentStuck(bundle);
   const initials = bundle.submitter.name
     .split(' ')
     .map((s) => s[0] ?? '')
@@ -922,11 +1061,107 @@ function DesktopDetail({
         <ActionBar theme={theme}>
           <div style={{ flex: 1, fontFamily: FONT_UI, fontSize: 13, color: theme.inkSoft }}>
             อนุมัติเมื่อ {formatThaiDate(bundle.approvedAt)} โดย {bundle.approver?.name ?? ''} — รอโอนเงิน
+            {bundle.paymentError && (
+              <div style={{ marginTop: 6, color: theme.danger }}>
+                โอนผ่าน KBIZ ครั้งก่อนไม่สำเร็จ: {bundle.paymentError}
+              </div>
+            )}
           </div>
-          <div style={{ minWidth: 240 }}>
-            <PrimaryButton theme={theme} onClick={onPay}>
-              บันทึกจ่าย & แนบสลิป
-            </PrimaryButton>
+          {actionError && (
+            <span style={{ fontFamily: FONT_UI, fontSize: 13, color: theme.danger }}>{actionError}</span>
+          )}
+          {/* Manual pay always stays available; KBIZ becomes primary (and
+              manual demotes to a ghost button) only once the bundle actually
+              has a mapped payee to fire the bot at. */}
+          {bundle.kbizPayable && (
+            <div style={{ minWidth: 200 }}>
+              <PrimaryButton theme={theme} onClick={onPayViaKbiz}>
+                โอนผ่าน KBIZ
+              </PrimaryButton>
+            </div>
+          )}
+          <div style={{ minWidth: bundle.kbizPayable ? 200 : 240 }}>
+            {bundle.kbizPayable ? (
+              <GhostButton theme={theme} full onClick={onPay}>
+                บันทึกจ่าย & แนบสลิปเอง
+              </GhostButton>
+            ) : (
+              <PrimaryButton theme={theme} onClick={onPay}>
+                บันทึกจ่าย & แนบสลิป
+              </PrimaryButton>
+            )}
+          </div>
+        </ActionBar>
+      )}
+
+      {bundle.status === 'paying' && !bundle.paymentError && (
+        <ActionBar theme={theme}>
+          <div
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              background: `${theme.statusPaying}20`,
+              border: `1.5px solid ${theme.statusPaying}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            {Icon.bank(theme.statusPaying)}
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: FONT_UI, fontSize: 14, fontWeight: 500, color: theme.ink }}>
+              กำลังโอนผ่าน KBIZ — รอยืนยันบนมือถือ
+            </div>
+            <div style={{ fontFamily: FONT_UI, fontSize: 12, color: theme.inkSoft, marginTop: 2 }}>
+              {stuck
+                ? 'ค้างนานผิดปกติ — เปิดแอป K BIZ เพื่อดูว่าโอนไปแล้วหรือยัง แล้วเลือกด้านล่าง'
+                : 'หน้าจะอัปเดตให้อัตโนมัติเมื่อโอนสำเร็จ — ลองรีเฟรชอีกครั้งภายหลังหากรอนาน'}
+            </div>
+          </div>
+          {/* kbiz-bot can die without ever writing a result, and a result is
+              the only thing that flags a bundle — so after a while the approver
+              gets the same two ways out by hand rather than a request stuck in
+              "กำลังโอน" that no screen can close. */}
+          {stuck && (
+            <div style={{ display: 'flex', gap: 10 }}>
+              <GhostButton theme={theme} onClick={onForcePaymentRetry}>
+                ยังไม่ได้โอน — ปล่อยกลับ
+              </GhostButton>
+              <div style={{ minWidth: 220 }}>
+                <GhostButton theme={theme} full onClick={onPay}>
+                  โอนไปแล้ว — แนบสลิปเอง
+                </GhostButton>
+              </div>
+            </div>
+          )}
+        </ActionBar>
+      )}
+
+      {bundle.status === 'paying' && bundle.paymentError && (
+        <ActionBar theme={theme}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: FONT_UI, fontSize: 14, fontWeight: 600, color: theme.danger }}>
+              โอนผ่าน KBIZ ไม่สำเร็จ / ไม่ทราบผล
+            </div>
+            <div style={{ fontFamily: FONT_UI, fontSize: 13, color: theme.ink, marginTop: 2 }}>
+              {bundle.paymentError}
+            </div>
+          </div>
+          {actionError && (
+            <span style={{ fontFamily: FONT_UI, fontSize: 13, color: theme.danger }}>{actionError}</span>
+          )}
+          <div style={{ display: 'flex', gap: 10 }}>
+            <GhostButton theme={theme} onClick={onPaymentRetry}>
+              ยังไม่ได้โอน — ลองใหม่
+            </GhostButton>
+            <div style={{ minWidth: 220 }}>
+              <PrimaryButton theme={theme} onClick={onPay}>
+                ยืนยันว่าโอนแล้ว (แนบสลิป)
+              </PrimaryButton>
+            </div>
           </div>
         </ActionBar>
       )}

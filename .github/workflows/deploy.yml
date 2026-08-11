@@ -244,6 +244,14 @@ jobs:
           # stay off and nothing else changes.
           NOTIFY_INGRESS_TOKEN: ${{ secrets.NOTIFY_INGRESS_TOKEN }}
           HF_ERP_BASE_URL: ${{ secrets.HF_ERP_BASE_URL || 'http://192.168.100.228:4020' }}
+          # KBIZ payment automation. Both optional, and both fail dark: until
+          # the host directory has been provisioned by hand (runbook step 1 —
+          # the api gates on `queue/` inside it, which Docker cannot create for
+          # you) the "จ่ายผ่าน KBIZ" action answers 503 and the poller never
+          # starts, and without the webhook nothing goes to Slack.
+          # The host directory is shared with kbiz-bot in the payroll stack.
+          KBIZ_QUEUE_HOST_DIR: ${{ secrets.KBIZ_QUEUE_HOST_DIR || '/srv/kbiz-queue' }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           IMAGE_TAG: sha-${{ github.sha }}
         run: |
           set -euo pipefail
@@ -285,6 +293,10 @@ jobs:
           # HF One portal notifications
           NOTIFY_INGRESS_TOKEN=${NOTIFY_INGRESS_TOKEN}
           HF_ERP_BASE_URL=${HF_ERP_BASE_URL}
+
+          # KBIZ payment automation (queue dir shared with kbiz-bot, Slack alerts)
+          KBIZ_QUEUE_HOST_DIR=${KBIZ_QUEUE_HOST_DIR}
+          SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
           EOF
 
       - name: Log in to GHCR (on remote host)

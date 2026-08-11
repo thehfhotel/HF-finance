@@ -5,6 +5,8 @@ import type {
   BundleWithDetails,
   CreateBundleRequest,
   CreateUserRequest,
+  KbizCategoryMapping,
+  KbizPayeeHandles,
   Receipt,
   ReceiptItem,
   UpdateUserRequest,
@@ -163,6 +165,14 @@ function jsonPatchBody(payload: unknown): RequestOptions {
   };
 }
 
+function jsonPutBody(payload: unknown): RequestOptions {
+  return {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+    headers: { 'Content-Type': 'application/json' },
+  };
+}
+
 // ─── Multipart helpers ───────────────────────────────────────────
 
 export interface ReceiptFormFields {
@@ -201,10 +211,21 @@ export function receiptFormFromFields(
   return form;
 }
 
-export function payFormFromFields(transferRef: string, proof: File): FormData {
+/**
+ * `force` closes a `paying` bundle the bot never reported back on — the
+ * approver has the e-slip on their phone and is overruling a payment nobody is
+ * coming back for. The API refuses it on any other status and audits it as an
+ * override.
+ */
+export function payFormFromFields(
+  transferRef: string,
+  proof: File,
+  opts: { force?: boolean } = {},
+): FormData {
   const form = new FormData();
   form.append('transferRef', transferRef);
   form.append('proof', proof);
+  if (opts.force) form.append('force', '1');
   return form;
 }
 
@@ -239,10 +260,23 @@ export interface NamedAmount {
   amount: number;
 }
 
+/** Shape of GET/PUT /api/admin/kbiz-settings. */
+export interface KbizSettings {
+  mapping: KbizCategoryMapping;
+  payees: KbizPayeeHandles;
+  /** False when the server has no queue dir / KBIZ bot wired up yet. */
+  configured: boolean;
+}
+
 /** Shape of GET /api/bundles/stats. */
 export interface BundleStats {
   pending: StatSlice;
   approved: StatSlice;
+  /** In flight at the bank — the KBIZ bot owns these right now. Screens that
+   *  fold 'paying' bundles into their approved/"พร้อมจ่าย" lists must fold
+   *  this slice into `approved` the same way, or the badge and the list under
+   *  it disagree. */
+  paying: StatSlice;
   paid: StatSlice;
   rejected: StatSlice;
   drafts: number;
@@ -360,6 +394,24 @@ export const api = {
         method: 'POST',
         body: form,
       }),
+    /** Admin-only. Atomically flips `approved` → `paying` and queues the KBIZ
+     *  intent server-side. 409 = another action already moved the bundle;
+     *  503 = automation not configured on this server. */
+    payViaKbiz: (id: string): Promise<BundleWithDetails> =>
+      request<BundleWithDetails>(`/api/bundles/${encodeURIComponent(id)}/pay-via-kbiz`, {
+        method: 'POST',
+      }),
+    /** Releases a `paying` bundle back to `approved` so Pay via KBIZ can be
+     *  fired again with a fresh intent. Free when the bundle came back
+     *  needs-verification, or when the queue proves nothing was ever armed;
+     *  `force` is the approver overruling an intent the bot still owns, after
+     *  checking K BIZ themselves (409 without it). */
+    paymentRetry: (id: string, opts: { force?: boolean } = {}): Promise<BundleWithDetails> =>
+      request<BundleWithDetails>(`/api/bundles/${encodeURIComponent(id)}/payment-retry`, {
+        method: 'POST',
+        body: JSON.stringify({ force: opts.force === true }),
+        headers: { 'Content-Type': 'application/json' },
+      }),
   },
 
   admin: {
@@ -370,6 +422,12 @@ export const api = {
       request<AdminUser>(`/api/admin/users/${encodeURIComponent(id)}`, jsonPatchBody(req)),
     deleteUser: (id: string): Promise<void> =>
       request<void>(`/api/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    getKbizSettings: (): Promise<KbizSettings> => request<KbizSettings>('/api/admin/kbiz-settings'),
+    putKbizSettings: (body: {
+      mapping?: KbizCategoryMapping;
+      payees?: KbizPayeeHandles;
+    }): Promise<KbizSettings> =>
+      request<KbizSettings>('/api/admin/kbiz-settings', jsonPutBody(body)),
   },
 };
 
