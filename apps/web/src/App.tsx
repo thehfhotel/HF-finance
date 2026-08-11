@@ -31,6 +31,7 @@ import { DesktopApprover } from './screens/approver/Desktop';
 import { DesktopEmployee } from './screens/employee/Desktop';
 import { Login } from './screens/auth/Login';
 import { ManageEmployees } from './screens/approver/ManageEmployees';
+import { AdminKbiz } from './screens/approver/AdminKbiz';
 import { BottomNav } from './components/BottomNav';
 import type { BottomNavRoute } from './components/BottomNav';
 
@@ -51,6 +52,7 @@ function initialRouteFromUrl(): Route {
   const path = window.location.pathname;
   if (path === '/login') return { name: 'login' };
   if (path === '/admin/employees') return { name: 'admin-employees' };
+  if (path === '/admin/kbiz') return { name: 'admin-kbiz' };
   if (path === '/my-requests') return { name: 'my-requests' };
   if (path === '/overview') return { name: 'overview' };
   return { name: 'home' };
@@ -102,12 +104,14 @@ export function App() {
   // exactly what forced the whole archive down the wire.
   const sidebarCounts = {
     pending: stats?.pending.count,
-    approved: stats?.approved.count,
+    // 'พร้อมจ่าย'/'approved' opens a pane that also lists 'paying' bundles
+    // (see Inbox.tsx), so the badge has to count both server slices.
+    approved: stats ? stats.approved.count + stats.paying.count : undefined,
     paid: stats?.paid.count,
     rejected: stats?.rejected.count,
     myDrafts: myStats?.drafts,
     myPending: myStats?.pending.count,
-    myApproved: myStats?.approved.count,
+    myApproved: myStats ? myStats.approved.count + myStats.paying.count : undefined,
     myPaid: myStats?.paid.count,
     myRejected: myStats?.rejected.count,
   };
@@ -311,6 +315,7 @@ export function App() {
     else if (name === 'approver-review' && id) setRoute({ name: 'approver-review', id });
     else if (name === 'approver-pay' && id) setRoute({ name: 'approver-pay', id });
     else if (name === 'admin-employees') setRoute({ name: 'admin-employees' });
+    else if (name === 'admin-kbiz') setRoute({ name: 'admin-kbiz' });
     else if (name === 'my-requests') setRoute({ name: 'my-requests' });
     else if (name === 'logout') handleLogout();
   };
@@ -471,6 +476,89 @@ export function App() {
     );
   }
 
+  if (route.name === 'admin-kbiz') {
+    const adminRole = currentUser?.role ?? tweaks.role;
+    const showAdminKbizBottomNav = platform === 'mobile';
+    const adminKbizMobileShell = (
+      <>
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: theme.paper,
+            overflow: 'auto',
+            paddingBottom: showAdminKbizBottomNav ? 56 : 0,
+          }}
+        >
+          <AdminKbiz
+            theme={theme}
+            onBack={() => setRoute({ name: 'approver-home' })}
+            currentUser={currentUser}
+            onNavigate={setRoute}
+            counts={sidebarCounts}
+            onLogout={handleLogout}
+          />
+        </div>
+        {showAdminKbizBottomNav && (
+          <BottomNav
+            role={adminRole}
+            activeRoute="admin-kbiz"
+            theme={theme}
+            onNavigate={(r) => setRoute({ name: r } as Route)}
+          />
+        )}
+      </>
+    );
+    if (platform !== 'mobile') {
+      return (
+        <>
+          <AdminKbiz
+            theme={theme}
+            onBack={() => setRoute({ name: 'approver-home' })}
+            currentUser={currentUser}
+            onNavigate={setRoute}
+            counts={sidebarCounts}
+            onLogout={handleLogout}
+          />
+          {IS_DEV && <TweaksPanel tweaks={tweaks} onChange={setTweak} onJump={onJump} />}
+        </>
+      );
+    }
+    return (
+      <>
+        {IS_DEV ? (
+          <IOSDevice dark={tweaks.dark} width={402} height={874}>
+            {adminKbizMobileShell}
+          </IOSDevice>
+        ) : (
+          <div
+            style={{
+              position: 'fixed',
+              top: 'var(--hf-band-offset, 0px)',
+              right: 0,
+              bottom: 0,
+              left: 0,
+              background: theme.paper,
+              overflow: 'hidden',
+            }}
+          >
+            {/* HF One shell band, portal-only mode — real mobile flow, not
+                the dev-only IOSDevice preview. */}
+            <script
+              defer
+              src="https://erp.thehfhotel.org/shell/hf-bar.js"
+              data-app="Reimbursement"
+              data-module="finance"
+              data-portal-only="1"
+            />
+            {adminKbizMobileShell}
+          </div>
+        )}
+        {IS_DEV && <TweaksPanel tweaks={tweaks} onChange={setTweak} onJump={onJump} />}
+      </>
+    );
+  }
+
   if (loading) {
     return <CenteredSpinner background={theme.paper} accent={theme.accent} />;
   }
@@ -569,6 +657,7 @@ export function App() {
             initialView={route.name === 'my-requests' ? route.view : undefined}
             onNavigateApprover={(key) => {
               if (key === 'employees') return setRoute({ name: 'admin-employees' });
+              if (key === 'admin-kbiz') return setRoute({ name: 'admin-kbiz' });
               if (key === 'overview') return setRoute({ name: 'overview' });
               // A box status — open the approver console on that exact tab.
               setRoute({ name: 'approver-home', filter: key as 'pending' });
@@ -734,6 +823,8 @@ function pathForRoute(route: Route): string {
       return '/login';
     case 'admin-employees':
       return '/admin/employees';
+    case 'admin-kbiz':
+      return '/admin/kbiz';
     case 'my-requests':
       return '/my-requests';
     case 'overview':

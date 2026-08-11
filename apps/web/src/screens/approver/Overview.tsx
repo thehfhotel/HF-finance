@@ -230,12 +230,15 @@ interface OverviewProps {
 
 export function ApproverOverview({ theme, bundles, stats, onOpenBundle, onSelectFilter, padding = '24px 28px 48px' }: OverviewProps) {
   const pending = bundles.filter((b) => b.status === 'pending');
-  const approved = bundles.filter((b) => b.status === 'approved');
+  // 'paying' is still money not yet transferred, so it counts alongside
+  // 'approved' here the same way Inbox.tsx folds it into the "พร้อมจ่าย" tab.
+  const approved = bundles.filter((b) => b.status === 'approved' || b.status === 'paying');
   const paid = bundles.filter((b) => b.status === 'paid');
   const rejected = bundles.filter((b) => b.status === 'rejected');
 
   const totalPending = stats ? stats.pending.total : sumTotals(pending);
-  const totalApproved = stats ? stats.approved.total : sumTotals(approved);
+  const approvedCount = stats ? stats.approved.count + stats.paying.count : approved.length;
+  const totalApproved = stats ? stats.approved.total + stats.paying.total : sumTotals(approved);
   const triage = oldestPending(pending, TRIAGE_LIMIT);
   const buckets = agingBuckets(pending);
   const bucketMax = Math.max(1, ...buckets.map((b) => b.count));
@@ -271,9 +274,9 @@ export function ApproverOverview({ theme, bundles, stats, onOpenBundle, onSelect
           theme={theme}
           label="พร้อมจ่าย"
           dot={theme.statusApproved}
-          value={String(stats ? stats.approved.count : approved.length)}
-          sub={approved.length > 0 ? `${fmt(totalApproved)} ต้องโอน` : 'ไม่มีค้าง'}
-          emphasis={approved.length > 0}
+          value={String(approvedCount)}
+          sub={approvedCount > 0 ? `${fmt(totalApproved)} ต้องโอน` : 'ไม่มีค้าง'}
+          emphasis={approvedCount > 0}
           onClick={onSelectFilter ? () => onSelectFilter('approved') : undefined}
         />
         <StatTile

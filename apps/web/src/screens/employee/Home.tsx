@@ -26,7 +26,9 @@ export function Home({ theme, state, nav, currentUser, isApprover, onLogout }: H
   const looseTotal = loose.reduce((s, r) => s + r.amount, 0);
 
   const pending = bundles.filter((b) => b.status === 'pending');
-  const approved = bundles.filter((b) => b.status === 'approved');
+  // 'paying' is still money not yet in hand, so it counts alongside 'approved'
+  // for the outstanding total below.
+  const approved = bundles.filter((b) => b.status === 'approved' || b.status === 'paying');
   const paid = bundles.filter((b) => b.status === 'paid');
   const sumBundle = (b: { receipts: { amount: number }[] }) =>
     b.receipts.reduce((a, r) => a + r.amount, 0);

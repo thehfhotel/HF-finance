@@ -220,6 +220,7 @@ export function StatusPill({ status, theme, size = 'md' }: StatusPillProps) {
     draft: { label: 'ร่าง', dot: theme.inkSofter, fg: theme.inkSoft },
     pending: { label: 'รออนุมัติ', dot: theme.statusPending, fg: theme.statusPending },
     approved: { label: 'อนุมัติแล้ว', dot: theme.statusApproved, fg: theme.statusApproved },
+    paying: { label: 'กำลังโอน', dot: theme.statusPaying, fg: theme.statusPaying },
     paid: { label: 'จ่ายแล้ว', dot: theme.statusPaid, fg: theme.statusPaid },
     rejected: { label: 'ปฏิเสธ', dot: theme.statusRejected, fg: theme.statusRejected },
   };

@@ -19,6 +19,11 @@ enum BundleStatus {
   DRAFT
   PENDING
   APPROVED
+  /// The KBIZ automation window: an intent is queued and the bot is driving the
+  /// bank. Resolves forward to PAID, or back to APPROVED when KBIZ confirmed the
+  /// transfer never armed. PAYING + a non-null `paymentError` means "the outcome
+  /// is ambiguous, a human must resolve it" — never auto-retried.
+  PAYING
   PAID
   REJECTED
 }
@@ -89,6 +94,22 @@ model Bundle {
   transferProofPath  String?
   note               String       @default("")
   rejectReason       String?
+  /// Id of the KBIZ payment intent that currently owns this bundle — also the
+  /// queue filename (`queue/<paymentIntentId>.json`). Stamped by the atomic
+  /// APPROVED→PAYING flip that doubles as the double-pay guard. Unique so the
+  /// database itself refuses to let one intent own two bundles; the poller
+  /// looks a bundle up by it.
+  paymentIntentId    String?      @unique
+  /// Why the last automated attempt did not cleanly succeed. Set while PAYING =
+  /// needs human verification; set while APPROVED = a confirmed-failed attempt
+  /// that is safe to retry.
+  paymentError       String?
+  /// When the bundle entered PAYING (stamped by the same atomic claim that
+  /// writes `paymentIntentId`, cleared on every exit). A bundle whose bot never
+  /// reports back would otherwise sit here silently forever: the poller's
+  /// stranded-payment watchdog uses this to notice, flag and alert on one that
+  /// has been in flight far longer than a transfer can take.
+  payingSince        DateTime?
   createdAt          DateTime     @default(now())
 
   receipts     Receipt[]
@@ -97,6 +118,18 @@ model Bundle {
   @@index([userId])
   @@index([status])
   @@map("bundles")
+}
+
+/// Small key/value store for operational settings an admin edits at runtime —
+/// today the KBIZ category mapping and the payee handles (see
+/// `SETTING_KBIZ_*` in @reimbursement/shared). Values are JSON so a setting can
+/// grow a field without a migration; the keys are a closed set owned by code.
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("app_settings")
 }
 
 model AuditEvent {

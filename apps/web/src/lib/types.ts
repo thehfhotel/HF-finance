@@ -21,6 +21,9 @@ export interface Theme {
   statusApproved: string;
   statusPaid: string;
   statusRejected: string;
+  /** The KBIZ-automation-in-flight window (`paying`) — amber, distinct from
+   *  `statusPending`'s warmer amber so the two never read as the same wait. */
+  statusPaying: string;
 }
 
 // Bundles in app state include their joined receipts and submitter, since the

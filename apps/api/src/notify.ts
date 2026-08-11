@@ -19,6 +19,8 @@
  */
 
 const NOTIFY_TOKEN = process.env.NOTIFY_INGRESS_TOKEN;
+/** Incoming-webhook URL, shared with the payroll stack. Unset → no Slack. */
+const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
 // The portal over the LAN, not its public hostname.
 //
 // erp.thehfhotel.org sits behind Cloudflare Access, and this container holds no
@@ -84,6 +86,40 @@ export function notifyPortal(input: NotifyInput): void {
       }
     } catch (error) {
       console.error('[notify] failed:', error);
+    }
+  })();
+}
+
+/**
+ * Post a line into Slack via an incoming webhook.
+ *
+ * Same two rules as `notifyPortal` above: fire-and-forget, and dark without
+ * `SLACK_WEBHOOK_URL`. Used for payments that need a human — the portal bell
+ * reaches the approver's phone, Slack reaches whoever is at a desk, and a
+ * transfer whose outcome is unknown deserves both.
+ */
+export function notifySlack(text: string): void {
+  if (!SLACK_WEBHOOK_URL) return; // feature dark
+
+  void (async () => {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), NOTIFY_TIMEOUT_MS);
+      try {
+        const res = await fetch(SLACK_WEBHOOK_URL, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text }),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          console.error(`[slack] webhook returned ${res.status}`);
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch (error) {
+      console.error('[slack] failed:', error);
     }
   })();
 }
