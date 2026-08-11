@@ -711,7 +711,20 @@ function renderScreen({ route, theme, state, setState, reqState, reqSetState, na
 
   // 'home': employee → requestor Home; approver → inbox
   if (role === 'employee')
-    return <Home theme={theme} state={reqState} nav={nav} currentUser={currentUser} onLogout={onLogout} />;
+    // Requests are everyone's, drafts are yours. Feeding this screen the
+    // personal scope wholesale meant a new employee — with no requests of their
+    // own yet — opened the app to nothing at all, unable to see the work they
+    // had been asked to pick up. Bundles come from the shared list; loose
+    // receipts stay personal, because a half-finished receipt is not shared work.
+    return (
+      <Home
+        theme={theme}
+        state={{ receipts: reqState.receipts, bundles: state.bundles }}
+        nav={nav}
+        currentUser={currentUser}
+        onLogout={onLogout}
+      />
+    );
   return <Inbox theme={theme} state={state} nav={nav} currentUser={currentUser} onLogout={onLogout} />;
 }
 
