@@ -3,6 +3,7 @@ import { auth } from '../auth';
 import { prisma } from '../db';
 import { Prisma } from '../generated/prisma';
 import { saveUploadedFile } from '../uploads';
+import { notifyPortal } from '../notify';
 import { bundleStatusFromShared, serializeBundleWithDetails } from '../serializers';
 import type { BundleStatus } from '@reimbursement/shared';
 
@@ -238,6 +239,23 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
           where: { id: bundle.id },
           include: { receipts: true, user: true, approver: true },
         });
+      });
+
+      // Tell the approvers. Fire-and-forget by construction: a submission that
+      // succeeded must not fail because a notification did.
+      const total = sumReceiptAmounts(created.receipts);
+      notifyPortal({
+        title: 'คำขอเบิกใหม่',
+        body: `${created.user.name} · ${name} · ฿${total.toLocaleString('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`,
+        path: '/',
+        // One notification per request, so a retry cannot ring twice.
+        tag: `reimbursement:bundle:${created.id}`,
+        // Only people who can approve it — the portal fails closed to nobody
+        // rather than everybody if that set is empty.
+        audience: 'managers',
       });
 
       return serializeBundleWithDetails(created);
