@@ -9,6 +9,13 @@ FROM mcr.microsoft.com/playwright:v1.59.1-noble
 # payroll-form (at /app/data) and this container.
 WORKDIR /app/kbiz-bot
 
+# Thai font shaping for headless-Chromium PDF rendering (the payment voucher
+# attached to transfer-other transfers) — the noble base image ships no Thai
+# fonts by default, so unpatched glyphs render as tofu boxes in the PDF.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends fonts-thai-tlwg \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY kbiz-bot/package.json ./
 RUN npm install --include=dev
 

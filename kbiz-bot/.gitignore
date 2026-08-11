@@ -11,6 +11,7 @@ test-results/
 *.json
 trace.zip
 !package.json
+!tsconfig.json
 !transfer-other.config.example.json
 # the real config holds a payee's bank details — keep it local
 transfer-other.config.json

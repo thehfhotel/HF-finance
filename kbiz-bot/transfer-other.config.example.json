@@ -1,6 +1,6 @@
 {
   "maxTransfer": 50000,
-  "category": "Refund",
+  "kbizCategoryId": "30",
   "recipients": {
     "revew": {
       "mode": "favorite",

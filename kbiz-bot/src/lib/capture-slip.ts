@@ -16,7 +16,12 @@ import type { Page } from "playwright";
  * screenshot (the real proof) and return whatever text we could parse.
  */
 
-const SLIPS_DIR = resolve("..", "data", "slips");
+/**
+ * `KBIZ_SLIPS_DIR` decouples this from the default `../data` layout so it can
+ * point at a shared cross-repo dir (e.g. `/srv/kbiz-queue/slips` mounted into
+ * the container) instead. Unset preserves today's behavior exactly.
+ */
+export const SLIPS_DIR = process.env.KBIZ_SLIPS_DIR ? resolve(process.env.KBIZ_SLIPS_DIR) : resolve("..", "data", "slips");
 
 /** Make sure the slips/screenshots directory exists. Safe to call repeatedly. */
 export function ensureSlipsDir(): string {
