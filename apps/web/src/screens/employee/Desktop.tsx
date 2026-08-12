@@ -21,15 +21,6 @@ const NEW_RECEIPT_ACCENT = '#7E5E3A';
 const NEW_RECEIPT_MERCHANT_FALLBACK = 'ใบเสร็จใหม่';
 const DETAIL_MAX_WIDTH = 840;
 
-function todayThaiDateLabel(): string {
-  const today = new Date().toISOString().slice(0, 10);
-  return formatThaiDate(today);
-}
-
-function autoNamePlaceholder(): string {
-  return `คำขอ ${todayThaiDateLabel()}`;
-}
-
 function sanitizeAmountInput(raw: string): string {
   let v = raw.replace(/[^0-9.]/g, '');
   const dot = v.indexOf('.');
@@ -74,6 +65,8 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
   const [selectedBundleId, setSelectedBundleId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bundleName, setBundleName] = useState<string>('');
+  // Required-title violation — set on a submit attempt, cleared by typing.
+  const [titleError, setTitleError] = useState(false);
   const [photoIdx, setPhotoIdx] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -151,7 +144,11 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
   };
 
   const submitBundle = async (): Promise<void> => {
-    if (submitting || !bundleName.trim()) return;
+    if (submitting) return;
+    if (!bundleName.trim()) {
+      setTitleError(true);
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -309,7 +306,11 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
         selectedReceipts={selectedReceipts}
         selectedTotal={selectedTotal}
         bundleName={bundleName}
-        onBundleNameChange={setBundleName}
+        onBundleNameChange={(next) => {
+          setBundleName(next);
+          if (titleError && next.trim()) setTitleError(false);
+        }}
+        titleError={titleError}
         owed={owed}
         outstandingCount={totalsByStatus.pending + totalsByStatus.approved}
         submitting={submitting}
@@ -388,6 +389,7 @@ interface DraftsPaneProps {
   selectedTotal: number;
   bundleName: string;
   onBundleNameChange: (next: string) => void;
+  titleError: boolean;
   owed: number;
   outstandingCount: number;
   submitting: boolean;
@@ -410,6 +412,7 @@ function DraftsPane({
   selectedTotal,
   bundleName,
   onBundleNameChange,
+  titleError,
   owed,
   outstandingCount,
   submitting,
@@ -555,6 +558,7 @@ function DraftsPane({
         selectedTotal={selectedTotal}
         bundleName={bundleName}
         onBundleNameChange={onBundleNameChange}
+        titleError={titleError}
         submitting={submitting}
         onSubmit={onSubmitBundle}
         onRemoveReceipt={onToggleReceipt}
@@ -924,6 +928,7 @@ interface BundleComposerProps {
   selectedTotal: number;
   bundleName: string;
   onBundleNameChange: (next: string) => void;
+  titleError: boolean;
   submitting: boolean;
   onSubmit: () => void;
   onRemoveReceipt: (id: string) => void;
@@ -936,6 +941,7 @@ function BundleComposer({
   selectedTotal,
   bundleName,
   onBundleNameChange,
+  titleError,
   submitting,
   onSubmit,
   onRemoveReceipt,
@@ -1013,17 +1019,19 @@ function BundleComposer({
         <>
           <div style={{ flex: 1, overflow: 'auto', padding: '0 22px' }}>
             <div style={{ marginBottom: 16 }}>
-              <div style={sectionLabelStyle}>ชื่อคำขอ</div>
+              <div style={{ ...sectionLabelStyle, color: titleError ? theme.danger : sectionLabelStyle.color }}>
+                ชื่อคำขอ *
+              </div>
               <input
                 value={bundleName}
                 onChange={(e) => onBundleNameChange(e.target.value)}
-                placeholder={autoNamePlaceholder()}
+                placeholder="เช่น ค่าอุปกรณ์ซ่อมแอร์"
                 style={{
                   width: '100%',
                   padding: '10px 12px',
                   borderRadius: 10,
                   background: theme.paper,
-                  border: `0.5px solid ${theme.hairlineStrong}`,
+                  border: titleError ? `1.5px solid ${theme.danger}` : `0.5px solid ${theme.hairlineStrong}`,
                   fontFamily: FONT_UI,
                   fontSize: 14,
                   color: theme.ink,
@@ -1037,10 +1045,13 @@ function BundleComposer({
                   marginTop: 6,
                   fontFamily: FONT_UI,
                   fontSize: 11,
-                  color: theme.inkSofter,
+                  fontWeight: titleError ? 600 : 400,
+                  color: titleError ? theme.danger : theme.inkSofter,
                 }}
               >
-                กรุณาตั้งชื่อคำขอ เช่น ค่าอุปกรณ์ซ่อมแอร์
+                {titleError
+                  ? 'กรุณาตั้งชื่อคำขอก่อนส่ง'
+                  : 'ตั้งชื่อให้สื่อความหมาย — ชื่อนี้จะไปอยู่ในสลิปโอนเงินด้วย'}
               </div>
             </div>
 
@@ -1154,7 +1165,7 @@ function BundleComposer({
                 })}
               </div>
             </div>
-            <PrimaryButton theme={theme} disabled={submitting || !bundleName.trim()} onClick={onSubmit}>
+            <PrimaryButton theme={theme} disabled={submitting} onClick={onSubmit}>
               {submitting ? 'กำลังส่ง...' : `ส่งขออนุมัติ · ${selectedCount} ใบ`}
             </PrimaryButton>
           </div>

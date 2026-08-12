@@ -2,7 +2,6 @@ import { useState } from 'react';
 import type { AppState, Theme } from '../../lib/types';
 import type { Nav } from '../../lib/router';
 import { FONT_UI } from '../../lib/theme';
-import { formatThaiDate } from '../../lib/format';
 import { api } from '../../lib/api';
 import { AppBar } from '../../components/AppBar';
 import { IconBtn, Money, PrimaryButton, SectionHeader } from '../../components/primitives';
@@ -10,11 +9,6 @@ import { Icon } from '../../components/icons';
 import { FormRow } from '../../components/FormRow';
 import { SelectableReceiptRow } from './_shared';
 import { Toast, useToast } from '../../components/Toast';
-
-function todayAutoName(): string {
-  const today = new Date().toISOString().slice(0, 10);
-  return `คำขอ ${formatThaiDate(today)}`;
-}
 
 interface BundleBuilderProps {
   theme: Theme;
@@ -26,6 +20,8 @@ interface BundleBuilderProps {
 
 export function BundleBuilder({ theme, state, nav, setState, preselectId }: BundleBuilderProps) {
   const [name, setName] = useState('');
+  // Required-title violation — set on a submit attempt, cleared by typing.
+  const [titleError, setTitleError] = useState(false);
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +51,11 @@ export function BundleBuilder({ theme, state, nav, setState, preselectId }: Bund
   };
 
   const submit = async () => {
-    if (selectedLoose.length === 0 || !name.trim() || submitting) return;
+    if (selectedLoose.length === 0 || submitting) return;
+    if (!name.trim()) {
+      setTitleError(true);
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
@@ -95,17 +95,28 @@ export function BundleBuilder({ theme, state, nav, setState, preselectId }: Bund
       />
 
       <div style={{ padding: '20px 20px 0' }}>
-        <FormRow theme={theme} label="ชื่อ" value={name} onChange={setName} placeholder={todayAutoName()} />
+        <FormRow
+          theme={theme}
+          label="ชื่อคำขอ *"
+          value={name}
+          onChange={(v) => {
+            setName(v);
+            if (titleError && v.trim()) setTitleError(false);
+          }}
+          placeholder="เช่น ค่าอุปกรณ์ซ่อมแอร์"
+          error={titleError}
+        />
         <div
           style={{
             marginTop: -12,
             marginBottom: 18,
             fontFamily: FONT_UI,
             fontSize: 12,
-            color: theme.inkSofter,
+            fontWeight: titleError ? 600 : 400,
+            color: titleError ? theme.danger : theme.inkSofter,
           }}
         >
-          กรุณาตั้งชื่อคำขอ เช่น ค่าอุปกรณ์ซ่อมแอร์
+          {titleError ? 'กรุณาตั้งชื่อคำขอก่อนส่ง' : 'ตั้งชื่อให้สื่อความหมาย — ชื่อนี้จะไปอยู่ในสลิปโอนเงินด้วย'}
         </div>
         <FormRow
           theme={theme}
@@ -200,7 +211,7 @@ export function BundleBuilder({ theme, state, nav, setState, preselectId }: Bund
             {error}
           </div>
         )}
-        <PrimaryButton theme={theme} disabled={selectedLoose.length === 0 || !name.trim() || submitting} onClick={submit}>
+        <PrimaryButton theme={theme} disabled={selectedLoose.length === 0 || submitting} onClick={submit}>
           {submitting ? 'กำลังส่ง...' : 'ส่งขออนุมัติ'}
         </PrimaryButton>
       </div>

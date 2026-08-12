@@ -7,6 +7,8 @@ interface BaseProps {
   value: string;
   placeholder?: string;
   readOnly?: boolean;
+  /** Required-field violation: label + border go danger-red. */
+  error?: boolean;
 }
 
 interface InputProps extends BaseProps {
@@ -33,14 +35,14 @@ interface SelectProps extends BaseProps {
 type FormRowProps = InputProps | MultilineProps | SelectProps;
 
 export function FormRow(props: FormRowProps) {
-  const { theme, label, value, placeholder, readOnly } = props;
+  const { theme, label, value, placeholder, readOnly, error } = props;
   return (
     <div style={{ marginBottom: 18 }}>
       <div
         style={{
           fontFamily: FONT_UI,
           fontSize: 11,
-          color: theme.inkSoft,
+          color: error ? theme.danger : theme.inkSoft,
           letterSpacing: 1.4,
           textTransform: 'uppercase',
           marginBottom: 8,
@@ -81,7 +83,7 @@ export function FormRow(props: FormRowProps) {
             padding: '12px 14px',
             borderRadius: 12,
             background: theme.surface,
-            border: `0.5px solid ${theme.hairlineStrong}`,
+            border: error ? `1.5px solid ${theme.danger}` : `0.5px solid ${theme.hairlineStrong}`,
             fontFamily: FONT_UI,
             fontSize: 14,
             color: theme.ink,
@@ -102,7 +104,7 @@ export function FormRow(props: FormRowProps) {
             padding: '12px 14px',
             borderRadius: 12,
             background: theme.surface,
-            border: `0.5px solid ${theme.hairlineStrong}`,
+            border: error ? `1.5px solid ${theme.danger}` : `0.5px solid ${theme.hairlineStrong}`,
             fontFamily: FONT_UI,
             fontSize: 15,
             color: theme.ink,
