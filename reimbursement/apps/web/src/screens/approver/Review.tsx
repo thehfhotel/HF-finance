@@ -467,6 +467,9 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
               {error}
             </div>
           )}
+          <GhostButton theme={theme} onClick={() => setConfirmKind('reject')}>
+            ปฏิเสธ (อนุมัติผิด)
+          </GhostButton>
           {/* Manual pay always stays available; KBIZ appears once this host is
               wired up for it — the destination itself is chosen in the picker. */}
           {b.kbizPayable && (
