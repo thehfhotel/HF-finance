@@ -6,6 +6,8 @@ import type {
   CreateBundleRequest,
   CreateUserRequest,
   KbizCategoryMapping,
+  KbizDestination,
+  KbizFavorite,
   KbizPayeeHandles,
   Receipt,
   ReceiptItem,
@@ -287,6 +289,15 @@ export interface KbizSettings {
   /** Details behind each handle, for the admin dropdown labels. */
   availablePayees?: PublishedPayee[] | null;
   handlesUpdatedAt?: string | null;
+  /**
+   * KBIZ's own saved accounts, as last synced by the bot ('list-favorites'
+   * queue item → queue/kbiz-favorites.json) — the vocabulary the pay-time
+   * destination picker's "เลือกจากบัญชีที่บันทึกไว้" mode offers. MASKED, never
+   * a full account number. Null = never synced on this host (or the file is
+   * unreadable) — the honest "ยังไม่ได้ซิงค์" state, not an empty list.
+   */
+  favorites: KbizFavorite[] | null;
+  favoritesUpdatedAt: string | null;
 }
 
 /** Shape of GET /api/bundles/stats. */
@@ -419,12 +430,22 @@ export const api = {
         body: form,
       }),
     /** Admin-only. Atomically flips `approved` → `paying` and queues the KBIZ
-     *  intent server-side. 409 = another action already moved the bundle;
+     *  intent server-side. `destination` is the approver's pay-time choice
+     *  from the destination picker; omitted keeps the pre-picker behaviour
+     *  (the admin-mapped payee handle). 409 = another action already moved
+     *  the bundle, or the destination doesn't resolve to a real account;
      *  503 = automation not configured on this server. */
-    payViaKbiz: (id: string): Promise<BundleWithDetails> =>
-      request<BundleWithDetails>(`/api/bundles/${encodeURIComponent(id)}/pay-via-kbiz`, {
-        method: 'POST',
-      }),
+    payViaKbiz: (id: string, destination?: KbizDestination): Promise<BundleWithDetails> =>
+      request<BundleWithDetails>(
+        `/api/bundles/${encodeURIComponent(id)}/pay-via-kbiz`,
+        destination
+          ? {
+              method: 'POST',
+              body: JSON.stringify({ destination }),
+              headers: { 'Content-Type': 'application/json' },
+            }
+          : { method: 'POST' },
+      ),
     /** Releases a `paying` bundle back to `approved` so Pay via KBIZ can be
      *  fired again with a fresh intent. Free when the bundle came back
      *  needs-verification, or when the queue proves nothing was ever armed;
@@ -453,6 +474,17 @@ export const api = {
       payees?: KbizPayeeHandles;
     }): Promise<KbizSettings> =>
       request<KbizSettings>('/api/admin/kbiz-settings', jsonPutBody(body)),
+    /** Queues a read-only scrape of KBIZ's own favorites picker; the bot
+     *  publishes the result as `queue/kbiz-favorites.json`, which the next
+     *  `getKbizSettings()` serves as `favorites`/`favoritesUpdatedAt` — the
+     *  caller polls for that. `alreadyRunning` means one sync was already in
+     *  flight and this call joined it rather than queueing a second scrape —
+     *  with a null `id` when that sync was still being queued and had none to
+     *  report yet. */
+    syncKbizFavorites: (): Promise<{ id: string | null; alreadyRunning: boolean }> =>
+      request<{ id: string | null; alreadyRunning: boolean }>('/api/admin/kbiz-sync-favorites', {
+        method: 'POST',
+      }),
   },
 };
 

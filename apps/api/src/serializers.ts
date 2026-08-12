@@ -106,10 +106,18 @@ export function serializeBundle(bundle: PrismaBundle): SharedBundle {
 /**
  * Can this bundle actually be paid through KBIZ right now?
  *
- * Computed on the server so the web app never has to know the payee mapping:
- * the feature has to be wired up on this host, the bundle has to be sitting in
- * APPROVED, the submitter has to map to a payee handle the bot is allowed to
- * pay, and there has to be money to move.
+ * Computed on the server so the web app never has to know how payment is wired
+ * up: the feature has to be provisioned on this host, the bundle has to be
+ * sitting in APPROVED, and there has to be money to move.
+ *
+ * Deliberately NOT gated on the submitter's mapped payee handle any more. Since
+ * the pay-time picker landed a destination no longer has to be a handle — a
+ * synced KBIZ favorite or an account the approver types are equally valid — so
+ * requiring a mapping here hid the picker from exactly the submitters it was
+ * built for, and the only way to reach it was to invent a bogus mapping purely
+ * to unlock a button. WHERE the money goes is decided at pay time instead: the
+ * picker offers what actually exists, and POST /pay-via-kbiz still refuses a
+ * body-less call from a submitter with no mapping (409).
  */
 function computeKbizPayable(
   bundle: PrismaBundle,
@@ -118,15 +126,14 @@ function computeKbizPayable(
 ): boolean {
   if (!kbiz.configured) return false;
   if (bundle.status !== 'APPROVED') return false;
-  if (!kbiz.payees[bundle.userId]) return false;
   return receipts.reduce((total, receipt) => total + Number(receipt.amount), 0) > 0;
 }
 
 /**
  * `kbiz` is optional and loaded ONCE per request by the caller — never per
- * bundle. The list endpoint returns up to 200 of these, and re-reading the
- * payee setting for each one would turn one render into 200 queries.
- * Omitted → `kbizPayable` is absent, as the contract allows.
+ * bundle. The list endpoint returns up to 200 of these, and re-inspecting the
+ * shared queue directory for each one would turn one render into 200 filesystem
+ * round trips. Omitted → `kbizPayable` is absent, as the contract allows.
  */
 export function serializeBundleWithDetails(
   bundle: PrismaBundle & {

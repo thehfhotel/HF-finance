@@ -10,7 +10,12 @@ import {
 } from '@reimbursement/shared';
 import { auth } from '../auth';
 import { prisma } from '../db';
-import { isKbizConfigured, readPayeeHandlesManifest } from '../kbiz';
+import {
+  isKbizConfigured,
+  readKbizFavorites,
+  readPayeeHandlesManifest,
+  writeSyncFavoritesItem,
+} from '../kbiz';
 import { serializeAdminUser } from '../serializers';
 import { getKbizCategoryMapping, getKbizPayees, getReceiptCategories, isKbizCategoryId, putSetting } from '../settings';
 
@@ -197,13 +202,15 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
    * letting someone map payees into a feature that will answer 503.
    */
   .get('/kbiz-settings', async () => {
-    const [mapping, payees, configured, handlesManifest, receiptCategories] = await Promise.all([
-      getKbizCategoryMapping(),
-      getKbizPayees(),
-      isKbizConfigured(),
-      readPayeeHandlesManifest(),
-      getReceiptCategories(),
-    ]);
+    const [mapping, payees, configured, handlesManifest, favoritesManifest, receiptCategories] =
+      await Promise.all([
+        getKbizCategoryMapping(),
+        getKbizPayees(),
+        isKbizConfigured(),
+        readPayeeHandlesManifest(),
+        readKbizFavorites(),
+        getReceiptCategories(),
+      ]);
     return {
       mapping,
       payees,
@@ -217,6 +224,12 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
       // WHAT a handle pays, not just its name. Bot manifest v2; may be null.
       availablePayees: handlesManifest?.payees ?? null,
       handlesUpdatedAt: handlesManifest?.updatedAt ?? null,
+      // KBIZ's own saved accounts, as last synced by the bot — masked to a
+      // last-4, and the vocabulary the pay-time destination picker offers.
+      // null = never synced on this host (or the file is unreadable), which is
+      // what makes "ยังไม่ได้ซิงค์รายชื่อจาก KBIZ" the honest thing to show.
+      favorites: favoritesManifest?.favorites ?? null,
+      favoritesUpdatedAt: favoritesManifest?.updatedAt ?? null,
     };
   })
 
@@ -355,4 +368,33 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
         payees: t.Optional(t.Record(t.String(), t.String())),
       }),
     },
-  );
+  )
+
+  /**
+   * "ซิงค์รายชื่อจาก KBIZ" — ask the bot to re-read the bank's own favorites.
+   *
+   * The saved accounts live in KBIZ, not here, so the only way to offer them as
+   * pay-time destinations is to have the bot look. This queues that read-only
+   * scrape and returns immediately: the bot takes a browser session to do it,
+   * and the answer arrives later as `queue/kbiz-favorites.json`, which
+   * GET /kbiz-settings serves as `favorites`. The admin screen polls that.
+   *
+   * `alreadyRunning` is a normal, successful answer — one outstanding sync is
+   * plenty, and repeated clicks join the one in flight instead of queueing a
+   * second scrape behind it. An ask the bot never finished ages out after
+   * `KBIZ_STALE_MS`, so a bot that died holding one cannot wedge this button.
+   */
+  .post('/kbiz-sync-favorites', async ({ status }) => {
+    if (!(await isKbizConfigured())) {
+      return status(503, {
+        message: 'เซิร์ฟเวอร์นี้ยังไม่ได้เปิดใช้งานการจ่ายผ่าน KBIZ',
+      });
+    }
+
+    try {
+      return await writeSyncFavoritesItem();
+    } catch (error) {
+      console.error('[kbiz] could not queue a favorites sync:', error);
+      return status(500, { message: 'สั่งซิงค์รายชื่อจาก KBIZ ไม่สำเร็จ' });
+    }
+  });

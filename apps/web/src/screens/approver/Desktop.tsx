@@ -18,6 +18,8 @@ import { ReceiptPhoto, ReceiptThumb } from '../../components/Receipts';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { EmptyState } from '../../components/EmptyState';
 import { Toast, useToast } from '../../components/Toast';
+import { KbizDestinationPicker } from '../../components/KbizDestinationPicker';
+import type { KbizChosenDestination } from '../../components/KbizDestinationPicker';
 
 const TABLE_GRID_COLUMNS = '1.2fr 1fr 1fr 100px';
 const DETAIL_MAX_WIDTH = 840;
@@ -58,6 +60,13 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [kbizPickerOpen, setKbizPickerOpen] = useState(false);
+  // Set by the destination picker's own "ยืนยัน" step; the pay-kbiz confirm
+  // dialog below reads it for the summary line and payViaKbiz sends it — the
+  // picker never fires the transfer itself. No destination change after the
+  // confirm dialog opens: cancelling it clears the choice, so firing again
+  // means reopening the picker from scratch.
+  const [chosenDestination, setChosenDestination] = useState<KbizChosenDestination | null>(null);
   const [confirmState, setConfirmState] = useState<{
     open: boolean;
     kind: 'approve' | 'pay' | 'reject' | 'pay-kbiz' | 'retry' | 'force-retry';
@@ -210,13 +219,14 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
   };
 
   const handlePayViaKbiz = async (): Promise<void> => {
-    if (!selectedBundle || submitting) return;
+    if (!selectedBundle || submitting || !chosenDestination) return;
     setActionError(null);
     setSubmitting(true);
     try {
-      const updated = await api.bundles.payViaKbiz(selectedBundle.id);
+      const updated = await api.bundles.payViaKbiz(selectedBundle.id, chosenDestination.destination);
       applyServerUpdate(updated);
       setConfirmState((s) => ({ ...s, open: false }));
+      setChosenDestination(null);
       showToast('ส่งคำสั่งโอนแล้ว — ยืนยันบนแอป K BIZ ในมือถือ');
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
@@ -339,7 +349,7 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
                   : undefined
               }
               onPay={() => setPayOpen(true)}
-              onPayViaKbiz={() => setConfirmState({ open: true, kind: 'pay-kbiz' })}
+              onPayViaKbiz={() => setKbizPickerOpen(true)}
               onPaymentRetry={() => setConfirmState({ open: true, kind: 'retry' })}
               onForcePaymentRetry={() => setConfirmState({ open: true, kind: 'force-retry' })}
               onPhoto={(i) => setPhotoIdx(i)}
@@ -379,6 +389,23 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
               onConfirm={() => setConfirmState({ open: true, kind: 'pay' })}
               submitting={submitting}
               actionError={actionError}
+            />
+          )}
+
+          {kbizPickerOpen && selectedBundle && (
+            <KbizDestinationPicker
+              theme={theme}
+              bundle={selectedBundle}
+              onClose={() => setKbizPickerOpen(false)}
+              onConfirm={(chosen) => {
+                setChosenDestination(chosen);
+                setKbizPickerOpen(false);
+                setConfirmState({ open: true, kind: 'pay-kbiz' });
+              }}
+              onGotoSettings={() => {
+                setKbizPickerOpen(false);
+                onNavigate?.({ name: 'admin-kbiz' });
+              }}
             />
           )}
         </div>
@@ -446,7 +473,7 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
                   ? (
                     <span>
                       <span style={{ display: 'block', marginBottom: 8 }}>
-                        โอนเข้าบัญชีที่บันทึกไว้ใน KBIZ ให้ {selectedBundle.submitter.name}
+                        โอนเข้า <strong>{chosenDestination?.summary ?? 'บัญชีที่เลือก'}</strong> ให้ {selectedBundle.submitter.name}
                       </span>
                       <span style={{ display: 'block', color: theme.warn }}>
                         ต้องกดยืนยันในแอป K BIZ บนมือถือ — หากไม่ยืนยัน การโอนจะไม่สำเร็จ
@@ -489,7 +516,11 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
               void confirmPay();
             }
           }}
-          onCancel={() => { setConfirmState((s) => ({ ...s, open: false })); setRejectReason(''); }}
+          onCancel={() => {
+            setConfirmState((s) => ({ ...s, open: false }));
+            setRejectReason('');
+            if (confirmState.kind === 'pay-kbiz') setChosenDestination(null);
+          }}
         />
       )}
 
@@ -1071,8 +1102,8 @@ function DesktopDetail({
             <span style={{ fontFamily: FONT_UI, fontSize: 13, color: theme.danger }}>{actionError}</span>
           )}
           {/* Manual pay always stays available; KBIZ becomes primary (and
-              manual demotes to a ghost button) only once the bundle actually
-              has a mapped payee to fire the bot at. */}
+              manual demotes to a ghost button) once this host is wired up for
+              it — the destination itself is chosen in the picker. */}
           {bundle.kbizPayable && (
             <div style={{ minWidth: 200 }}>
               <PrimaryButton theme={theme} onClick={onPayViaKbiz}>
