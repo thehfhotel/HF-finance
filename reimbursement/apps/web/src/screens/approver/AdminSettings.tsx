@@ -24,7 +24,7 @@ import { AppBar } from '../../components/AppBar';
 import { Avatar, Card, GhostButton, PrimaryButton } from '../../components/primitives';
 import { Icon } from '../../components/icons';
 
-interface AdminKbizProps {
+interface AdminSettingsProps {
   theme: Theme;
   /** Optional — when set, the back action navigates via the app's router instead of `window.history.back()`. */
   onBack?: () => void;
@@ -87,14 +87,14 @@ function useReducedMotion(): boolean {
   return reduced;
 }
 
-export function AdminKbiz({
+export function AdminSettings({
   theme,
   onBack,
   currentUser,
   onNavigate,
   onLogout,
   counts,
-}: AdminKbizProps): JSX.Element {
+}: AdminSettingsProps): JSX.Element {
   const platform = useViewportPlatform();
   const isMobile = platform === 'mobile';
   const reducedMotion = useReducedMotion();
@@ -462,11 +462,11 @@ export function AdminKbiz({
       theme={theme}
       currentUser={currentUser ?? null}
       isApprover
-      active="admin-kbiz"
+      active="admin-settings"
       counts={counts}
       onSelect={(key) => {
         if (key === 'employees') return onNavigate?.({ name: 'admin-employees' });
-        if (key === 'admin-kbiz') return onNavigate?.({ name: 'admin-kbiz' });
+        if (key === 'admin-settings') return onNavigate?.({ name: 'admin-settings' });
         if (key === 'overview') return onNavigate?.({ name: 'overview' });
         if (key.startsWith('my-')) {
           const view = key.slice(3) as 'drafts' | 'pending' | 'approved' | 'paid' | 'rejected';

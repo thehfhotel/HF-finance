@@ -1,5 +1,5 @@
 // Shared formatting for KBIZ payee/favorite labels and sync timestamps —
-// used by the admin settings screen (screens/approver/AdminKbiz.tsx) and the
+// used by the admin settings screen (screens/approver/AdminSettings.tsx) and the
 // pay-time destination picker (components/KbizDestinationPicker.tsx), so the
 // same account never reads differently depending on which screen shows it.
 import { formatKbizAccountLabel } from './kbizDestination';

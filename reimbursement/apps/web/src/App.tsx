@@ -31,7 +31,7 @@ import { DesktopApprover } from './screens/approver/Desktop';
 import { DesktopEmployee } from './screens/employee/Desktop';
 import { Login } from './screens/auth/Login';
 import { ManageEmployees } from './screens/approver/ManageEmployees';
-import { AdminKbiz } from './screens/approver/AdminKbiz';
+import { AdminSettings } from './screens/approver/AdminSettings';
 import { BottomNav } from './components/BottomNav';
 import type { BottomNavRoute } from './components/BottomNav';
 
@@ -52,7 +52,10 @@ function initialRouteFromUrl(): Route {
   const path = window.location.pathname;
   if (path === '/login') return { name: 'login' };
   if (path === '/admin/employees') return { name: 'admin-employees' };
-  if (path === '/admin/kbiz') return { name: 'admin-kbiz' };
+  if (path === '/admin/settings') return { name: 'admin-settings' };
+  // Legacy path — the screen lived at /admin/kbiz before it became general
+  // settings (2026-08-12). Old bookmarks and portal links keep working.
+  if (path === '/admin/kbiz') return { name: 'admin-settings' };
   if (path === '/my-requests') return { name: 'my-requests' };
   if (path === '/overview') return { name: 'overview' };
   return { name: 'home' };
@@ -315,7 +318,7 @@ export function App() {
     else if (name === 'approver-review' && id) setRoute({ name: 'approver-review', id });
     else if (name === 'approver-pay' && id) setRoute({ name: 'approver-pay', id });
     else if (name === 'admin-employees') setRoute({ name: 'admin-employees' });
-    else if (name === 'admin-kbiz') setRoute({ name: 'admin-kbiz' });
+    else if (name === 'admin-settings') setRoute({ name: 'admin-settings' });
     else if (name === 'my-requests') setRoute({ name: 'my-requests' });
     else if (name === 'logout') handleLogout();
   };
@@ -476,9 +479,9 @@ export function App() {
     );
   }
 
-  if (route.name === 'admin-kbiz') {
+  if (route.name === 'admin-settings') {
     const adminRole = currentUser?.role ?? tweaks.role;
-    const showAdminKbizBottomNav = platform === 'mobile';
+    const showAdminSettingsBottomNav = platform === 'mobile';
     const adminKbizMobileShell = (
       <>
         <div
@@ -487,10 +490,10 @@ export function App() {
             inset: 0,
             background: theme.paper,
             overflow: 'auto',
-            paddingBottom: showAdminKbizBottomNav ? 56 : 0,
+            paddingBottom: showAdminSettingsBottomNav ? 56 : 0,
           }}
         >
-          <AdminKbiz
+          <AdminSettings
             theme={theme}
             onBack={() => setRoute({ name: 'approver-home' })}
             currentUser={currentUser}
@@ -499,10 +502,10 @@ export function App() {
             onLogout={handleLogout}
           />
         </div>
-        {showAdminKbizBottomNav && (
+        {showAdminSettingsBottomNav && (
           <BottomNav
             role={adminRole}
-            activeRoute="admin-kbiz"
+            activeRoute="admin-settings"
             theme={theme}
             onNavigate={(r) => setRoute({ name: r } as Route)}
           />
@@ -512,7 +515,7 @@ export function App() {
     if (platform !== 'mobile') {
       return (
         <>
-          <AdminKbiz
+          <AdminSettings
             theme={theme}
             onBack={() => setRoute({ name: 'approver-home' })}
             currentUser={currentUser}
@@ -657,7 +660,7 @@ export function App() {
             initialView={route.name === 'my-requests' ? route.view : undefined}
             onNavigateApprover={(key) => {
               if (key === 'employees') return setRoute({ name: 'admin-employees' });
-              if (key === 'admin-kbiz') return setRoute({ name: 'admin-kbiz' });
+              if (key === 'admin-settings') return setRoute({ name: 'admin-settings' });
               if (key === 'overview') return setRoute({ name: 'overview' });
               // A box status — open the approver console on that exact tab.
               setRoute({ name: 'approver-home', filter: key as 'pending' });
@@ -823,8 +826,8 @@ function pathForRoute(route: Route): string {
       return '/login';
     case 'admin-employees':
       return '/admin/employees';
-    case 'admin-kbiz':
-      return '/admin/kbiz';
+    case 'admin-settings':
+      return '/admin/settings';
     case 'my-requests':
       return '/my-requests';
     case 'overview':

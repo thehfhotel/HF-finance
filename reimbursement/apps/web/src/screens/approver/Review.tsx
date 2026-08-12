@@ -676,7 +676,7 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
           }}
           onGotoSettings={() => {
             setKbizPickerOpen(false);
-            nav({ name: 'admin-kbiz' });
+            nav({ name: 'admin-settings' });
           }}
         />
       )}
