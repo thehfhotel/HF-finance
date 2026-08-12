@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-REPO="${REPO:-thehfhotel/payroll}"
+REPO="${REPO:-thehfhotel/HF-finance}"
 SECRET_NAME="NOTIFY_INGRESS_TOKEN"
 REMOTE="${REMOTE:-evergreen}"
 CONTAINER="${CONTAINER:-hf-erp-portal}"

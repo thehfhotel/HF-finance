@@ -96,7 +96,7 @@ The reimbursement api container runs as uid 1000; host dirs it writes need
 
 ### Issue tracker
 
-Issues live in GitHub Issues (thehfhotel/payroll) via the `gh` CLI; external
+Issues live in GitHub Issues (thehfhotel/HF-finance) via the `gh` CLI; external
 PRs are NOT a triage/request surface. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
