@@ -108,10 +108,10 @@ export const BANK_ALIASES: string[][] = [
   ["Hongkong and Shanghai", "เอชเอสบีซี", "ฮ่องกงและเซี่ยงไฮ้"],
   ["Deutsche Bank", "ดอยซ์"],
   ["Government Housing", "อาคารสงเคราะห์"],
-  ["BAAC", "เพื่อการเกษตรและสหกรณ์"],
+  ["BAAC", "ธ.ก.ส", "เพื่อการเกษตรและสหกรณ์"],
   ["Mizuho", "มิซูโฮ"],
   ["BNP Paribas", "บีเอ็นพี"],
-  ["Bank of China", "แบงก์ออฟไชน่า"],
+  ["Bank of China", "แห่งประเทศจีน"],
   ["Islamic Bank", "อิสลาม"],
   ["Tisco", "ทิสโก้"],
   ["Kiatnakin", "เกียรตินาคิน"],
@@ -142,10 +142,10 @@ export function bankPattern(wanted: string): RegExp {
 }
 
 const CELL_LABELS: { key: keyof RawFavoriteRow; re: RegExp }[] = [
-  { key: "nickname", re: /^(display name|ชื่อที่แสดง|ชื่อเล่น)$/i },
+  { key: "nickname", re: /^(display name|ชื่อย่อบัญชี|ชื่อที่แสดง|ชื่อเล่น)$/i },
   { key: "accountName", re: /^(account name|ชื่อบัญชี)$/i },
   { key: "bank", re: /^(bank|ธนาคาร)$/i },
-  { key: "accountNo", re: /^(account no|account number|เลขที่บัญชี|บัญชีเลขที่)$/i },
+  { key: "accountNo", re: /^(account no|account number|เลขบัญชี|เลขที่บัญชี|บัญชีเลขที่)$/i },
 ];
 
 /** Normalize a cell to its label key, or null when it isn't a label. */

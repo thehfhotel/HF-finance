@@ -242,3 +242,27 @@ describe("bank aliases", () => {
     expect(aliasesForBank("Some Future Bank")).toEqual(["Some Future Bank"]);
   });
 });
+
+describe("Thai UI (pinned from the 2026-08-12 live probe)", () => {
+  it("parses a real Thai picker row, merged mobile label included", () => {
+    const row = parseFavoriteRowCells([
+      "ชื่อย่อบัญชี/ชื่อบัญชี", "Guide HF",
+      "ชื่อย่อบัญชี", "Guide HF",
+      "ชื่อบัญชี", "น.ส. ทดสองสอง ตัวอย่าง",
+      "ธนาคาร", "ธนาคารกรุงศรีอยุธยา",
+      "เลขบัญชี", "100-0-00509-8",
+    ]);
+    expect(row).not.toBeNull();
+    expect(toFavorite(row!)).toEqual({
+      nickname: "Guide HF",
+      accountName: "น.ส. ทดสองสอง ตัวอย่าง",
+      bank: "ธนาคารกรุงศรีอยุธยา",
+      accountMasked: "…5098",
+      accountLast4: "5098",
+    });
+  });
+  it("BAAC and Bank of China match their real Thai option texts", () => {
+    expect(bankPattern("BAAC").test("ธนาคาร ธ.ก.ส.")).toBe(true);
+    expect(bankPattern("Bank of China").test("ธนาคารแห่งประเทศจีน (ไทย)")).toBe(true);
+  });
+});
