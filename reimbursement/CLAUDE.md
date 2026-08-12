@@ -54,10 +54,11 @@ apps/
 packages/
   shared/    API contract types (Receipt, Bundle, Property, Role, etc.)
 deploy/      nginx vhost reference
-.github/
-  workflows/ deploy.yml — build images, ssh deploy
 Dockerfile.api, Dockerfile.web, docker-compose.production.yml
 ```
+
+Deploy workflows live at the MONOREPO ROOT, not under `reimbursement/`
+(there is no `.github/` in this subtree — see the banner above).
 
 ## Conventions
 
@@ -103,7 +104,11 @@ bun run db:seed                # seed sample users + receipts + bundles
 - **Theme**: `apps/web/src/lib/theme.ts` (`getTheme(dark, accent)`).
 - **Routing** (state-based, not URL-based for in-app screens): `apps/web/src/lib/router.ts`.
 - **Mock data for seed**: `apps/api/prisma/seed.ts`.
-- **Deploy workflow**: `.github/workflows/deploy.yml`.
+- **Deploy workflow**: `.github/workflows/deploy-reimbursement.yml` (build →
+  SSH-deploy) and `.github/workflows/reimbursement-ci.yml` (typecheck + PR
+  image smoke) — both at the MONOREPO ROOT, not in `reimbursement/`. Do not
+  confuse with the root's own `.github/workflows/deploy.yml`, which is the
+  unrelated payroll-form + kbiz-bot pipeline.
 - **KBIZ payment pipeline** (apps/api): `kbiz.ts` (queue-dir config + intent
   writes, dark when `KBIZ_QUEUE_DIR` unset/unprovisioned), `kbiz-poller.ts`
   (result reconciliation + stranded-payment watchdog), `voucher.ts` (Thai
@@ -130,7 +135,7 @@ bun run db:seed                # seed sample users + receipts + bundles
 
 ### Issue tracker
 
-Issues live in GitHub Issues (thehfhotel/reimbursement-v2) via the `gh` CLI; external PRs are NOT a triage/request surface. See `docs/agents/issue-tracker.md`.
+Issues live in GitHub Issues (thehfhotel/payroll) via the `gh` CLI; external PRs are NOT a triage/request surface. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

@@ -102,7 +102,8 @@ Next steps (off this host):
 
        ssh-keyscan -t ed25519 evergreen.thehfhotel.org
 
-     Save the output as the GitHub repo secret SSH_KNOWN_HOSTS.
+     Save the output as the GitHub repo secret REIMB_SSH_KNOWN_HOSTS
+     (on thehfhotel/payroll — the monorepo repo, not this app's old one).
 
   3. Set the rest of the GitHub repo secrets — see DEPLOYMENT.md.
 

@@ -43,7 +43,7 @@ RUN bun --filter web build \
 # ─────────────────────────────────────────────────────────────────────────────
 FROM nginx:alpine AS runtime
 
-LABEL org.opencontainers.image.source=https://github.com/jwinut/reimbursement
+LABEL org.opencontainers.image.source=https://github.com/thehfhotel/payroll
 LABEL org.opencontainers.image.licenses=Proprietary
 
 # Drop the stock site config and ship the SPA + proxy config below.
