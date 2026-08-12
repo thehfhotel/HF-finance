@@ -151,8 +151,13 @@ jobs:
           file: Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ github.repository }}:latest
-            ${{ env.REGISTRY }}/${{ github.repository }}:${{ github.sha }}
+            # Image names are LITERALS, deliberately decoupled from the repo
+            # name (repo renamed payroll → HF-finance 2026-08-12): GHCR
+            # packages keep their names and evergreen's compose pulls these
+            # exact strings. Renaming the packages would orphan sha history
+            # and require a synchronized compose+prod change — don't.
+            ${{ env.REGISTRY }}/thehfhotel/payroll:latest
+            ${{ env.REGISTRY }}/thehfhotel/payroll:${{ github.sha }}
           # `scope: payroll` isolates GHA cache namespace from kbiz-bot.
           cache-from: type=gha,scope=payroll
           cache-to: type=gha,mode=max,scope=payroll
@@ -182,8 +187,8 @@ jobs:
           file: kbiz-bot/Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ github.repository }}-kbiz-bot:latest
-            ${{ env.REGISTRY }}/${{ github.repository }}-kbiz-bot:${{ github.sha }}
+            ${{ env.REGISTRY }}/thehfhotel/payroll-kbiz-bot:latest
+            ${{ env.REGISTRY }}/thehfhotel/payroll-kbiz-bot:${{ github.sha }}
           cache-from: type=gha,scope=kbiz-bot
           cache-to: type=gha,mode=max,scope=kbiz-bot
 
