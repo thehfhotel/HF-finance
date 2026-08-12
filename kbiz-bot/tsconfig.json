@@ -13,7 +13,37 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+
+    // The KBIZ contract (KbizPaymentIntent, KbizDestination, KbizFavorite,
+    // the memo rules) is OWNED by reimbursement/packages/shared and imported
+    // from SOURCE — no publish step, no workspace rewiring. This mapping is
+    // what resolves it for the three toolchains that read a tsconfig:
+    //   - tsc  reads it here;
+    //   - tsx  reads `paths` at runtime out of the tsconfig it finds in
+    //          process.cwd() — NOT next to the file being imported. So the bot
+    //          must be launched FROM kbiz-bot/ (the npm scripts and the
+    //          Dockerfile's `WORKDIR /app/kbiz-bot` both do);
+    //   - bun  honors the nearest tsconfig, including when `bun test` is run
+    //          from the repo root (the root-CI context).
+    //
+    // THE BUILT IMAGE HAS NONE OF THIS. The repo-root .dockerignore excludes
+    // `kbiz-bot/*.json` (re-including only package.json), so tsconfig.json is
+    // not in the build context at all; in the container the bare specifier
+    // resolves through a node_modules symlink the Dockerfile creates, plus the
+    // shared package's own `exports` field. Two independent mechanisms, pinned
+    // to one file by test/shared-resolution.test.ts — change one, read that.
+    //
+    // A contract change is a `tsc` error here. Note CI does NOT run tsc today
+    // (deploy.yml's `test` job is `bun test` only); the drift check that does
+    // run is the text comparison in test/shared-contract.test.ts.
+    //
+    // No `baseUrl`: TypeScript 7 REMOVED it (TS5102), and a bare `paths` entry
+    // is resolved relative to this file's own directory — exactly what
+    // `baseUrl: "."` used to mean here. tsx and bun read it the same way.
+    "paths": {
+      "@reimbursement/shared": ["../reimbursement/packages/shared/src/index.ts"]
+    }
   },
   // Only src/ is type-checked: test/ imports "bun:test", which is a Bun
   // runtime module with no installed type declarations, and `bun test` type-

@@ -346,6 +346,9 @@ export const KBIZ_MEMO_MAX_LENGTH = 100;
  * "ค่าน้ำ/ค่าไฟ" stays two readable words. Whitespace is then collapsed and
  * trimmed and the result capped at `KBIZ_MEMO_MAX_LENGTH`. Idempotent:
  * sanitizing an already-sanitized string returns it unchanged.
+ *
+ * NB: ฿ (U+0E3F) sits INSIDE the preserved Thai block and SURVIVES
+ * sanitization — pinned by kbiz-bot/test/shared-contract.test.ts.
  */
 export function sanitizeKbizMemo(s: string): string {
   return s
