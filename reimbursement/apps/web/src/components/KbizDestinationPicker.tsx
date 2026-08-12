@@ -39,7 +39,7 @@ export interface KbizDestinationPickerProps {
   bundle: BundleWithDetails;
   onClose: () => void;
   onConfirm: (chosen: KbizChosenDestination) => void;
-  /** Navigates to ตั้งค่า (admin-kbiz) — offered from the empty-favorites state. */
+  /** Navigates to ตั้งค่า (admin-settings) — offered from the empty-favorites state. */
   onGotoSettings: () => void;
 }
 

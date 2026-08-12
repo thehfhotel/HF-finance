@@ -278,7 +278,7 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
         // Destinations that live on other screens hand off; the rest are panes
         // of this one, so the sidebar itself never changes shape.
         if (key === 'employees') return onNavigate?.({ name: 'admin-employees' });
-        if (key === 'admin-kbiz') return onNavigate?.({ name: 'admin-kbiz' });
+        if (key === 'admin-settings') return onNavigate?.({ name: 'admin-settings' });
         // Your own requests live on the requestor console; the menu there is
         // this same component, so only the highlighted row changes — and the
         // pane it opens is the one that was actually clicked.
@@ -404,7 +404,7 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
               }}
               onGotoSettings={() => {
                 setKbizPickerOpen(false);
-                onNavigate?.({ name: 'admin-kbiz' });
+                onNavigate?.({ name: 'admin-settings' });
               }}
             />
           )}
