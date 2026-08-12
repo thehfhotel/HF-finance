@@ -1,0 +1,59 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# bun
+bun.lockb
+.bun/
+
+# build outputs
+dist/
+build/
+.vite/
+
+# testing
+coverage/
+playwright-report/
+test-results/
+
+# misc
+.DS_Store
+*.pem
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# local env files
+.env
+.env*.local
+
+# uploads
+/uploads
+
+# typescript
+*.tsbuildinfo
+
+# prisma generated client
+apps/api/src/generated/
+
+# uploaded files
+apps/api/uploads/*
+!apps/api/uploads/.gitkeep
+
+# editors
+.vscode/
+.idea/
+
+# local-only docs / data (not for the public repo)
+CLAUDE.local.md
+/Private & Shared*/
+
+out/
+
+# Python bytecode from the local Notion import tooling
+__pycache__/
+*.pyc
