@@ -59,9 +59,10 @@ services:
       # kbiz-bot-only. loadTransferConfig() resolves the bare filename
       # relative to the container's WORKDIR (/app/kbiz-bot), which is
       # exactly this mount's target — no extra env var needed. Ops creates
-      # the real file at /srv/kbiz-bot/transfer-other.config.json (copied
-      # from kbiz-bot/transfer-other.config.example.json) before
-      # uncommenting; see EVERGREEN.md's switch-over steps.
+      # the real file at /home/deploy/kbiz-bot/transfer-other.config.json
+      # (copied from kbiz-bot/transfer-other.config.example.json) before
+      # uncommenting; see EVERGREEN.md's switch-over steps. NOT /srv — same
+      # snap-Docker constraint as the queue dir above.
       - ${KBIZ_TRANSFER_CONFIG_HOST_PATH:-/home/deploy/kbiz-bot/transfer-other.config.json}:/app/kbiz-bot/transfer-other.config.json:ro
     env_file:
       - .env
