@@ -299,3 +299,9 @@ source path … read-only file system` even though the path exists. Both
 2026-08-12 deploys tripped this and briefly took the stacks down; recovery was
 relocating the tree + pointing `KBIZ_QUEUE_HOST_DIR` (env/secret) at the new
 path. Compose/workflow defaults now say `/home/deploy/kbiz-queue`.
+
+Second correction, same day: the tree must be `chown -R 1000:1000` (the api
+container runs as `bun`, uid 1000, and needs write for vouchers/intents/archive)
+— `deploy:deploy` (999) left it read-only to the api and the first จ่ายผ่าน KBIZ
+rolled back with EACCES on the voucher write. kbiz-bot and payroll-form run as
+root and are indifferent to ownership.
