@@ -516,7 +516,7 @@ export const KBIZ_BANKS = [
 export type KbizBank = (typeof KBIZ_BANKS)[number];
 
 /**
- * Thai display names, index-aligned with KBIZ_BANKS. The bot's KBIZ session
+ * The bot's Thai-session bank <select>, all 31 options pinned VERBATIM from the live page (2026-08-12 probe) — not guesses, not index-aligned with the shorter English list. The bot's KBIZ session
  * runs in Thai (since 2026-08-12), so these are what its bank <select>
  * renders; the web picker shows + sends these, and the bot's alias matcher
  * (BANK_ALIASES in kbiz-bot/src/lib/favorites-core.ts — keep in parity)
@@ -528,26 +528,32 @@ export const KBIZ_BANKS_TH = [
   'ธนาคารกรุงไทย',
   'ธนาคารทหารไทยธนชาต',
   'ธนาคารไทยพาณิชย์',
-  'ซิตี้แบงก์',
+  'ธนาคารซิตี้แบงก์ เอ็น.เอ.',
   'ธนาคารซูมิโตโม มิตซุย แบงกิ้ง',
   'ธนาคารสแตนดาร์ดชาร์เตอร์ด',
   'ธนาคารซีไอเอ็มบี ไทย',
   'ธนาคารยูโอบี',
   'ธนาคารกรุงศรีอยุธยา',
   'ธนาคารออมสิน',
-  'ธนาคารเอชเอสบีซี',
+  'ธนาคารฮ่องกงและเซี่ยงไฮ้',
   'ธนาคารดอยซ์แบงก์',
   'ธนาคารอาคารสงเคราะห์',
-  'ธนาคารเพื่อการเกษตรและสหกรณ์การเกษตร',
+  'ธนาคาร ธ.ก.ส.',
   'ธนาคารมิซูโฮ',
   'ธนาคารบีเอ็นพี พารีบาส์',
-  'ธนาคารแบงก์ออฟไชน่า',
+  'ธนาคารแห่งประเทศจีน (ไทย)',
   'ธนาคารอิสลามแห่งประเทศไทย',
-  'ธนาคารทิสโก้',
+  'ธนาคาร ทิสโก้',
   'ธนาคารเกียรตินาคินภัทร',
   'ธนาคารไอซีบีซี (ไทย)',
   'ธนาคารไทยเครดิต',
   'ธนาคารแลนด์ แอนด์ เฮ้าส์',
+  'ธนาคารเจพีมอร์แกน เชส',
+  'ธนาคารเมกะ สากลพาณิชย์',
+  'ธนาคารแห่งอเมริกา',
+  'ธนาคาร อินเดียนโอเวอร์ซีส์',
+  'ธนาคารพัฒนาวิสาหกิจขนาดกลางและขนาดย่อมแห่งประเทศไทย',
+  'ธนาคารคลิกซ์',
 ] as const;
 
 /** Every value the custom-destination bank field accepts (either language). */
