@@ -17,7 +17,7 @@ import {
   rowHasAccountEndingWith,
   toFavorite,
   type FavoritesDriver,
-} from "../src/lib/scrape-favorites";
+} from "../src/lib/favorites-core";
 
 /** One rendered row's <p> texts, in DOM order. */
 const row = (nickname: string, accountName: string, bank: string, accountNo: string) => [
