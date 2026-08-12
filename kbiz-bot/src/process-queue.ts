@@ -6,12 +6,15 @@ import { runAddPayrollFlow } from "./flows/add-payroll-flow";
 import { runTransferPayrollFlow } from "./flows/transfer-payroll-flow";
 import { runTransferOtherFlow } from "./flows/transfer-other-flow";
 import { scrapeRegisteredAccounts } from "./lib/scrape-registered";
-import { loadTransferConfig, resolveRecipient, toPayee } from "./lib/transfer-config";
+import { FAVORITES_FILE, scrapeFavorites } from "./lib/scrape-favorites";
+import { loadTransferConfig } from "./lib/transfer-config";
 import { HANDLES_FILE, publishPayeeHandles } from "./lib/payee-handles";
 import { htmlToPdf } from "./lib/html-to-pdf";
 import {
+  describeDestination,
   mapFlowOutcomeToPatch,
   parseTransferOtherRequest,
+  resolveQueuePayee,
   resolveSharedPath,
   slipFileBasename,
   type TransferOtherQueuePatch,
@@ -45,7 +48,24 @@ type PayrollQueueRequest = {
   result?: { success: boolean; finalUrl?: string; error?: string };
 };
 
-type QueueRequest = PayrollQueueRequest | TransferOtherQueueRequest;
+/**
+ * A read-only sync item: no workbook, no payee, no money. reimbursement
+ * queues one ("sync_<uuidhex>") when an approver refreshes the destination
+ * picker, and the bot answers by republishing queue/kbiz-favorites.json.
+ */
+type SyncQueueRequest = {
+  id: string;
+  app: "reimbursement";
+  type: "list-favorites";
+  status: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  updatedAt?: string;
+  result?: { success: boolean; count?: number; error?: string };
+};
+
+type QueueRequest = PayrollQueueRequest | TransferOtherQueueRequest | SyncQueueRequest;
 
 async function notifySlack(text: string) {
   if (!SLACK) return;
@@ -63,14 +83,16 @@ async function listApproved(): Promise<QueueRequest[]> {
   const out: QueueRequest[] = [];
   for (const f of files) {
     if (!f.endsWith(".json")) continue;
-    // The handles manifest lives alongside the queue items (only shared path
-    // needing no new mount) — it is metadata, never a request.
-    if (f === HANDLES_FILE) continue;
+    // The handles + favorites manifests live alongside the queue items (only
+    // shared path needing no new mount) — they are metadata, never requests.
+    if (f === HANDLES_FILE || f === FAVORITES_FILE) continue;
     try {
       const buf = await readFile(join(QUEUE_DIR, f), "utf8");
       const parsed = JSON.parse(buf) as { type?: unknown };
       const req: QueueRequest =
-        parsed.type === "transfer-other" ? parseTransferOtherRequest(parsed) : (parsed as PayrollQueueRequest);
+        parsed.type === "transfer-other"
+          ? parseTransferOtherRequest(parsed)
+          : (parsed as PayrollQueueRequest | SyncQueueRequest);
       if (req.status === "approved") out.push(req);
     } catch (e) {
       console.warn(`⚠ skipping malformed queue file ${f}: ${(e as Error).message}`);
@@ -95,12 +117,19 @@ async function runListRegistered(page: Page): Promise<{ success: boolean; finalU
   return { success: true, finalUrl: LIST_URL };
 }
 
+/** Refresh the destination picker's saved-account list (read-only, no money). */
+async function runListFavorites(page: Page): Promise<number> {
+  const { favorites } = await scrapeFavorites(page, QUEUE_DIR); // writes queue/kbiz-favorites.json
+  console.log(`✓ ${favorites.length} saved account(s) written to ${FAVORITES_FILE}`);
+  return favorites.length;
+}
+
 /**
- * Drive a single `transfer-other` intent: resolve the payee from the bot's
- * own config (the intent carries only a handle — see decision 4 in
- * docs/adr/0001-kbiz-transfer-automation.md), best-effort attach the
- * rendered voucher, run the flow with `confirm: true`, and map the outcome
- * to the queue patch the watch loop writes back.
+ * Drive a single `transfer-other` intent: resolve the destination (a picked
+ * favorite or typed account, else the payee handle the bot's own config
+ * resolves — see decision 4 in docs/adr/0001-kbiz-transfer-automation.md),
+ * best-effort attach the rendered voucher, run the flow with `confirm: true`,
+ * and map the outcome to the queue patch the watch loop writes back.
  *
  * Every early-return here happens BEFORE the phone push is ever armed, so it
  * is always safe to file as "nothing moved" (mapFlowOutcomeToPatch's
@@ -115,12 +144,13 @@ async function runTransferOtherQueueItem(page: Page, req: TransferOtherQueueRequ
     return mapFlowOutcomeToPatch({ success: false, error: `config: ${(e as Error).message}` });
   }
 
-  let recipient;
+  let payee;
   try {
-    ({ recipient } = resolveRecipient(config, req.payee.handle));
+    payee = resolveQueuePayee(req, config);
   } catch (e) {
-    // Unknown handle → fail with a clear error. Never guess a payee.
-    return mapFlowOutcomeToPatch({ success: false, error: `Unknown payee handle "${req.payee.handle}": ${(e as Error).message}` });
+    // Unknown handle or malformed destination → fail with a clear error.
+    // Never guess a payee.
+    return mapFlowOutcomeToPatch({ success: false, error: (e as Error).message });
   }
 
   if (req.amount > config.maxTransfer) {
@@ -144,7 +174,7 @@ async function runTransferOtherQueueItem(page: Page, req: TransferOtherQueueRequ
   }
 
   const flow = await runTransferOtherFlow(page, {
-    payee: toPayee(recipient),
+    payee,
     amount: req.amount,
     memo: req.memo,
     attachmentPath,
@@ -193,13 +223,18 @@ async function processBatch(): Promise<number> {
       await notifySlack(`:hourglass_flowing_sand: Running \`${req.id}\` (${req.type})`);
 
       if (req.type === "transfer-other") {
+        // bank + last 4 for a custom destination — a full account number has
+        // no business in Slack. See describeDestination.
+        const dest = describeDestination(req);
         try {
           const patch = await runTransferOtherQueueItem(page, req);
           await patchRequest(req.id, { status: patch.status, result: patch.result, completedAt: new Date().toISOString() });
           const icon = patch.status === "done" ? "✅" : patch.status === "needs-review" ? "⚠️" : "❌";
           const slackIcon = patch.status === "done" ? ":white_check_mark:" : patch.status === "needs-review" ? ":warning:" : ":x:";
           const detail = patch.result.error ? ` — ${patch.result.error}` : patch.result.reference ? ` → ${patch.result.reference}` : "";
-          await notifySlack(`${slackIcon} ${patch.status} \`${req.id}\` (transfer-other, bundle ${req.bundleId})${detail}`);
+          await notifySlack(
+            `${slackIcon} ${patch.status} \`${req.id}\` (transfer-other → ${dest}, bundle ${req.bundleId})${detail}`,
+          );
           console.log(`${icon} ${req.id} ${patch.status}`);
         } catch (e) {
           // Unknown crash: we cannot prove the phone push was never armed, so
@@ -209,8 +244,41 @@ async function processBatch(): Promise<number> {
           const error = (e as Error).message;
           const patch = mapFlowOutcomeToPatch({ success: false, outcome: "unconfirmed", error: `Crashed: ${error}` });
           await patchRequest(req.id, { status: patch.status, result: patch.result, completedAt: new Date().toISOString() });
-          await notifySlack(`:warning: Crashed \`${req.id}\` (transfer-other, bundle ${req.bundleId}) → needs-review — ${error}`);
+          await notifySlack(
+            `:warning: Crashed \`${req.id}\` (transfer-other → ${dest}, bundle ${req.bundleId}) → needs-review — ${error}`,
+          );
           console.log(`⚠️ ${req.id} crashed → needs-review: ${error}`);
+        }
+        continue;
+      }
+
+      // A read-only scrape: nothing can move, so a failure is always just
+      // "failed" (retryable), never the ambiguous needs-review a transfer has.
+      if (req.type === "list-favorites") {
+        // The completion patch may find the file GONE (reimbursement's
+        // staleness sweep can archive an old ask) — the scrape's real output
+        // is kbiz-favorites.json, which was already published, so a vanished
+        // status file is a shrug, never a batch-abort.
+        try {
+          const count = await runListFavorites(page);
+          await patchRequest(req.id, {
+            status: "done",
+            completedAt: new Date().toISOString(),
+            result: { success: true, count },
+          }).catch((e) =>
+            console.log(`↷ ${req.id} finished but its queue file is gone (${(e as Error).message}) — manifest published anyway`),
+          );
+          await notifySlack(`:white_check_mark: Done \`${req.id}\` (list-favorites) → ${count} saved account(s)`);
+          console.log(`✅ ${req.id} done`);
+        } catch (e) {
+          const error = (e as Error).message;
+          await patchRequest(req.id, {
+            status: "failed",
+            completedAt: new Date().toISOString(),
+            result: { success: false, error },
+          }).catch(() => console.log(`↷ ${req.id} failed and its queue file is gone`));
+          await notifySlack(`:x: Failed \`${req.id}\` (list-favorites) — ${error}`);
+          console.log(`❌ ${req.id} failed: ${error}`);
         }
         continue;
       }

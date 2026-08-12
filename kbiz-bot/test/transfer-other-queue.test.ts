@@ -7,11 +7,15 @@
 
 import { describe, expect, it } from "bun:test";
 import {
+  describeDestination,
   mapFlowOutcomeToPatch,
+  parseDestination,
   parseTransferOtherRequest,
+  resolveQueuePayee,
   resolveSharedPath,
   slipFileBasename,
 } from "../src/lib/transfer-other-queue";
+import type { TransferConfig } from "../src/lib/transfer-config";
 
 function validIntent(overrides: Record<string, unknown> = {}) {
   return {
@@ -91,6 +95,214 @@ describe("parseTransferOtherRequest", () => {
 
   it("names the intent id in later errors once id is known", () => {
     expect(() => parseTransferOtherRequest(validIntent({ bundleId: undefined }))).toThrow(/^abc123:/);
+  });
+
+  it("accepts a null payee when the intent carries a destination", () => {
+    // The picker writes payee: null for anything but a handle; the
+    // destination is what gets paid.
+    const intent = validIntent({ payee: null, destination: { kind: "favorite", nickname: "พี่วิว", bank: "SCB", accountLast4: "5678" } });
+    expect(parseTransferOtherRequest(intent).payee).toBeNull();
+  });
+
+  it("still requires payee.handle when there is no destination at all", () => {
+    expect(() => parseTransferOtherRequest(validIntent({ payee: null }))).toThrow(/missing "payee.handle"/);
+  });
+
+  it("does NOT reject a malformed destination — that has to fail the item, not hide the file", () => {
+    // A file that throws here is skipped by listApproved and sits "approved"
+    // forever; the destination is validated at resolve time instead so the
+    // item can be patched to failed with the reason.
+    const intent = validIntent({ payee: null, destination: { kind: "nonsense" } });
+    expect(parseTransferOtherRequest(intent).destination).toEqual({ kind: "nonsense" });
+  });
+});
+
+// ── destination picker (handle / favorite / custom) ─────────────────────────
+
+// Fake payee book — no real account ever appears in this repo.
+const CONFIG: TransferConfig = {
+  maxTransfer: 50_000,
+  recipients: {
+    revew: { mode: "favorite", nickname: "พี่วิว", accountNo: "111-2-34567-8", bank: "Kasikornbank" },
+  },
+};
+
+describe("parseDestination", () => {
+  it("parses a handle destination", () => {
+    expect(parseDestination({ kind: "handle", handle: "revew" })).toEqual({ kind: "handle", handle: "revew" });
+  });
+
+  it("parses a favorite destination, keeping only the last 4 digits", () => {
+    expect(
+      parseDestination({ kind: "favorite", nickname: "พี่วิว", bank: "Siam Commercial Bank", accountLast4: "5678", accountName: "MS. TESTONE SAMPLE" }),
+    ).toEqual({
+      kind: "favorite",
+      nickname: "พี่วิว",
+      bank: "Siam Commercial Bank",
+      accountLast4: "5678",
+      accountName: "MS. TESTONE SAMPLE",
+    });
+  });
+
+  it("strips the mask off accountLast4 (…5678 → 5678)", () => {
+    const dest = parseDestination({ kind: "favorite", nickname: "พี่วิว", bank: "SCB", accountLast4: "…5678" });
+    expect(dest).toMatchObject({ accountLast4: "5678" });
+  });
+
+  it("rejects a favorite whose accountLast4 isn't 4 digits", () => {
+    expect(() => parseDestination({ kind: "favorite", nickname: "พี่วิว", bank: "SCB", accountLast4: "567" })).toThrow(
+      /"accountLast4" must be exactly 4 digits/,
+    );
+  });
+
+  it("rejects a favorite missing nickname or bank", () => {
+    expect(() => parseDestination({ kind: "favorite", bank: "SCB", accountLast4: "5678" })).toThrow(/missing "nickname"/);
+    expect(() => parseDestination({ kind: "favorite", nickname: "พี่วิว", accountLast4: "5678" })).toThrow(/missing "bank"/);
+  });
+
+  it("parses a custom destination, stripping separators from the account number", () => {
+    expect(parseDestination({ kind: "custom", bank: "Bangkok Bank", accountNo: "111-2-34567-8" })).toEqual({
+      kind: "custom",
+      bank: "Bangkok Bank",
+      accountNo: "1112345678",
+      accountName: undefined,
+    });
+    expect(parseDestination({ kind: "custom", bank: "Bangkok Bank", accountNo: "020 4 01234 567" })).toMatchObject({
+      accountNo: "020401234567",
+    });
+  });
+
+  it("rejects a custom account number outside 8–15 digits", () => {
+    expect(() => parseDestination({ kind: "custom", bank: "Bangkok Bank", accountNo: "12345" })).toThrow(/must be 8–15 digits/);
+    expect(() => parseDestination({ kind: "custom", bank: "Bangkok Bank", accountNo: "1234567890123456" })).toThrow(
+      /must be 8–15 digits/,
+    );
+  });
+
+  it("rejects a custom account number carrying anything but digits and separators", () => {
+    expect(() => parseDestination({ kind: "custom", bank: "Bangkok Bank", accountNo: "11a2345678" })).toThrow(/must be digits/);
+  });
+
+  it("never echoes the account number in an error", () => {
+    // The message lands in the queue file, the approver's screen and Slack.
+    let message = "";
+    try {
+      parseDestination({ kind: "custom", bank: "Bangkok Bank", accountNo: "1234567" });
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toContain("must be 8–15 digits");
+    expect(message).not.toContain("1234567");
+  });
+
+  it("rejects an unknown kind and a non-object", () => {
+    expect(() => parseDestination({ kind: "iban", iban: "TH12" })).toThrow(/unknown destination kind "iban"/);
+    expect(() => parseDestination({})).toThrow(/unknown destination kind undefined/);
+    expect(() => parseDestination(null)).toThrow(/must be an object/);
+    expect(() => parseDestination("favorite")).toThrow(/must be an object/);
+  });
+
+  it("tags errors with the intent id it was given", () => {
+    expect(() => parseDestination({ kind: "nope" }, "abc123")).toThrow(/^abc123:/);
+  });
+});
+
+describe("resolveQueuePayee", () => {
+  const req = (over: Record<string, unknown>) =>
+    ({ id: "abc123", payee: null, ...over }) as Parameters<typeof resolveQueuePayee>[0];
+
+  it("resolves a handle destination through the payee book", () => {
+    const payee = resolveQueuePayee(req({ destination: { kind: "handle", handle: "revew" } }), CONFIG);
+    expect(payee).toEqual({
+      mode: "favorite",
+      nickname: "พี่วิว",
+      accountNo: "111-2-34567-8",
+      bank: "Kasikornbank",
+      accountName: undefined,
+    });
+  });
+
+  it("resolves a favorite destination WITHOUT any account number", () => {
+    const payee = resolveQueuePayee(
+      req({ destination: { kind: "favorite", nickname: "พี่วิว", bank: "SCB", accountLast4: "5678" } }),
+      CONFIG,
+    );
+    expect(payee).toEqual({
+      mode: "favorite",
+      nickname: "พี่วิว",
+      bank: "SCB",
+      accountLast4: "5678",
+      accountName: undefined,
+    });
+    expect(payee.accountNo).toBeUndefined();
+  });
+
+  it("resolves a custom destination to the digits the flow will type", () => {
+    const payee = resolveQueuePayee(
+      req({ destination: { kind: "custom", bank: "Bangkok Bank", accountNo: "111-2-34567-8", accountName: "MS. TESTONE SAMPLE" } }),
+      CONFIG,
+    );
+    expect(payee).toEqual({
+      mode: "custom",
+      bank: "Bangkok Bank",
+      accountNo: "1112345678",
+      accountName: "MS. TESTONE SAMPLE",
+    });
+  });
+
+  it("prefers the destination over payee.handle", () => {
+    const payee = resolveQueuePayee(
+      req({ payee: { handle: "revew" }, destination: { kind: "custom", bank: "Bangkok Bank", accountNo: "222-3-45678-9" } }),
+      CONFIG,
+    );
+    expect(payee.mode).toBe("custom");
+    expect(payee.bank).toBe("Bangkok Bank");
+  });
+
+  it("falls back to payee.handle for a pre-picker intent", () => {
+    expect(resolveQueuePayee(req({ payee: { handle: "revew" } }), CONFIG).nickname).toBe("พี่วิว");
+  });
+
+  it("fails on an unknown handle, from either route", () => {
+    expect(() => resolveQueuePayee(req({ payee: { handle: "ghost" } }), CONFIG)).toThrow(/Unknown payee handle "ghost"/);
+    expect(() => resolveQueuePayee(req({ destination: { kind: "handle", handle: "ghost" } }), CONFIG)).toThrow(
+      /Unknown payee handle "ghost"/,
+    );
+  });
+
+  it("fails on a malformed destination instead of falling back to the handle", () => {
+    expect(() => resolveQueuePayee(req({ payee: { handle: "revew" }, destination: { kind: "iban" } }), CONFIG)).toThrow(
+      /unknown destination kind "iban"/,
+    );
+  });
+
+  it("fails when the intent names no destination at all", () => {
+    expect(() => resolveQueuePayee(req({}), CONFIG)).toThrow(/neither a "destination" nor a "payee.handle"/);
+  });
+});
+
+describe("describeDestination", () => {
+  it("shows a custom destination as bank + last 4 ONLY", () => {
+    const line = describeDestination({
+      payee: null,
+      destination: { kind: "custom", bank: "Bangkok Bank", accountNo: "111-2-34567-8" },
+    });
+    expect(line).toBe("custom (Bangkok Bank …5678)");
+    expect(line).not.toContain("1112345678");
+    expect(line).not.toContain("111-2-34567-8");
+  });
+
+  it("describes favorite and handle destinations", () => {
+    expect(
+      describeDestination({ payee: null, destination: { kind: "favorite", nickname: "พี่วิว", bank: "SCB", accountLast4: "5678" } }),
+    ).toBe('favorite "พี่วิว" (SCB …5678)');
+    expect(describeDestination({ payee: null, destination: { kind: "handle", handle: "revew" } })).toBe('handle "revew"');
+  });
+
+  it("falls back to the handle, and never throws on a broken destination", () => {
+    expect(describeDestination({ payee: { handle: "revew" } })).toBe('handle "revew"');
+    expect(describeDestination({ payee: null })).toBe("no destination");
+    expect(describeDestination({ payee: null, destination: { kind: "iban" } })).toBe("unparseable destination");
   });
 });
 

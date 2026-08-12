@@ -1,4 +1,24 @@
 import { basename, resolve } from "node:path";
+import type { Payee } from "../flows/transfer-other-flow";
+import { resolveRecipient, toPayee, type TransferConfig } from "./transfer-config";
+
+/**
+ * Where a payment goes, chosen by the approver at pay time. Mirrors
+ * reimbursement's `KbizDestination` (packages/shared/src/index.ts) — same
+ * cross-repo JSON contract as the intent itself.
+ *
+ *  - "handle": the admin-mapped payee; the bot's own gitignored payee book
+ *    resolves it, exactly as before the picker existed.
+ *  - "favorite": a synced KBIZ saved account. Carries NO full account number
+ *    (the synced list is masked); the flow verifies nickname + bank + last-4
+ *    against the live picker and requires exactly one match.
+ *  - "custom": a typed destination — the one kind that must carry the full
+ *    number, because the bot has to type it into KBIZ.
+ */
+export type QueueDestination =
+  | { kind: "handle"; handle: string }
+  | { kind: "favorite"; nickname: string; bank: string; accountLast4: string; accountName?: string }
+  | { kind: "custom"; bank: string; accountNo: string; accountName?: string };
 
 /**
  * The `transfer-other` queue-item shape, written by reimbursement's apps/api
@@ -19,7 +39,20 @@ export interface TransferOtherQueueRequest {
   createdAt: string;
   /** The bundle this pays. */
   bundleId: string;
-  payee: { handle: string };
+  /**
+   * The pre-picker way of naming a payee: an admin-mapped handle. Writers set
+   * it only for a `kind: "handle"` destination and `null` otherwise, so
+   * readers PREFER `destination` and fall back here for older intents.
+   */
+  payee: { handle: string } | null;
+  /**
+   * Where the money goes. Deliberately untyped at parse time: a malformed
+   * destination must FAIL the item with a clear error (parseDestination, at
+   * resolve time), not make the whole file unreadable — an unparseable file
+   * is skipped by listApproved and would sit "approved" forever while
+   * reimbursement shows the bundle stuck in `paying`.
+   */
+  destination?: unknown;
   /** Baht, e.g. 1234.5. */
   amount: number;
   /** Already sanitized by reimbursement's buildKbizMemo; the flow sanitizes again anyway. */
@@ -61,8 +94,12 @@ export function parseTransferOtherRequest(raw: unknown): TransferOtherQueueReque
   }
   if (typeof r.bundleId !== "string" || !r.bundleId) throw new Error(`${tag}: missing "bundleId"`);
 
-  const payee = r.payee as { handle?: unknown } | undefined;
-  if (!payee || typeof payee !== "object" || typeof payee.handle !== "string" || !payee.handle) {
+  // A destination supersedes payee.handle, so payee may legitimately be null
+  // whenever one is present — its own validation happens in parseDestination,
+  // where a bad value fails the item instead of hiding the whole file.
+  const payee = r.payee as { handle?: unknown } | null | undefined;
+  const hasDestination = r.destination !== undefined && r.destination !== null;
+  if (!hasDestination && (!payee || typeof payee !== "object" || typeof payee.handle !== "string" || !payee.handle)) {
     throw new Error(`${tag}: missing "payee.handle"`);
   }
   if (typeof r.amount !== "number" || !Number.isFinite(r.amount) || r.amount <= 0) {
@@ -81,6 +118,148 @@ export function parseTransferOtherRequest(raw: unknown): TransferOtherQueueReque
   }
 
   return r as unknown as TransferOtherQueueRequest;
+}
+
+/** KBIZ account numbers render with dashes/spaces; both are pure formatting. */
+const ACCOUNT_SEPARATORS = /[\s-]+/g;
+
+/**
+ * Validate a typed ("custom") account number: 8–15 digits once the separators
+ * are stripped, and nothing else. Thai account numbers are 10 digits (12 for
+ * some banks), so this rejects a truncated paste or a mistyped field without
+ * pinning one bank's format.
+ *
+ * The number itself is NEVER echoed in the error — that string ends up in the
+ * queue file, the approver's screen and Slack.
+ */
+export function normalizeCustomAccountNo(raw: string, tag: string): string {
+  const stripped = raw.replace(ACCOUNT_SEPARATORS, "");
+  if (!/^\d+$/.test(stripped)) {
+    throw new Error(`${tag}: custom destination "accountNo" must be digits (with optional spaces/dashes)`);
+  }
+  if (stripped.length < 8 || stripped.length > 15) {
+    throw new Error(`${tag}: custom destination "accountNo" must be 8–15 digits, got ${stripped.length}`);
+  }
+  return stripped;
+}
+
+/**
+ * Validate + narrow the intent's `destination`. Every failure names the field,
+ * because this is the one place a picker bug on reimbursement's side becomes
+ * visible: the item fails with the message the approver reads.
+ */
+export function parseDestination(raw: unknown, tag = "destination"): QueueDestination {
+  if (!raw || typeof raw !== "object") {
+    throw new Error(`${tag}: "destination" must be an object, got ${JSON.stringify(raw)}`);
+  }
+  const d = raw as Record<string, unknown>;
+  const kind = typeof d.kind === "string" ? d.kind : "";
+
+  const required = (key: string): string => {
+    const v = d[key];
+    if (typeof v !== "string" || !v.trim()) {
+      throw new Error(`${tag}: "${kind}" destination is missing "${key}"`);
+    }
+    return v.trim();
+  };
+  const optional = (key: string): string | undefined => {
+    const v = d[key];
+    if (v === undefined || v === null) return undefined;
+    if (typeof v !== "string") throw new Error(`${tag}: destination "${key}" must be a string when present`);
+    return v.trim() || undefined;
+  };
+
+  switch (kind) {
+    case "handle":
+      return { kind: "handle", handle: required("handle") };
+    case "favorite": {
+      const accountLast4 = required("accountLast4").replace(/\D+/g, "");
+      if (accountLast4.length !== 4) {
+        throw new Error(`${tag}: favorite destination "accountLast4" must be exactly 4 digits`);
+      }
+      return {
+        kind: "favorite",
+        nickname: required("nickname"),
+        bank: required("bank"),
+        accountLast4,
+        accountName: optional("accountName"),
+      };
+    }
+    case "custom":
+      return {
+        kind: "custom",
+        bank: required("bank"),
+        accountNo: normalizeCustomAccountNo(required("accountNo"), tag),
+        accountName: optional("accountName"),
+      };
+    default:
+      throw new Error(`${tag}: unknown destination kind ${JSON.stringify(d.kind)} — expected "handle", "favorite" or "custom"`);
+  }
+}
+
+/** Resolve a payee-book handle into the flow's Payee. Never guesses a payee. */
+function payeeForHandle(config: TransferConfig, handle: string): Payee {
+  try {
+    return toPayee(resolveRecipient(config, handle).recipient);
+  } catch (e) {
+    throw new Error(`Unknown payee handle "${handle}": ${(e as Error).message}`);
+  }
+}
+
+/**
+ * The intent's destination as the flow's Payee.
+ *
+ * `destination` wins whenever it is present — `payee.handle` is only the
+ * fallback for intents written before the picker existed. A "favorite" gets
+ * NO account number (the synced list is masked; the flow verifies against the
+ * live picker by nickname + bank + last-4), and a "custom" gets the validated
+ * digits it will type. Anything unrecognized throws, and the caller files the
+ * item as failed — nothing has been submitted to KBIZ at this point.
+ */
+export function resolveQueuePayee(
+  req: Pick<TransferOtherQueueRequest, "id" | "payee" | "destination">,
+  config: TransferConfig,
+): Payee {
+  if (req.destination !== undefined && req.destination !== null) {
+    const dest = parseDestination(req.destination, req.id);
+    if (dest.kind === "favorite") {
+      return {
+        mode: "favorite",
+        nickname: dest.nickname,
+        bank: dest.bank,
+        accountLast4: dest.accountLast4,
+        accountName: dest.accountName,
+      };
+    }
+    if (dest.kind === "custom") {
+      return { mode: "custom", bank: dest.bank, accountNo: dest.accountNo, accountName: dest.accountName };
+    }
+    return payeeForHandle(config, dest.handle);
+  }
+
+  if (req.payee?.handle) return payeeForHandle(config, req.payee.handle);
+  throw new Error(`${req.id}: intent carries neither a "destination" nor a "payee.handle" — nothing to pay.`);
+}
+
+/**
+ * One-line destination for logs and Slack. A CUSTOM destination is shown as
+ * bank + last 4 ONLY: it is the single kind carrying a full account number,
+ * and Slack is not where that belongs. Never throws — a broken destination
+ * still has to be reportable.
+ */
+export function describeDestination(req: Pick<TransferOtherQueueRequest, "payee" | "destination">): string {
+  if (req.destination === undefined || req.destination === null) {
+    return req.payee?.handle ? `handle "${req.payee.handle}"` : "no destination";
+  }
+  let dest: QueueDestination;
+  try {
+    dest = parseDestination(req.destination);
+  } catch {
+    return "unparseable destination";
+  }
+  if (dest.kind === "handle") return `handle "${dest.handle}"`;
+  if (dest.kind === "favorite") return `favorite "${dest.nickname}" (${dest.bank} …${dest.accountLast4})`;
+  return `custom (${dest.bank} …${dest.accountNo.slice(-4)})`;
 }
 
 /**
