@@ -78,6 +78,7 @@ export function AdminKbiz({
 
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [availableHandles, setAvailableHandles] = useState<string[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,6 +95,7 @@ export function AdminKbiz({
         setSavedPayees(settings.payees);
         setPayeeDraft(settings.payees);
         setConfigured(settings.configured);
+        setAvailableHandles(settings.availableHandles ?? null);
         setUsers(userList);
       } catch (err) {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : 'โหลดการตั้งค่าไม่สำเร็จ');
@@ -179,6 +181,7 @@ export function AdminKbiz({
       onDefaultCategoryChange={setDefaultCategoryDraft}
       users={users}
       payeeDraft={payeeDraft}
+      availableHandles={availableHandles}
       onPayeeChange={(userId, handle) => setPayeeDraft((prev) => ({ ...prev, [userId]: handle }))}
     />
   );
@@ -349,6 +352,7 @@ interface SettingsBodyProps {
   onDefaultCategoryChange: (id: KbizCategoryId) => void;
   users: AdminUser[];
   payeeDraft: Record<string, string>;
+  availableHandles: string[] | null;
   onPayeeChange: (userId: string, handle: string) => void;
 }
 
@@ -363,6 +367,7 @@ function SettingsBody({
   onDefaultCategoryChange,
   users,
   payeeDraft,
+  availableHandles,
   onPayeeChange,
 }: SettingsBodyProps): JSX.Element {
   if (loading) {
@@ -427,7 +432,9 @@ function SettingsBody({
 
       <SectionLabel theme={theme}>บัญชีผู้รับเงินสำหรับโอนอัตโนมัติ</SectionLabel>
       <div style={{ fontFamily: FONT_UI, fontSize: 12, color: theme.inkSoft, marginBottom: 10, lineHeight: 1.5 }}>
-        ระบุชื่อย่อบัญชีผู้รับที่บันทึกไว้ใน KBIZ (พิมพ์เป็นตัวอักษรอังกฤษ) — เว้นว่างหากพนักงานคนนั้นยังโอนผ่าน KBIZ ไม่ได้
+        {availableHandles !== null
+          ? 'เลือกบัญชีผู้รับจากสมุดบัญชีของบอท — เลือก "—" หากพนักงานคนนั้นยังโอนผ่าน KBIZ ไม่ได้'
+          : 'ระบุชื่อย่อบัญชีผู้รับที่บันทึกไว้ใน KBIZ (ยังไม่ได้รับรายชื่อจากบอท — ตรวจสอบว่า kbiz-bot ทำงานอยู่)'}
       </div>
       <Card theme={theme} padding={0}>
         {users.length === 0 ? (
@@ -441,6 +448,7 @@ function SettingsBody({
               theme={theme}
               user={u}
               value={payeeDraft[u.id] ?? ''}
+              availableHandles={availableHandles}
               onChange={(v) => onPayeeChange(u.id, v)}
               isLast={i === users.length - 1}
             />
@@ -539,11 +547,13 @@ interface PayeeRowProps {
   theme: Theme;
   user: AdminUser;
   value: string;
+  /** Bot-published handle options; null = not published, fall back to typing. */
+  availableHandles: string[] | null;
   onChange: (v: string) => void;
   isLast: boolean;
 }
 
-function PayeeRow({ theme, user, value, onChange, isLast }: PayeeRowProps): JSX.Element {
+function PayeeRow({ theme, user, value, availableHandles, onChange, isLast }: PayeeRowProps): JSX.Element {
   const roleLabel = user.role === 'approver' ? 'ผู้อนุมัติ' : 'พนักงาน';
   return (
     <div
@@ -572,23 +582,56 @@ function PayeeRow({ theme, user, value, onChange, isLast }: PayeeRowProps): JSX.
         </div>
         <div style={{ fontFamily: FONT_UI, fontSize: 11, color: theme.inkSoft }}>{roleLabel}</div>
       </div>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="เช่น revew"
-        style={{
-          width: 160,
-          padding: '9px 12px',
-          borderRadius: 10,
-          background: theme.surface,
-          border: `0.5px solid ${theme.hairlineStrong}`,
-          fontFamily: FONT_MONO,
-          fontSize: 13,
-          color: theme.ink,
-          outline: 'none',
-          boxSizing: 'border-box',
-        }}
-      />
+      {availableHandles !== null ? (
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={{
+            width: 180,
+            padding: '9px 12px',
+            borderRadius: 10,
+            background: theme.surface,
+            border: `0.5px solid ${theme.hairlineStrong}`,
+            fontFamily: FONT_MONO,
+            fontSize: 13,
+            color: value === '' ? theme.inkSoft : theme.ink,
+            outline: 'none',
+            boxSizing: 'border-box',
+            appearance: 'none' as const,
+            cursor: 'pointer',
+          }}
+        >
+          <option value="">— ไม่โอนผ่าน KBIZ —</option>
+          {availableHandles.map((h) => (
+            <option key={h} value={h}>
+              {h}
+            </option>
+          ))}
+          {/* A saved handle the bot no longer knows stays visible + flagged,
+              instead of silently vanishing from the row. */}
+          {value !== '' && !availableHandles.includes(value) && (
+            <option value={value}>{value} (ไม่พบในบอท)</option>
+          )}
+        </select>
+      ) : (
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="เช่น revew"
+          style={{
+            width: 160,
+            padding: '9px 12px',
+            borderRadius: 10,
+            background: theme.surface,
+            border: `0.5px solid ${theme.hairlineStrong}`,
+            fontFamily: FONT_MONO,
+            fontSize: 13,
+            color: theme.ink,
+            outline: 'none',
+            boxSizing: 'border-box',
+          }}
+        />
+      )}
     </div>
   );
 }
