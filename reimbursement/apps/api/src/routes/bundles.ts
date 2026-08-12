@@ -461,9 +461,17 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
       if (!bundle) {
         return status(404, { message: 'Bundle not found' });
       }
-      if (bundle.status !== 'PENDING') {
+      // PENDING or APPROVED — an approval made in error should be rejectable
+      // without paying it first. PAYING is pointedly excluded: money may be
+      // mid-flight at the bank, and its only exits are the payment actions.
+      if (bundle.status === 'PAYING') {
         return status(409, {
-          message: `Cannot reject a ${bundle.status.toLowerCase()} bundle; only pending bundles can be rejected`,
+          message: 'คำขอกำลังโอนผ่าน KBIZ — ปิดรายการโอนก่อน (ยืนยันว่าโอนแล้ว หรือ ลองใหม่) จึงจะปฏิเสธได้',
+        });
+      }
+      if (bundle.status !== 'PENDING' && bundle.status !== 'APPROVED') {
+        return status(409, {
+          message: `Cannot reject a ${bundle.status.toLowerCase()} bundle; only pending or approved bundles can be rejected`,
         });
       }
 
@@ -480,7 +488,10 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
 
         const result = await tx.bundle.update({
           where: { id: params.id },
-          data: { status: 'REJECTED', rejectReason: reason },
+          // approvedAt/approvedById stay — the audit trail should show it WAS
+          // approved and then rejected. A leftover confirmed-failed KBIZ note
+          // is cleared: the rejection supersedes the retry offer.
+          data: { status: 'REJECTED', rejectReason: reason, paymentError: null },
           include: { receipts: true, user: true, approver: true },
         });
 
@@ -489,7 +500,7 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
             type: 'reject',
             bundleId: params.id,
             actorId: user.id,
-            metadata: reason ? { reason } : {},
+            metadata: { ...(reason ? { reason } : {}), fromStatus: bundle.status },
           },
         });
 

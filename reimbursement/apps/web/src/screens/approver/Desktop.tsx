@@ -1090,6 +1090,9 @@ function DesktopDetail({
 
       {bundle.status === 'approved' && (
         <ActionBar theme={theme}>
+          <GhostButton theme={theme} onClick={onReject}>
+            ปฏิเสธ
+          </GhostButton>
           <div style={{ flex: 1, fontFamily: FONT_UI, fontSize: 13, color: theme.inkSoft }}>
             อนุมัติเมื่อ {formatThaiDate(bundle.approvedAt)} โดย {bundle.approver?.name ?? ''} — รอโอนเงิน
             {bundle.paymentError && (
