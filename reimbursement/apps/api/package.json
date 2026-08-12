@@ -22,7 +22,7 @@
     "@prisma/client-runtime-utils": "^7.2.0",
     "@reimbursement/shared": "workspace:*",
     "elysia": "^1.1.27",
-    "jose": "^6.2.3",
+    "jose": "^6.2.8",
     "pg": "^8.13.1",
     "prisma": "^7.2.0"
   },
