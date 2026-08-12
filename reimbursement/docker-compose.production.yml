@@ -56,7 +56,7 @@ services:
       start_period: 10s
 
   api:
-    image: ghcr.io/thehfhotel/reimbursement-v2-api:${IMAGE_TAG:-latest}
+    image: ghcr.io/thehfhotel/payroll-reimbursement-api:${IMAGE_TAG:-latest}
     container_name: reimbursement-v2-api
     restart: unless-stopped
     # No host port binding — only reachable through the web container's nginx.
@@ -137,7 +137,7 @@ services:
       start_period: 30s
 
   web:
-    image: ghcr.io/thehfhotel/reimbursement-v2-web:${IMAGE_TAG:-latest}
+    image: ghcr.io/thehfhotel/payroll-reimbursement-web:${IMAGE_TAG:-latest}
     container_name: reimbursement-v2-web
     restart: unless-stopped
     # Cloudflare Tunnel routes reimbursement.thehfhotel.org directly to this
