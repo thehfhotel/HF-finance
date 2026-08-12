@@ -178,3 +178,27 @@ describe("mapFlowOutcomeToPatch", () => {
     expect(parsed).toBeGreaterThanOrEqual(before);
   });
 });
+
+// ── payee-handles manifest (the admin-dropdown feed) ────────────────────────
+import { buildHandlesManifest, HANDLES_FILE } from "../src/lib/payee-handles";
+
+describe("payee handles manifest", () => {
+  it("handles are the recipient keys, sorted, with a timestamp", () => {
+    const m = buildHandlesManifest(
+      {
+        maxTransfer: 50000,
+        recipients: {
+          somchai: { accountNo: "1", bank: "K" },
+          revew: { mode: "favorite", nickname: "พี่วิว", accountNo: "2", bank: "SCB" },
+        },
+      },
+      new Date("2026-08-12T00:00:00Z"),
+    );
+    expect(m.handles).toEqual(["revew", "somchai"]);
+    expect(m.updatedAt).toBe("2026-08-12T00:00:00.000Z");
+  });
+
+  it("manifest filename is what both queue scanners skip", () => {
+    expect(HANDLES_FILE).toBe("payee-handles.json");
+  });
+});
