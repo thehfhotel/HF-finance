@@ -15,6 +15,7 @@ import type {
   Role as PrismaRole,
   User as PrismaUser,
 } from './generated/prisma';
+import type { KbizPaymentContext } from './kbiz';
 
 /**
  * Convert Prisma database rows into the shared API contract types
@@ -26,6 +27,7 @@ const BUNDLE_STATUS_MAP: Record<PrismaBundleStatus, BundleStatus> = {
   DRAFT: 'draft',
   PENDING: 'pending',
   APPROVED: 'approved',
+  PAYING: 'paying',
   PAID: 'paid',
   REJECTED: 'rejected',
 };
@@ -94,19 +96,49 @@ export function serializeBundle(bundle: PrismaBundle): SharedBundle {
     transferProofPath: bundle.transferProofPath,
     note: bundle.note,
     rejectReason: bundle.rejectReason,
+    paymentIntentId: bundle.paymentIntentId,
+    paymentError: bundle.paymentError,
+    payingSince: bundle.payingSince ? bundle.payingSince.toISOString() : null,
     createdAt: bundle.createdAt.toISOString(),
   };
 }
 
+/**
+ * Can this bundle actually be paid through KBIZ right now?
+ *
+ * Computed on the server so the web app never has to know the payee mapping:
+ * the feature has to be wired up on this host, the bundle has to be sitting in
+ * APPROVED, the submitter has to map to a payee handle the bot is allowed to
+ * pay, and there has to be money to move.
+ */
+function computeKbizPayable(
+  bundle: PrismaBundle,
+  receipts: PrismaReceipt[],
+  kbiz: KbizPaymentContext,
+): boolean {
+  if (!kbiz.configured) return false;
+  if (bundle.status !== 'APPROVED') return false;
+  if (!kbiz.payees[bundle.userId]) return false;
+  return receipts.reduce((total, receipt) => total + Number(receipt.amount), 0) > 0;
+}
+
+/**
+ * `kbiz` is optional and loaded ONCE per request by the caller — never per
+ * bundle. The list endpoint returns up to 200 of these, and re-reading the
+ * payee setting for each one would turn one render into 200 queries.
+ * Omitted → `kbizPayable` is absent, as the contract allows.
+ */
 export function serializeBundleWithDetails(
   bundle: PrismaBundle & {
     receipts: PrismaReceipt[];
     user: PrismaUser;
     approver?: PrismaUser | null;
   },
+  kbiz?: KbizPaymentContext,
 ): BundleWithDetails {
   return {
     ...serializeBundle(bundle),
+    ...(kbiz ? { kbizPayable: computeKbizPayable(bundle, bundle.receipts, kbiz) } : {}),
     receipts: bundle.receipts.map(serializeReceipt),
     submitter: { name: bundle.user.name, initials: bundle.user.initials },
     approver: bundle.approver

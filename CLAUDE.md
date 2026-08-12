@@ -10,7 +10,13 @@ This file is read by Claude Code when working in this repository.
 - **Employee** — submits receipts (photo + amount + category + property), bundles
   them, sends a request for review.
 - **Approver / Manager** — reviews bundles in an inbox, approves or rejects, then
-  attaches a bank-transfer slip + reference to mark as paid.
+  pays: either **"จ่ายผ่าน KBIZ"** (automated — writes a payment intent to a shared
+  queue; the `kbiz-bot` in the payroll repo drives the bank transfer, the approver
+  taps approve in the K BIZ phone app, and the e-slip files itself back) or the
+  manual fallback (attach a bank-transfer slip + reference). Bundle statuses:
+  `draft → pending → approved → paying → paid | rejected`; `paying` with
+  `paymentError` set = needs human verification, never auto-resolved. See
+  `docs/adr/0001-kbiz-transfer-automation.md`.
 
 Company accounting (daily income + expenses, monthly P&L) is **out of scope** for
 this app — that lives in a separate app, income.thehfhotel.org. Don't add a
@@ -91,6 +97,15 @@ bun run db:seed                # seed sample users + receipts + bundles
 - **Routing** (state-based, not URL-based for in-app screens): `apps/web/src/lib/router.ts`.
 - **Mock data for seed**: `apps/api/prisma/seed.ts`.
 - **Deploy workflow**: `.github/workflows/deploy.yml`.
+- **KBIZ payment pipeline** (apps/api): `kbiz.ts` (queue-dir config + intent
+  writes, dark when `KBIZ_QUEUE_DIR` unset/unprovisioned), `kbiz-poller.ts`
+  (result reconciliation + stranded-payment watchdog), `voucher.ts` (Thai
+  payment-voucher HTML), `settings.ts` (`app_settings` key-value: category
+  mapping + payee handles), `money.ts`. Admin UI: `/admin/kbiz`
+  (`apps/web/src/screens/approver/AdminKbiz.tsx`). Env: `KBIZ_QUEUE_DIR`,
+  `KBIZ_POLL_MS`, `KBIZ_STALE_MS`, `SLACK_WEBHOOK_URL`. The bank-driving half
+  lives in the payroll repo (`kbiz-bot/`); the contract is `KbizPaymentIntent`
+  in `packages/shared`.
 
 ## Things to avoid
 

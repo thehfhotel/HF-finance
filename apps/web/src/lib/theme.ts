@@ -87,6 +87,9 @@ export function getTheme(dark: boolean, accent: string): Theme {
     statusApproved: dark ? '#7FA8D9' : '#2C5282',
     statusPaid: dark ? '#5FA974' : '#2F855A',
     statusRejected: dark ? '#E08585' : '#C53030',
+    // Gold-ramp amber, one step deeper than statusPending so a "กำลังโอน" chip
+    // never reads as the same wait as "รออนุมัติ" sitting next to it.
+    statusPaying: dark ? HF_GOLD[600] : HF_GOLD[700],
   };
 }
 

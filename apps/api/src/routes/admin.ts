@@ -1,8 +1,17 @@
 import { Elysia, t } from 'elysia';
-import type { Role } from '@reimbursement/shared';
+import {
+  SETTING_KBIZ_CATEGORY_MAPPING,
+  SETTING_KBIZ_PAYEES,
+  type KbizCategoryId,
+  type KbizCategoryMapping,
+  type KbizPayeeHandles,
+  type Role,
+} from '@reimbursement/shared';
 import { auth } from '../auth';
 import { prisma } from '../db';
+import { isKbizConfigured } from '../kbiz';
 import { serializeAdminUser } from '../serializers';
+import { getKbizCategoryMapping, getKbizPayees, isKbizCategoryId, putSetting } from '../settings';
 
 function roleFromShared(role: Role): 'EMPLOYEE' | 'APPROVER' {
   if (role === 'approver') return 'APPROVER';
@@ -169,4 +178,106 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
 
     await prisma.user.delete({ where: { id: params.id } });
     return status(204, null);
-  });
+  })
+
+  /**
+   * The two settings that make automated KBIZ payment work, both editable
+   * without a deploy:
+   *
+   *  - **mapping** — receipt category → KBIZ expense category. New receipt
+   *    categories appear as the hotel invents them, and KBIZ's own list is
+   *    fixed, so this has to be data rather than code.
+   *  - **payees** — employee → the payee handle kbiz-bot resolves against a
+   *    saved, vetted KBIZ account. Only handles, never account numbers: KBIZ
+   *    owns those, which is why the bot cannot misroute a transfer.
+   *
+   * `configured` reports whether the shared queue directory is actually mounted
+   * on this host, so the admin screen can say "off on this server" instead of
+   * letting someone map payees into a feature that will answer 503.
+   */
+  .get('/kbiz-settings', async () => {
+    const [mapping, payees, configured] = await Promise.all([
+      getKbizCategoryMapping(),
+      getKbizPayees(),
+      isKbizConfigured(),
+    ]);
+    return { mapping, payees, configured };
+  })
+
+  .put(
+    '/kbiz-settings',
+    async ({ body, status }) => {
+      let nextMapping: KbizCategoryMapping | null = null;
+      if (body.mapping) {
+        const { defaultCategoryId } = body.mapping;
+        if (!isKbizCategoryId(defaultCategoryId)) {
+          return status(400, { message: `หมวดหมู่ KBIZ ไม่ถูกต้อง: ${defaultCategoryId}` });
+        }
+
+        const categories: Record<string, KbizCategoryId> = {};
+        for (const [receiptCategory, kbizId] of Object.entries(body.mapping.categories)) {
+          if (receiptCategory.trim().length === 0) {
+            return status(400, { message: 'ชื่อหมวดหมู่ใบเสร็จว่างไม่ได้' });
+          }
+          // Every id is checked against KBIZ's own picker list: an id KBIZ does
+          // not offer would make the bot click nothing and file the expense
+          // under whatever happened to be selected.
+          if (!isKbizCategoryId(kbizId)) {
+            return status(400, { message: `หมวดหมู่ KBIZ ไม่ถูกต้อง: ${kbizId}` });
+          }
+          categories[receiptCategory] = kbizId;
+        }
+
+        nextMapping = { categories, defaultCategoryId };
+      }
+
+      let nextPayees: KbizPayeeHandles | null = null;
+      if (body.payees) {
+        const payees: KbizPayeeHandles = {};
+        for (const [userId, rawHandle] of Object.entries(body.payees)) {
+          const handle = typeof rawHandle === 'string' ? rawHandle.trim() : '';
+          // A blank handle is how the admin screen removes someone, so it drops
+          // the entry rather than failing — the employee simply stops being
+          // payable by the bot, which is the fail-closed default anyway.
+          if (handle.length === 0) continue;
+          payees[userId] = handle;
+        }
+
+        const userIds = Object.keys(payees);
+        if (userIds.length > 0) {
+          const known = await prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: { id: true },
+          });
+          const knownIds = new Set(known.map((user) => user.id));
+          const missing = userIds.filter((id) => !knownIds.has(id));
+          if (missing.length > 0) {
+            return status(400, { message: `ไม่พบพนักงานรหัส: ${missing.join(', ')}` });
+          }
+        }
+
+        nextPayees = payees;
+      }
+
+      if (nextMapping) await putSetting(SETTING_KBIZ_CATEGORY_MAPPING, nextMapping);
+      if (nextPayees) await putSetting(SETTING_KBIZ_PAYEES, nextPayees);
+
+      const [mapping, payees, configured] = await Promise.all([
+        getKbizCategoryMapping(),
+        getKbizPayees(),
+        isKbizConfigured(),
+      ]);
+      return { mapping, payees, configured };
+    },
+    {
+      body: t.Object({
+        mapping: t.Optional(
+          t.Object({
+            categories: t.Record(t.String(), t.String()),
+            defaultCategoryId: t.String(),
+          }),
+        ),
+        payees: t.Optional(t.Record(t.String(), t.String())),
+      }),
+    },
+  );

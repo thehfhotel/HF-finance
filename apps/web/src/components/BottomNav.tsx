@@ -9,7 +9,8 @@ export type BottomNavRoute =
   | 'approver-home'
   | 'overview'
   | 'my-requests'
-  | 'admin-employees';
+  | 'admin-employees'
+  | 'admin-kbiz';
 
 interface NavItem {
   label: string;
@@ -26,6 +27,7 @@ const APPROVER_ITEMS: NavItem[] = [
   { label: 'กล่องอนุมัติ', route: 'approver-home', icon: Icon.bundle },
   { label: 'คำขอของฉัน', route: 'my-requests', icon: Icon.receipt },
   { label: 'พนักงาน', route: 'admin-employees', icon: Icon.user },
+  { label: 'ตั้งค่า KBIZ', route: 'admin-kbiz', icon: Icon.bank },
 ];
 
 interface BottomNavProps {

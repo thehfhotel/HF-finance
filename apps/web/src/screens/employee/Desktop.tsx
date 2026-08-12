@@ -95,13 +95,15 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
 
   const totalsByStatus = {
     pending: bundles.filter((b) => b.status === 'pending').length,
-    approved: bundles.filter((b) => b.status === 'approved').length,
+    // 'paying' folds into 'approved' here — it's the same "not yet received"
+    // bucket from the employee's side, and there is no separate my-paying tab.
+    approved: bundles.filter((b) => b.status === 'approved' || b.status === 'paying').length,
     paid: bundles.filter((b) => b.status === 'paid').length,
     rejected: bundles.filter((b) => b.status === 'rejected').length,
   };
 
   const owed = bundles
-    .filter((b) => b.status === 'pending' || b.status === 'approved')
+    .filter((b) => b.status === 'pending' || b.status === 'approved' || b.status === 'paying')
     .reduce((sum, b) => sum + b.receipts.reduce((acc, r) => acc + r.amount, 0), 0);
 
   /** Select every loose receipt, or clear the selection when all are already on. */
@@ -149,12 +151,12 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
   };
 
   const submitBundle = async (): Promise<void> => {
+    if (submitting || !bundleName.trim()) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const effectiveName = bundleName.trim() || autoNamePlaceholder();
       const created = await api.bundles.create({
-        name: effectiveName,
+        name: bundleName.trim(),
         receiptIds: [...selected],
       });
       setState((s) => ({
@@ -290,7 +292,11 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
       <BundleListPane
         theme={theme}
         filter={listFilter}
-        bundles={bundles.filter((b) => b.status === listFilter)}
+        // Same fold as totalsByStatus above — an in-flight KBIZ transfer shows
+        // up on "อนุมัติแล้ว" rather than vanishing from every tab.
+        bundles={bundles.filter(
+          (b) => b.status === listFilter || (listFilter === 'approved' && b.status === 'paying'),
+        )}
         onOpenBundle={openBundle}
       />
     ) : (
@@ -1026,6 +1032,16 @@ function BundleComposer({
                   fontWeight: 500,
                 }}
               />
+              <div
+                style={{
+                  marginTop: 6,
+                  fontFamily: FONT_UI,
+                  fontSize: 11,
+                  color: theme.inkSofter,
+                }}
+              >
+                กรุณาตั้งชื่อคำขอ เช่น ค่าอุปกรณ์ซ่อมแอร์
+              </div>
             </div>
 
             <div style={{ marginBottom: 16 }}>
@@ -1138,7 +1154,7 @@ function BundleComposer({
                 })}
               </div>
             </div>
-            <PrimaryButton theme={theme} disabled={submitting} onClick={onSubmit}>
+            <PrimaryButton theme={theme} disabled={submitting || !bundleName.trim()} onClick={onSubmit}>
               {submitting ? 'กำลังส่ง...' : `ส่งขออนุมัติ · ${selectedCount} ใบ`}
             </PrimaryButton>
           </div>
@@ -1477,6 +1493,39 @@ function BundleStatusBlock({ theme, bundle, total }: BundleStatusBlockProps) {
           </div>
           <div style={{ fontFamily: FONT_UI, fontSize: 12, color: theme.inkSoft, marginTop: 2 }}>
             {bundle.approver?.name ?? ''} อนุมัติเมื่อ {formatThaiDate(bundle.approvedAt)}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (bundle.status === 'paying') {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 18,
+            background: theme.statusPaying,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {Icon.bank('#fff')}
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: FONT_UI, fontSize: 14, fontWeight: 500, color: theme.ink }}>
+            กำลังโอนผ่าน KBIZ
+          </div>
+          <div style={{ fontFamily: FONT_UI, fontSize: 12, color: theme.inkSoft, marginTop: 2 }}>
+            {/* paymentError is whatever the bot/bank wrote back (often English,
+                technical) — fine for the approver console, not for an employee
+                who can't act on it. Keep the raw text off this screen. */}
+            {bundle.paymentError
+              ? 'ผู้อนุมัติกำลังตรวจสอบการโอน'
+              : 'รอยืนยันการโอนบนมือถือของผู้อนุมัติ'}
           </div>
         </div>
       </div>

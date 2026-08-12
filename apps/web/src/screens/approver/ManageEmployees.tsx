@@ -281,6 +281,7 @@ export function ManageEmployees({
       counts={counts}
       onSelect={(key) => {
         if (key === 'overview') return onNavigate?.({ name: 'overview' });
+        if (key === 'admin-kbiz') return onNavigate?.({ name: 'admin-kbiz' });
         if (key.startsWith('my-')) {
           const view = key.slice(3) as 'drafts' | 'pending' | 'approved' | 'paid' | 'rejected';
           return onNavigate?.({ name: 'my-requests', view });

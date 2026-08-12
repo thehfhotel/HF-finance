@@ -5,23 +5,37 @@ import { Prisma } from '../generated/prisma';
 import { saveUploadedFile } from '../uploads';
 import { notifyPortal } from '../notify';
 import { bundleStatusFromShared, serializeBundleWithDetails } from '../serializers';
-import type { BundleStatus } from '@reimbursement/shared';
+import {
+  intentFileExists,
+  isKbizConfigured,
+  loadKbizPaymentContext,
+  newPaymentIntentId,
+  readIntentState,
+  withdrawQueuedIntent,
+  writeIntent,
+  writeVoucherHtml,
+} from '../kbiz';
+import { getKbizCategoryMapping, getKbizPayees } from '../settings';
+import { sumReceiptAmounts } from '../money';
+import { renderVoucherHtml } from '../voucher';
+import {
+  buildKbizMemo,
+  resolveKbizCategoryId,
+  type BundleStatus,
+  type KbizPaymentIntent,
+} from '@reimbursement/shared';
 
 const SHARED_BUNDLE_STATUSES: readonly BundleStatus[] = [
   'draft',
   'pending',
   'approved',
+  'paying',
   'paid',
   'rejected',
 ];
 
 function isSharedBundleStatus(value: string): value is BundleStatus {
   return (SHARED_BUNDLE_STATUSES as readonly string[]).includes(value);
-}
-
-function sumReceiptAmounts(amounts: ReadonlyArray<{ amount: { toString(): string } }>): number {
-  const total = amounts.reduce((accumulator, { amount }) => accumulator + Number(amount), 0);
-  return Number(total.toFixed(2));
 }
 
 /** Enough to fill a long screen without another round trip; a caller that wants
@@ -75,15 +89,20 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
       const take = Math.min(Math.max(Number(query.limit ?? DEFAULT_PAGE_SIZE) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
       const skip = Math.max(Number(query.offset ?? 0) || 0, 0);
 
-      const bundles = await prisma.bundle.findMany({
-        where: filters,
-        include: { receipts: true, user: true, approver: true },
-        orderBy: { submittedAt: 'desc' },
-        take,
-        skip,
-      });
+      // The KBIZ payee mapping is read once for the whole page, not once per
+      // bundle — `kbizPayable` is a per-row answer built from a per-request fact.
+      const [bundles, kbiz] = await Promise.all([
+        prisma.bundle.findMany({
+          where: filters,
+          include: { receipts: true, user: true, approver: true },
+          orderBy: { submittedAt: 'desc' },
+          take,
+          skip,
+        }),
+        loadKbizPaymentContext(),
+      ]);
 
-      return bundles.map(serializeBundleWithDetails);
+      return bundles.map((bundle) => serializeBundleWithDetails(bundle, kbiz));
     },
     {
       query: t.Object({
@@ -165,6 +184,8 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
       return {
         pending: pick('pending'),
         approved: pick('approved'),
+        /** In flight at the bank — the KBIZ bot owns these right now. */
+        paying: pick('paying'),
         paid: pick('paid'),
         rejected: pick('rejected'),
         /** Loose receipts — always the caller's own, whatever the scope. */
@@ -270,10 +291,13 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
   )
 
   .get('/:id', async ({ params, status }) => {
-    const bundle = await prisma.bundle.findUnique({
-      where: { id: params.id },
-      include: { receipts: true, user: true, approver: true },
-    });
+    const [bundle, kbiz] = await Promise.all([
+      prisma.bundle.findUnique({
+        where: { id: params.id },
+        include: { receipts: true, user: true, approver: true },
+      }),
+      loadKbizPaymentContext(),
+    ]);
 
     if (!bundle) {
       return status(404, { message: 'Bundle not found' });
@@ -281,7 +305,7 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
 
     // Readable by any signed-in employee — same reasoning as the list above.
     // The actions on this bundle are still gated below.
-    return serializeBundleWithDetails(bundle);
+    return serializeBundleWithDetails(bundle, kbiz);
   })
 
   .post('/:id/approve', async ({ user, params, status }) => {
@@ -323,7 +347,9 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
       return result;
     });
 
-    return serializeBundleWithDetails(updated);
+    // The approver's next possible action is "จ่ายผ่าน KBIZ", so the response
+    // has to carry whether that action is available on this bundle.
+    return serializeBundleWithDetails(updated, await loadKbizPaymentContext());
   })
 
   /**
@@ -435,6 +461,27 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
     },
   )
 
+  /**
+   * Mark a bundle paid by hand, with the approver's own e-slip.
+   *
+   * Three bundles can arrive here:
+   *
+   *  - **APPROVED** — the ordinary manual transfer, unchanged since day one.
+   *  - **PAYING with a `paymentError`** — the KBIZ bot could not tell whether
+   *    its transfer landed. The approver was on their phone for the tap, so
+   *    they know the answer and hold the e-slip; attaching it here is how an
+   *    ambiguous payment is resolved forwards (ADR 0001, decision 7). Nothing
+   *    resolves it automatically, ever.
+   *  - **PAYING with no `paymentError`, with `force`** — the override. An
+   *    in-flight bundle normally belongs to the bot and is deliberately not
+   *    payable by hand. But the bot can die mid-transfer, or the deploy that
+   *    was rolling when the intent was written can have eaten it: then no
+   *    terminal result is ever written, nothing flags the bundle, and without
+   *    this the employee could never be paid at all. `force` is the approver
+   *    saying "I have checked K BIZ and I am holding the slip"; it is audited
+   *    as an override, and clearing `paymentIntentId` stops any late bot result
+   *    from landing on top of it.
+   */
   .post(
     '/:id/pay',
     async ({ user, params, body, status }) => {
@@ -449,9 +496,21 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
       if (!bundle) {
         return status(404, { message: 'Bundle not found' });
       }
-      if (bundle.status !== 'APPROVED') {
+
+      // Multipart carries strings, so the flag is read the same way the query
+      // parameters above are.
+      const forced =
+        bundle.status === 'PAYING' &&
+        bundle.paymentError === null &&
+        (body.force === '1' || body.force === 'true');
+      const manualResolution =
+        bundle.status === 'PAYING' && (bundle.paymentError !== null || forced);
+      if (bundle.status !== 'APPROVED' && !manualResolution) {
         return status(409, {
-          message: `Cannot pay a ${bundle.status.toLowerCase()} bundle; it must be approved first`,
+          message:
+            bundle.status === 'PAYING'
+              ? 'คำขอนี้กำลังโอนผ่าน KBIZ อยู่ — ยืนยันว่าต้องการบันทึกจ่ายเองก่อน'
+              : `Cannot pay a ${bundle.status.toLowerCase()} bundle; it must be approved first`,
         });
       }
 
@@ -468,6 +527,13 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
             transferRef: body.transferRef,
             transferAmount,
             transferProofPath,
+            // The intent is settled either way: clearing all three stops the
+            // poller from ever reconciling a late bot result onto a bundle a
+            // human has already closed, clears the needs-verification flag and
+            // takes the bundle out of the stranded-payment watchdog's sight.
+            paymentIntentId: null,
+            paymentError: null,
+            payingSince: null,
           },
           include: { receipts: true, user: true, approver: true },
         });
@@ -477,20 +543,286 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
             type: 'pay',
             bundleId: params.id,
             actorId: user.id,
-            metadata: { transferRef: body.transferRef, transferAmount },
+            metadata: manualResolution
+              ? {
+                  transferRef: body.transferRef,
+                  transferAmount,
+                  manualResolution: true,
+                  // `forced` marks the override: the bundle carried no error,
+                  // so this human overruled an attempt the bot never finished
+                  // reporting on.
+                  forced,
+                  intentId: bundle.paymentIntentId,
+                }
+              : { transferRef: body.transferRef, transferAmount },
           },
         });
 
         return result;
       });
 
-      return serializeBundleWithDetails(updated);
+      return serializeBundleWithDetails(updated, await loadKbizPaymentContext());
     },
     {
       body: t.Object({
         transferRef: t.String({ minLength: 1 }),
         proof: t.File(),
+        /** '1' — pay a PAYING bundle by hand anyway (see the docblock). */
+        force: t.Optional(t.String()),
       }),
       type: 'multipart/form-data',
+    },
+  )
+
+  /**
+   * "จ่ายผ่าน KBIZ" — hand this bundle to the bank bot.
+   *
+   * This is the only place in the app that starts money moving, so the order of
+   * operations is the whole design:
+   *
+   *  1. Everything that can refuse, refuses first — feature off, no payee
+   *     handle, nothing to pay — while the bundle is still untouched.
+   *  2. The atomic `UPDATE … WHERE status = 'APPROVED'` claims the bundle. That
+   *     WHERE clause IS the double-pay guard: of two concurrent clicks exactly
+   *     one matches a row, and the loser gets a 409 instead of a second intent.
+   *  3. ONLY THEN are the voucher and the intent written. The bot picks up
+   *     `queue/*.json`, so nothing may appear there before this app owns the
+   *     bundle — a file written before the guard would be executed even if the
+   *     guard then lost.
+   *
+   * We never send a bank or account number: the intent carries a payee *handle*
+   * that the bot resolves against a saved, vetted KBIZ account. This app stores
+   * no bank data at all (ADR 0001, decision 4).
+   */
+  .post('/:id/pay-via-kbiz', async ({ user, params, status }) => {
+    if (user.role !== 'APPROVER') {
+      return status(403, { message: 'Only approvers can pay bundles' });
+    }
+
+    if (!(await isKbizConfigured())) {
+      return status(503, {
+        message: 'เซิร์ฟเวอร์นี้ยังไม่ได้เปิดใช้งานการจ่ายผ่าน KBIZ',
+      });
+    }
+
+    const bundle = await prisma.bundle.findUnique({
+      where: { id: params.id },
+      include: { receipts: true, user: true, approver: true },
+    });
+    if (!bundle) {
+      return status(404, { message: 'Bundle not found' });
+    }
+
+    const payees = await getKbizPayees();
+    const handle = payees[bundle.userId];
+    if (!handle) {
+      return status(409, {
+        message: `ยังไม่ได้ตั้งค่าบัญชีปลายทางของ ${bundle.user.name} — ตั้งค่าที่หน้าผู้ดูแลระบบก่อน`,
+      });
+    }
+
+    // Server-computed, exactly like /pay: the amount is Σ receipts and never
+    // something the client sent.
+    const amount = sumReceiptAmounts(bundle.receipts);
+    if (amount <= 0) {
+      return status(409, { message: 'คำขอนี้ไม่มียอดที่ต้องจ่าย' });
+    }
+
+    const memo = buildKbizMemo(bundle.name, bundle.id);
+    const kbizCategoryId = resolveKbizCategoryId(
+      bundle.receipts.map((receipt) => ({
+        category: receipt.category,
+        amount: Number(receipt.amount),
+      })),
+      await getKbizCategoryMapping(),
+    );
+    const intentId = newPaymentIntentId();
+
+    const claimed = await prisma.bundle.updateMany({
+      where: { id: params.id, status: 'APPROVED' },
+      data: {
+        status: 'PAYING',
+        paymentIntentId: intentId,
+        paymentError: null,
+        // The clock the stranded-payment watchdog reads. Stamped by the claim
+        // itself so it is set even if this process dies before the intent file
+        // is written — that crash window is exactly what strands a bundle.
+        payingSince: new Date(),
+      },
+    });
+    if (claimed.count !== 1) {
+      return status(409, { message: 'คำขอนี้ไม่อยู่ในสถานะที่จ่ายได้' });
+    }
+
+    try {
+      const voucherFile = await writeVoucherHtml(
+        intentId,
+        renderVoucherHtml(bundle, bundle.receipts, bundle.user, bundle.approver),
+      );
+
+      const intent: KbizPaymentIntent = {
+        id: intentId,
+        app: 'reimbursement',
+        type: 'transfer-other',
+        status: 'approved',
+        createdAt: new Date().toISOString(),
+        bundleId: bundle.id,
+        payee: { handle },
+        amount,
+        memo,
+        kbizCategoryId,
+        voucherFile,
+      };
+      await writeIntent(intent);
+    } catch (error) {
+      console.error(`[kbiz] could not queue intent ${intentId}:`, error);
+
+      // Release the claim only when we are certain nothing is queued. If the
+      // intent file made it into queue/ the bot may already be driving the
+      // bank, and flipping the bundle back to APPROVED would invite a second
+      // transfer for the same money.
+      if (await intentFileExists(intentId)) {
+        return status(500, {
+          message: 'ส่งคำสั่งจ่ายไม่สมบูรณ์ กรุณาตรวจสอบสถานะการโอนก่อนสั่งจ่ายซ้ำ',
+        });
+      }
+
+      await prisma.bundle.updateMany({
+        where: { id: params.id, status: 'PAYING', paymentIntentId: intentId },
+        data: { status: 'APPROVED', paymentIntentId: null, paymentError: null, payingSince: null },
+      });
+      return status(500, { message: 'ส่งคำสั่งจ่ายไม่สำเร็จ คำขอกลับสู่สถานะอนุมัติแล้ว' });
+    }
+
+    await prisma.auditEvent.create({
+      data: {
+        type: 'pay-via-kbiz',
+        bundleId: params.id,
+        actorId: user.id,
+        metadata: { intentId, amount, memo, kbizCategoryId },
+      },
+    });
+
+    const [updated, kbiz] = await Promise.all([
+      prisma.bundle.findUniqueOrThrow({
+        where: { id: params.id },
+        include: { receipts: true, user: true, approver: true },
+      }),
+      loadKbizPaymentContext(),
+    ]);
+
+    return serializeBundleWithDetails(updated, kbiz);
+  })
+
+  /**
+   * "ยังไม่โอน" — release a payment that never moved money, so it can be paid
+   * again.
+   *
+   * Three ways in, all of them still requiring `PAYING`:
+   *
+   *  1. **`paymentError` set** — the bot came back ambiguous and a human has
+   *     checked K BIZ. Unchanged.
+   *  2. **No error, but nothing was ever armed** — the queue itself proves it:
+   *     no intent file at all (this app died between the atomic claim and the
+   *     write), or one still sitting at `status: 'approved'` (kbiz-bot never
+   *     started it). Both mean the bank has heard nothing, so the release is
+   *     free; the untouched file is withdrawn into `queue/archive/` first so
+   *     the bot can never pick it up afterwards.
+   *  3. **No error and the bot owns it, with `force`** — the override, for the
+   *     case where the bot died mid-flight and will never report. The approver
+   *     asserts they have checked K BIZ and nothing moved. Audited as forced.
+   *
+   * Without 2 and 3 a bundle whose bot never answers has NO way out: the only
+   * writer of `paymentError` is the poller reconciling a terminal result, so
+   * "no result ever arrives" used to mean stuck forever, with the employee
+   * unpaid and the approver unable to close it. Manual payment is the fallback
+   * for every bundle, including a stuck one.
+   *
+   * The stuck intent id is always dropped rather than reused — the next attempt
+   * writes a brand-new one, so a late result for the old intent can no longer
+   * find a bundle to land on.
+   */
+  .post(
+    '/:id/payment-retry',
+    async ({ user, params, body, status }) => {
+      if (user.role !== 'APPROVER') {
+        return status(403, { message: 'Only approvers can release a stuck payment' });
+      }
+
+      const bundle = await prisma.bundle.findUnique({ where: { id: params.id } });
+      if (!bundle) {
+        return status(404, { message: 'Bundle not found' });
+      }
+      if (bundle.status !== 'PAYING') {
+        return status(409, { message: 'คำขอนี้ไม่อยู่ในสถานะที่ปล่อยกลับไปอนุมัติได้' });
+      }
+
+      const force = body?.force === true;
+      let intentState: Awaited<ReturnType<typeof readIntentState>> | null = null;
+      let provablyIdle = false;
+
+      if (bundle.paymentError === null) {
+        intentState = await readIntentState(bundle.paymentIntentId);
+
+        // Nothing armed → release. Anything else needs the human to say so.
+        provablyIdle =
+          intentState === 'unqueued' ||
+          (intentState === 'queued' &&
+            bundle.paymentIntentId !== null &&
+            (await withdrawQueuedIntent(bundle.paymentIntentId)));
+
+        if (!provablyIdle && !force) {
+          return status(409, {
+            message:
+              intentState === 'unknown'
+                ? 'ตรวจสอบสถานะคำสั่งจ่ายไม่ได้ (ไม่พบคิว KBIZ) — เปิด K BIZ เพื่อดูว่าโอนไปแล้วหรือยัง แล้วยืนยันอีกครั้ง'
+                : 'kbiz-bot กำลังทำรายการนี้อยู่ — เปิด K BIZ เพื่อดูว่าโอนไปแล้วหรือยัง แล้วยืนยันอีกครั้ง',
+          });
+        }
+      }
+
+      const released = await prisma.bundle.updateMany({
+        // Guarded on the exact row this decision was made about: same status,
+        // same intent, same error-or-not. A poller sweep or a second approver
+        // landing in between matches zero rows instead of being overwritten.
+        where: {
+          id: params.id,
+          status: 'PAYING',
+          paymentIntentId: bundle.paymentIntentId,
+          ...(bundle.paymentError === null ? { paymentError: null } : { NOT: { paymentError: null } }),
+        },
+        data: { status: 'APPROVED', paymentIntentId: null, paymentError: null, payingSince: null },
+      });
+      if (released.count !== 1) {
+        return status(409, { message: 'คำขอนี้ไม่อยู่ในสถานะที่ปล่อยกลับไปอนุมัติได้' });
+      }
+
+      await prisma.auditEvent.create({
+        data: {
+          type: 'payment-retry',
+          bundleId: params.id,
+          actorId: user.id,
+          metadata: {
+            releasedIntentId: bundle.paymentIntentId,
+            paymentError: bundle.paymentError,
+            intentState,
+            // True only when the human overruled an intent the bot still owned.
+            forced: bundle.paymentError === null && !provablyIdle,
+          },
+        },
+      });
+
+      const [updated, kbiz] = await Promise.all([
+        prisma.bundle.findUniqueOrThrow({
+          where: { id: params.id },
+          include: { receipts: true, user: true, approver: true },
+        }),
+        loadKbizPaymentContext(),
+      ]);
+
+      return serializeBundleWithDetails(updated, kbiz);
+    },
+    {
+      body: t.Optional(t.Object({ force: t.Optional(t.Boolean()) })),
     },
   );
