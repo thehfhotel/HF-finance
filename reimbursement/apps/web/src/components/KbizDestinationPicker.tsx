@@ -7,11 +7,11 @@ import {
   KBIZ_ACCOUNT_NO_MAX_DIGITS,
   KBIZ_ACCOUNT_NO_MIN_DIGITS,
   countKbizAccountDigits,
-  formatKbizAccountLabel,
   formatKbizFavoriteLabel,
   isValidKbizAccountNo,
   sanitizeKbizAccountNoInput,
 } from '../lib/kbizDestination';
+import { payeeOptionLabel } from '../lib/kbizFormat';
 import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../lib/theme';
 import type { BundleWithDetails, KbizDestination, KbizFavorite, Theme } from '../lib/types';
 import { KBIZ_BANKS_TH } from '../lib/types';
@@ -106,9 +106,6 @@ export function KbizDestinationPicker({ theme, bundle, onClose, onConfirm, onGot
   const total = bundle.receipts.reduce((acc, r) => acc + r.amount, 0);
   const mappedHandle = payees?.[bundle.userId] ?? '';
   const hasHandle = mappedHandle.trim() !== '';
-  const mappedPayee: PublishedPayee | null = hasHandle
-    ? (availablePayees?.find((p) => p.handle === mappedHandle) ?? null)
-    : null;
   const favoriteList = favorites ?? [];
 
   const availableModes: Mode[] = [
@@ -128,7 +125,7 @@ export function KbizDestinationPicker({ theme, bundle, onClose, onConfirm, onGot
     if (mode === 'handle') {
       onConfirm({
         destination: { kind: 'handle', handle: mappedHandle },
-        summary: formatKbizAccountLabel(mappedPayee ?? {}, mappedHandle),
+        summary: payeeOptionLabel(mappedHandle, availablePayees),
       });
     } else if (mode === 'favorite') {
       const fav = favoriteKey !== null ? favoriteList[Number(favoriteKey)] : undefined;
@@ -238,7 +235,7 @@ export function KbizDestinationPicker({ theme, bundle, onClose, onConfirm, onGot
                       บัญชีที่ผูกไว้กับ {bundle.submitter.name}
                     </div>
                     <div style={{ fontFamily: FONT_UI, fontSize: 15, fontWeight: 600, color: theme.ink, lineHeight: 1.4 }}>
-                      {formatKbizAccountLabel(mappedPayee ?? {}, mappedHandle)}
+                      {payeeOptionLabel(mappedHandle, availablePayees)}
                     </div>
                     <div style={{ fontFamily: FONT_MONO, fontSize: 11, color: theme.inkSofter, marginTop: 6 }}>#{mappedHandle}</div>
                   </Card>

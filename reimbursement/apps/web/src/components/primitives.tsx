@@ -76,24 +76,30 @@ interface GhostButtonProps {
   children: ReactNode;
   onClick?: () => void;
   theme: Theme;
+  /** Same contract as PrimaryButton — a disabled ghost mutes its border and
+   *  label so an in-flight action reads as unavailable rather than ignored. */
+  disabled?: boolean;
   full?: boolean;
 }
 
-export function GhostButton({ children, onClick, theme, full = false }: GhostButtonProps) {
+export function GhostButton({ children, onClick, theme, disabled, full = false }: GhostButtonProps) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       style={{
         width: full ? '100%' : 'auto',
         padding: '13px 18px',
         background: 'transparent',
-        color: theme.ink,
-        border: `1px solid ${theme.hairlineStrong}`,
+        color: disabled ? theme.inkSoft : theme.ink,
+        border: `1px solid ${disabled ? theme.hairline : theme.hairlineStrong}`,
         borderRadius: 14,
         fontFamily: FONT_UI,
         fontSize: 15,
         fontWeight: 500,
-        cursor: 'pointer',
+        cursor: disabled ? 'default' : 'pointer',
+        transition: 'opacity 0.15s',
+        opacity: disabled ? 0.6 : 1,
       }}
     >
       {children}
