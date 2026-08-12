@@ -1,0 +1,19 @@
+{
+  "maxTransfer": 50000,
+  "kbizCategoryId": "30",
+  "recipients": {
+    "revew": {
+      "mode": "favorite",
+      "nickname": "<KBIZ saved-account Display Name, e.g. พี่วิว>",
+      "accountNo": "xxx-x-xxxxx-x",
+      "bank": "Siam Commercial",
+      "accountName": "<name on account (optional, for logging)>"
+    },
+    "some-vendor": {
+      "mode": "custom",
+      "accountNo": "xxxxxxxxxx",
+      "bank": "Kasikorn",
+      "accountName": "<name on account>"
+    }
+  }
+}
