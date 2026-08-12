@@ -3,6 +3,10 @@
  * NO playwright/session imports: payroll's repo-root CI runs `bun test`
  * without kbiz-bot's node_modules, so anything a test touches must not pull
  * the browser stack (same split as scrape-registered's driver pattern).
+ *
+ * `@reimbursement/shared` below is exempt and stays safe under that rule: the
+ * tsconfig `paths` entry maps it straight at a SOURCE file in the same repo, so
+ * it resolves with no node_modules at all (verified against the CI layout).
  */
 
 /**
@@ -38,29 +42,32 @@
  */
 
 
-/** Shared-file name for the synced favorites — both queue scanners skip it. */
-export const FAVORITES_FILE = "kbiz-favorites.json";
+import { KBIZ_FAVORITES_FILE, type KbizFavorite } from "@reimbursement/shared";
+
+/**
+ * Shared-file name for the synced favorites — both queue scanners skip it.
+ *
+ * The name is the CONTRACT's (reimbursement writes the reader), so it is
+ * imported rather than re-typed; the bot-local alias stays because the rest of
+ * this repo knows it as FAVORITES_FILE.
+ */
+export const FAVORITES_FILE = KBIZ_FAVORITES_FILE;
 
 // The picker paginates in the modal and the book is small in practice; 40
 // bounds the walk if the paginator ever misbehaves, matching scrape-registered.
 const MAX_PAGES = 40;
 
 /**
- * One synced saved account. Mirrors reimbursement's `KbizFavorite`
- * (packages/shared/src/index.ts) field-for-field — a cross-repo JSON
- * contract, not a shared import. Keep the names in lockstep.
+ * One synced saved account — reimbursement's `KbizFavorite`
+ * (reimbursement/packages/shared/src/index.ts) ITSELF, not a copy of it. The
+ * bot writes this shape into queue/kbiz-favorites.json and reimbursement's
+ * approver picker reads it back, so a field rename over there is now a compile
+ * error here instead of a silently-unread manifest.
+ *
+ * Re-exported so `scrape-favorites`'s `export *` and every existing importer
+ * keep seeing the name where they always found it.
  */
-export interface KbizFavorite {
-  /** Display Name in KBIZ — what the bot matches to select the row. */
-  nickname: string;
-  /** The bank's own name-on-account. */
-  accountName: string;
-  bank: string;
-  /** e.g. "…7394" — display only. */
-  accountMasked: string;
-  /** Last 4 digits — the verifier the bot matches at transfer time. */
-  accountLast4: string;
-}
+export type { KbizFavorite };
 
 /** The published `queue/kbiz-favorites.json` payload. */
 export interface FavoritesManifest {

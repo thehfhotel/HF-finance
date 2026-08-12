@@ -1,11 +1,12 @@
 import { basename, resolve } from "node:path";
+import type { KbizDestination, KbizPaymentIntent } from "@reimbursement/shared";
 import type { Payee } from "../flows/transfer-other-flow";
 import { resolveRecipient, toPayee, type TransferConfig } from "./transfer-config";
 
 /**
- * Where a payment goes, chosen by the approver at pay time. Mirrors
- * reimbursement's `KbizDestination` (packages/shared/src/index.ts) — same
- * cross-repo JSON contract as the intent itself.
+ * Where a payment goes, chosen by the approver at pay time — reimbursement's
+ * `KbizDestination` (reimbursement/packages/shared/src/index.ts) ITSELF, under
+ * the bot's own name.
  *
  *  - "handle": the admin-mapped payee; the bot's own gitignored payee book
  *    resolves it, exactly as before the picker existed.
@@ -14,65 +15,41 @@ import { resolveRecipient, toPayee, type TransferConfig } from "./transfer-confi
  *    against the live picker and requires exactly one match.
  *  - "custom": a typed destination — the one kind that must carry the full
  *    number, because the bot has to type it into KBIZ.
+ *
+ * NOTE this is the type of an ALREADY-VALIDATED destination. What arrives on
+ * disk is `unknown` until parseDestination below has proved it; sharing the
+ * type buys us the field names, never trust in the JSON.
  */
-export type QueueDestination =
-  | { kind: "handle"; handle: string }
-  | { kind: "favorite"; nickname: string; bank: string; accountLast4: string; accountName?: string }
-  | { kind: "custom"; bank: string; accountNo: string; accountName?: string };
+export type QueueDestination = KbizDestination;
 
 /**
  * The `transfer-other` queue-item shape, written by reimbursement's apps/api
- * and driven forward by kbiz-bot. This mirrors reimbursement's
- * `KbizPaymentIntent` (packages/shared/src/index.ts) field-for-field — it is a
- * cross-repo JSON contract, not a shared import (kbiz-bot lives in a separate
- * repo). Keep names/values in lockstep with
- * docs/adr/0001-kbiz-transfer-automation.md in the reimbursement repo; a
- * drift here silently breaks the pipeline.
+ * and driven forward by kbiz-bot: reimbursement's own `KbizPaymentIntent`
+ * (reimbursement/packages/shared/src/index.ts), with the two deliberate
+ * loosenings this side of the boundary needs, plus the bot's own bookkeeping
+ * timestamps. Both processes now compile against ONE declaration — a renamed
+ * field is a build failure, not a silently stranded intent. See
+ * reimbursement/docs/adr/0001-kbiz-transfer-automation.md.
+ *
+ * The loosenings (both widenings — this end never narrows what it trusts):
+ *  - `destination` stays `unknown`. A malformed destination must FAIL the item
+ *    with a clear error (parseDestination, at resolve time), not make the whole
+ *    file unreadable — an unparseable file is skipped by listApproved and would
+ *    sit "approved" forever while reimbursement shows the bundle stuck in
+ *    `paying`.
+ *  - `kbizCategoryId` stays `string`, not the contract's `KbizCategoryId`
+ *    union: KBIZ owns those anchor ids, and an id we don't know about yet must
+ *    reach the picker (or fail there), not be rejected by our own type.
  */
-export interface TransferOtherQueueRequest {
-  /** Unique per attempt, and also the queue filename. */
-  id: string;
-  app: "reimbursement";
-  type: "transfer-other";
-  /** Only `"approved"` is ever picked up; the rest are states the bot writes. */
-  status: "approved" | "running" | "done" | "failed" | "needs-review";
-  createdAt: string;
-  /** The bundle this pays. */
-  bundleId: string;
-  /**
-   * The pre-picker way of naming a payee: an admin-mapped handle. Writers set
-   * it only for a `kind: "handle"` destination and `null` otherwise, so
-   * readers PREFER `destination` and fall back here for older intents.
-   */
-  payee: { handle: string } | null;
-  /**
-   * Where the money goes. Deliberately untyped at parse time: a malformed
-   * destination must FAIL the item with a clear error (parseDestination, at
-   * resolve time), not make the whole file unreadable — an unparseable file
-   * is skipped by listApproved and would sit "approved" forever while
-   * reimbursement shows the bundle stuck in `paying`.
-   */
+export interface TransferOtherQueueRequest extends Omit<KbizPaymentIntent, "destination" | "kbizCategoryId"> {
+  /** Untrusted until parseDestination proves it. See the note above. */
   destination?: unknown;
-  /** Baht, e.g. 1234.5. */
-  amount: number;
-  /** Already sanitized by reimbursement's buildKbizMemo; the flow sanitizes again anyway. */
-  memo: string;
   /** One of KBIZ's picker anchor ids, e.g. "10". */
   kbizCategoryId: string;
-  /** Path relative to the shared dir, e.g. "vouchers/<id>.html". Omitted = no attachment. */
-  voucherFile?: string;
+  /** Bot-side bookkeeping, written back into the same file. Not in the contract. */
   startedAt?: string;
   completedAt?: string;
   updatedAt?: string;
-  result?: {
-    outcome: "success" | "confirmed-failed" | "unconfirmed";
-    reference?: string;
-    /** Basename only (e.g. "<id>.png"), living in the shared slips/ dir. */
-    slipFile?: string;
-    error?: string;
-    finalUrl?: string;
-    finishedAt?: string;
-  };
 }
 
 /**

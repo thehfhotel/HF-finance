@@ -25,10 +25,35 @@ driver for KBIZ (KBank Business Online), running on evergreen as a
 ## The contract
 
 Types come from the monorepo's shared package:
-`../reimbursement/packages/shared/src/index.ts` (`@reimbursement/shared` via
-tsconfig paths). The Dockerfile COPYs that dir into the image — keep the
-relative layout intact. A contract change rebuilds this image (CI paths filter
-includes `reimbursement/packages/shared/**`).
+`../reimbursement/packages/shared/src/index.ts` (`@reimbursement/shared`). A
+contract change rebuilds this image (CI paths filter includes
+`reimbursement/packages/shared/**`).
+
+**That specifier resolves two different ways, and both are load-bearing:**
+
+- **Dev, CI, `tsc`, `bun test`** — the `paths` entry in `kbiz-bot/tsconfig.json`.
+- **The container** — a node_modules symlink the Dockerfile creates
+  (`node_modules/@reimbursement/shared` → `/app/reimbursement/packages/shared`)
+  plus that package's own `exports`/`main`. The image has **no tsconfig.json**:
+  the repo-root `.dockerignore` excludes `kbiz-bot/*.json` and re-includes only
+  `package.json`, so the file is not even in the build context. Deleting the
+  symlink as "redundant" crashloops the bot at startup with
+  `ERR_MODULE_NOT_FOUND` while CI stays green. So does repointing the shared
+  package's `exports` at a `dist/` build output.
+
+`kbiz-bot/test/shared-resolution.test.ts` pins both mechanisms to one file —
+if you change the Dockerfile, the tsconfig mapping or the shared package's
+entry fields, that test is the thing that tells you the other end moved.
+
+**`tsx` reads its tsconfig from `process.cwd()`, not from the imported file's
+directory** — so the bot must always be launched from `kbiz-bot/`.
+`node --import tsx kbiz-bot/src/process-queue.ts` from the repo root fails; the
+npm scripts and the Dockerfile's `WORKDIR /app/kbiz-bot` both get this right.
+
+**CI does not run `tsc`** (`deploy.yml`'s `test` job is `bun test` only), so
+"the contract is a compile error now" is only true for whoever runs
+`npm run typecheck`. The drift check that actually runs is in
+`test/shared-contract.test.ts`, which reads the shared source as text.
 
 ## Facts pinned against the live site (probed + live-verified 2026-08-12)
 
@@ -47,6 +72,17 @@ includes `reimbursement/packages/shared/**`).
   match bare "success". Failure-before-success ordering is deliberate and
   test-pinned.
 - The memo field rejects special characters (sanitize to Thai/alnum/space).
+  The rule is the contract's `sanitizeKbizMemo`, not a bot-local copy — the
+  old `sanitizeMemo` in `transfer-other-flow.ts` is gone and is deliberately
+  not re-exported (that module pulls playwright; root CI runs `bun test`
+  without it). **One deliberate behavior delta** vs. the deleted local copy:
+  shared appends `.trimEnd()` after the 100-char cap, so an input that
+  sanitizes to >100 chars and gets cut mid-space now yields 99 chars, not 100
+  with a trailing space. Unreachable on the money path (reimbursement builds
+  every intent memo with `buildKbizMemo`, already capped + trimmed, and
+  re-sanitizing is idempotent); reachable only via
+  `npm run transfer-other -- --memo <101+ chars>`. If you are diffing prod memo
+  behavior against git history, that is the difference.
 
 ## Testing
 
