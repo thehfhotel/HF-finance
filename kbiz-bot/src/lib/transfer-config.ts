@@ -46,7 +46,7 @@ export interface TransferConfig {
   recipients: Record<string, RecipientConfig>;
 }
 
-const CONFIG_PATH = resolve("transfer-other.config.json");
+export const CONFIG_PATH = resolve("transfer-other.config.json");
 
 function fail(msg: string): never {
   throw new Error(`transfer-other.config.json: ${msg}`);

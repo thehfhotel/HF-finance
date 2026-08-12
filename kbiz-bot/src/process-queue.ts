@@ -7,6 +7,7 @@ import { runTransferPayrollFlow } from "./flows/transfer-payroll-flow";
 import { runTransferOtherFlow } from "./flows/transfer-other-flow";
 import { scrapeRegisteredAccounts } from "./lib/scrape-registered";
 import { loadTransferConfig, resolveRecipient, toPayee } from "./lib/transfer-config";
+import { HANDLES_FILE, publishPayeeHandles } from "./lib/payee-handles";
 import { htmlToPdf } from "./lib/html-to-pdf";
 import {
   mapFlowOutcomeToPatch,
@@ -62,6 +63,9 @@ async function listApproved(): Promise<QueueRequest[]> {
   const out: QueueRequest[] = [];
   for (const f of files) {
     if (!f.endsWith(".json")) continue;
+    // The handles manifest lives alongside the queue items (only shared path
+    // needing no new mount) — it is metadata, never a request.
+    if (f === HANDLES_FILE) continue;
     try {
       const buf = await readFile(join(QUEUE_DIR, f), "utf8");
       const parsed = JSON.parse(buf) as { type?: unknown };
@@ -259,6 +263,7 @@ async function main() {
   const intervalMs = Number(process.env.QUEUE_POLL_MS ?? 30_000);
 
   if (!watch) {
+    await publishPayeeHandles(QUEUE_DIR);
     const n = await processBatch();
     if (n === 0) console.log("No approved requests in queue.");
     return;
@@ -266,11 +271,15 @@ async function main() {
 
   console.log(`Watching ${resolve(QUEUE_DIR)} — polling every ${intervalMs}ms. Ctrl+C to stop.`);
   // First pass immediately
+  await publishPayeeHandles(QUEUE_DIR);
   await processBatch().catch((e) => console.error("batch error:", (e as Error).message));
   // Then loop
   while (true) {
     await new Promise((r) => setTimeout(r, intervalMs));
     try {
+      // mtime-gated: republishes only when the payee book changed, so editing
+      // it on the host reaches the admin dropdown within one poll interval.
+      await publishPayeeHandles(QUEUE_DIR);
       await processBatch();
     } catch (e) {
       console.error("batch error:", (e as Error).message);
