@@ -2,7 +2,11 @@ import { chromium, type BrowserContext, type Page } from "playwright";
 import { resolve } from "node:path";
 
 const USER_DATA_DIR = resolve("browser-data");
-const LOGIN_URL = "https://kbiz.kasikornbank.com/authen/login.jsp?lang=en";
+// lang=th since 2026-08-12: the picker's Account Name column renders the
+// bank's THAI name-on-account under a Thai session (English romanizes it),
+// and reimbursement wants Thai names. Every text matcher that navigates the
+// UI is bilingual, and bank matching goes through aliasesForBank().
+const LOGIN_URL = "https://kbiz.kasikornbank.com/authen/login.jsp?lang=th";
 const DASHBOARD_URL = "https://kbiz.kasikornbank.com/menu/account/account-summary";
 
 // Exported: transfer-other-flow.ts's phone-approval poll loop needs this
@@ -68,7 +72,7 @@ export async function gotoAuthenticated(page: Page, url: string): Promise<void> 
       await page.waitForTimeout(500);
       if (isUnauthenticatedUrl(page.url())) return false;
       const sessionDead = await page
-        .evaluate(() => /Sorry[\s\S]+session has expired|session expired or you are signed in/i.test((document.body as HTMLElement).innerText))
+        .evaluate(() => /Sorry[\s\S]+session has expired|session expired or you are signed in|เซสชัน(?:ของคุณ)?หมดอายุ|หมดเวลาการใช้งาน|เข้าสู่ระบบจากอุปกรณ์อื่น/i.test((document.body as HTMLElement).innerText))
         .catch(() => false);
       if (sessionDead) return false;
     }

@@ -82,6 +82,65 @@ const digitsOnly = (s: string) => s.replace(/\D+/g, "");
 // The picker's cell labels. English is what the live page renders (we log in
 // with lang=en); the Thai alternates cost nothing and keep a language flip
 // from silently scraping zero rows.
+/**
+ * EN ↔ TH aliases per KBIZ bank. The bot's session language decides which
+ * name the page renders (the session runs Thai since 2026-08-12), but config
+ * files, old intents and old manifests may carry either — so bank matching
+ * always goes through aliasesForBank(), never a bare substring.
+ *
+ * Stems are deliberately short + distinctive (e.g. "กสิกร" not the full
+ * ธนาคาร… string) so KBIZ's exact rendering can vary without breaking a
+ * match, while no stem is a substring of another bank's name.
+ */
+export const BANK_ALIASES: string[][] = [
+  ["Kasikornbank", "กสิกร"],
+  ["Bangkok Bank", "กรุงเทพ"],
+  ["Krung Thai Bank", "กรุงไทย"],
+  ["TMBThanachart", "ทหารไทยธนชาต", "ทีเอ็มบีธนชาต", "ธนชาต"],
+  ["Siam Commercial", "ไทยพาณิชย์"],
+  ["CITIBANK", "ซิตี้แบงก์"],
+  ["Sumitomo Mitsui", "ซูมิโตโม"],
+  ["Standard Chartered", "สแตนดาร์ดชาร์เตอร์ด"],
+  ["CIMB", "ซีไอเอ็มบี"],
+  ["United Overseas", "ยูโอบี"],
+  ["Ayudhya", "กรุงศรี"],
+  ["Government Savings", "ออมสิน"],
+  ["Hongkong and Shanghai", "เอชเอสบีซี", "ฮ่องกงและเซี่ยงไฮ้"],
+  ["Deutsche Bank", "ดอยซ์"],
+  ["Government Housing", "อาคารสงเคราะห์"],
+  ["BAAC", "เพื่อการเกษตรและสหกรณ์"],
+  ["Mizuho", "มิซูโฮ"],
+  ["BNP Paribas", "บีเอ็นพี"],
+  ["Bank of China", "แบงก์ออฟไชน่า"],
+  ["Islamic Bank", "อิสลาม"],
+  ["Tisco", "ทิสโก้"],
+  ["Kiatnakin", "เกียรตินาคิน"],
+  ["ICBC", "ไอซีบีซี"],
+  ["Thai Credit", "ไทยเครดิต"],
+  ["Land and Houses", "แลนด์ แอนด์ เฮ้าส์"],
+];
+
+const escapeRe = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Every name the wanted bank is known by. Unknown banks fall back to the
+ * wanted string itself — matching still works, just without translation.
+ */
+export function aliasesForBank(wanted: string): string[] {
+  const w = wanted.trim().toLowerCase();
+  for (const group of BANK_ALIASES) {
+    if (group.some((a) => w.includes(a.toLowerCase()) || a.toLowerCase().includes(w))) {
+      return group;
+    }
+  }
+  return [wanted.trim()];
+}
+
+/** Case-insensitive "text mentions this bank, under any of its names". */
+export function bankPattern(wanted: string): RegExp {
+  return new RegExp(aliasesForBank(wanted).map(escapeRe).join("|"), "i");
+}
+
 const CELL_LABELS: { key: keyof RawFavoriteRow; re: RegExp }[] = [
   { key: "nickname", re: /^(display name|ชื่อที่แสดง|ชื่อเล่น)$/i },
   { key: "accountName", re: /^(account name|ชื่อบัญชี)$/i },
@@ -249,7 +308,7 @@ export function rowHasAccountEndingWith(text: string, last4: string): boolean {
  * empty and drops out on its own.
  */
 export function matchFavoriteRows(rowTexts: string[], criteria: FavoriteRowCriteria): number[] {
-  const bankRe = new RegExp(criteria.bank.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+  const bankRe = bankPattern(criteria.bank);
   const acctD = criteria.accountNo ? digitsOnly(criteria.accountNo) : "";
   const out: number[] = [];
 

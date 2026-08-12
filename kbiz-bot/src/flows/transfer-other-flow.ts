@@ -1,7 +1,7 @@
 import type { Page } from "playwright";
 import { gotoAuthenticated, isUnauthenticatedUrl } from "../lib/session";
 import { captureSlip, ensureSlipsDir, SLIPS_DIR, type SlipCapture } from "../lib/capture-slip";
-import { matchFavoriteRows } from "../lib/scrape-favorites";
+import { aliasesForBank, matchFavoriteRows } from "../lib/scrape-favorites";
 
 /**
  * Ad-hoc single transfer on KBIZ's "โอนเงินไปบัญชีบุคคลอื่น" page
@@ -244,8 +244,8 @@ async function selectCustomAccount(page: Page, payee: Payee, slug: string): Prom
       `(function(){
          var sel=document.querySelector('select[name="bank"]');
          if(!sel)return 'no-select';
-         var want=${JSON.stringify(payee.bank.toLowerCase())};
-         var opt=Array.prototype.find.call(sel.options,function(o){return (o.textContent||'').toLowerCase().indexOf(want)>=0;});
+         var wants=${JSON.stringify(aliasesForBank(payee.bank).map((a) => a.toLowerCase()))};
+         var opt=Array.prototype.find.call(sel.options,function(o){var t=(o.textContent||'').toLowerCase();return wants.some(function(w){return t.indexOf(w)>=0;});});
          if(!opt)return 'no-option';
          sel.value=opt.value; sel.dispatchEvent(new Event('change',{bubbles:true}));
          if(window.jQuery){try{window.jQuery(sel).val(opt.value).trigger('change');}catch(e){}}
