@@ -1,5 +1,10 @@
 # Deploying to evergreen
 
+> **Monorepo note (2026-08-12):** this repo also carries `reimbursement/`
+> (its own pipeline: `.github/workflows/deploy-reimbursement.yml` → SSH as
+> `reimbursement-v2` → `/home/reimbursement-v2/production`; secrets prefixed
+> `REIMB_`). Nothing below changed for payroll's own deploy.
+
 ## CI/CD via GitHub Actions
 
 `.github/workflows/deploy.yml` mirrors the new-hotel Phase-1 pattern

@@ -52,6 +52,9 @@ jobs:
               - 'KBIZTemplateUploadPayroll.xlsx'
             kbiz:
               - 'kbiz-bot/**'
+              # the bot imports the contract from the reimbursement subtree —
+              # a shared change must rebuild the bot image too
+              - 'reimbursement/packages/shared/**'
             deploy:
               - 'docker-compose.yml'
               - 'scripts/deploy/**'

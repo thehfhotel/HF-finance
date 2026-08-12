@@ -2,6 +2,13 @@
 
 This file is read by Claude Code when working in this repository.
 
+> **Monorepo note (2026-08-12):** this app now lives at `reimbursement/`
+> inside the finance monorepo (`thehfhotel/payroll`) — subtree-merged with
+> full history. Deploys run from the ROOT `.github/workflows/
+> deploy-reimbursement.yml`; images are `ghcr.io/thehfhotel/
+> payroll-reimbursement-{api,web}`. The old `thehfhotel/reimbursement-v2`
+> repo is archived history. Read the root `CLAUDE.md` for the monorepo map.
+
 ## What this is
 
 **reimbursement-v2** — an internal hotel-ops expense reimbursement app for HF Hotel
