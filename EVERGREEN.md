@@ -153,8 +153,16 @@ changes until they're set:
 | `KBIZ_SLIPS_DIR`   | `../data/slips`       | where captured e-slip screenshots are written          |
 | `KBIZ_SHARED_DIR`  | `../data`             | root a `transfer-other` intent's relative paths (`voucherFile`) resolve against |
 
+> **Snap-Docker constraint (why these paths live under `/home/deploy`):**
+> evergreen runs Docker as a snap. The confined daemon cannot use bind
+> sources outside `/home` — a `/srv/...` mount fails the container start
+> with `error while creating mount source path … read-only file system`,
+> even when the path exists on the host. Both 2026-08-12 deploys tripped
+> this and took the stacks down until the tree moved to
+> `/home/deploy/kbiz-queue`. Keep every future bind source under `/home`.
+
 `docker-compose.yml` has the switch-over already drafted, commented out, as
-**nested binds** — subpaths of `${KBIZ_QUEUE_HOST_DIR:-/srv/kbiz-queue}`
+**nested binds** — subpaths of `${KBIZ_QUEUE_HOST_DIR:-/home/deploy/kbiz-queue}`
 mounted OVER `./data/queue`, `./data/slips` and `./data/vouchers` in the
 `kbiz-bot` service, plus the matching `queue` bind in the `payroll` service.
 Every default in-container path keeps working in both containers, so the env
@@ -175,25 +183,25 @@ To flip it on:
 
 ```sh
 # On evergreen, once (creates the subdirs the contract expects):
-sudo mkdir -p /srv/kbiz-queue/{queue,queue/archive,vouchers,slips}
-sudo chown -R deploy:deploy /srv/kbiz-queue   # or whichever uid the containers run as
+sudo mkdir -p /home/deploy/kbiz-queue/{queue,queue/archive,vouchers,slips}
+sudo chown -R deploy:deploy /home/deploy/kbiz-queue   # or whichever uid the containers run as
 
 # Move the EXISTING payroll queue contents into the shared dir so history and
 # any pending items survive the switch (do this while the stack is stopped):
 docker compose down
-sudo rsync -a data/queue/ /srv/kbiz-queue/queue/
+sudo rsync -a data/queue/ /home/deploy/kbiz-queue/queue/
 
 # transfer-other.config.json (the payee book: real bank account numbers) is
-# PII and must NOT live under /srv/kbiz-queue above — that dir is also
+# PII and must NOT live under /home/deploy/kbiz-queue above — that dir is also
 # bind-mounted into reimbursement-api, and reimbursement never sends bank
 # details (see kbiz-bot/README.md). Give it its own kbiz-bot-only dir:
-sudo mkdir -p /srv/kbiz-bot
+sudo mkdir -p /home/deploy/kbiz-bot
 sudo cp path/to/kbiz-bot/transfer-other.config.example.json \
-  /srv/kbiz-bot/transfer-other.config.json   # then edit in the real payee(s)
-sudo chown -R deploy:deploy /srv/kbiz-bot
+  /home/deploy/kbiz-bot/transfer-other.config.json   # then edit in the real payee(s)
+sudo chown -R deploy:deploy /home/deploy/kbiz-bot
 
 # Uncomment ALL FOUR nested binds (three on kbiz-bot + one on payroll) and the
-# payee-book mount in docker-compose.yml, then also bind-mount /srv/kbiz-queue
+# payee-book mount in docker-compose.yml, then also bind-mount /home/deploy/kbiz-queue
 # into reimbursement-api (a different repo/stack) — see that repo's
 # docs/change-requests/CR-2026-08-12-kbiz-payment-automation.md.
 
