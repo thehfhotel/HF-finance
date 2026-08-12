@@ -15,9 +15,6 @@ on:
 # SAME group as deploy.yml's (root payroll+kbiz-bot pipeline): both stacks
 # bind-mount the one shared /home/deploy/kbiz-queue dir on evergreen, so the
 # two rollouts must queue against each other, not run concurrently.
-concurrency:
-  group: deploy-evergreen
-  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -34,101 +31,61 @@ jobs:
   # Build the api + web images and push to GHCR.
   # ──────────────────────────────────────────────────────────────────────
   build:
-    name: Build & Push (api + web)
+    name: Build & Push (${{ matrix.app }})
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-
-    outputs:
-      sha-tag: sha-${{ github.sha }}
-
+    timeout-minutes: 20
+    # api and web build in PARALLEL jobs — they were serial in one job, which
+    # put web's build time entirely on the critical path for nothing. Cache
+    # scopes were already per-image, so the split costs only runner setup.
+    strategy:
+      matrix:
+        include:
+          - app: api
+            image: thehfhotel/payroll-reimbursement-api
+            dockerfile: ./reimbursement/Dockerfile.api
+            scope: reimbursement-v2-api
+          - app: web
+            image: thehfhotel/payroll-reimbursement-web
+            dockerfile: ./reimbursement/Dockerfile.web
+            scope: reimbursement-v2-web
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v5.0.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435  # v3.11.1
 
       - name: Log in to GHCR
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4.1.0
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772  # v3.4.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── api image ─────────────────────────────────────────────────────
-      - name: Compute api tags
-        id: meta-api
-        uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893  # v5.9.0
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804  # v5.7.0
         with:
-          images: ${{ env.REGISTRY }}/${{ env.API_IMAGE }}
+          images: ${{ env.REGISTRY }}/${{ matrix.image }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-,format=long
 
-      - name: Build & push api
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7.1.0
+      - name: Build & push ${{ matrix.app }}
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83  # v6.18.0
         with:
           context: ./reimbursement
-          file: ./reimbursement/Dockerfile.api
+          file: ${{ matrix.dockerfile }}
           push: true
-          tags: ${{ steps.meta-api.outputs.tags }}
-          labels: ${{ steps.meta-api.outputs.labels }}
-          cache-from: type=gha,scope=reimbursement-v2-api
-          cache-to: type=gha,mode=max,scope=reimbursement-v2-api
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.scope }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.scope }}
           platforms: linux/amd64
 
-      # ── web image ─────────────────────────────────────────────────────
-      - name: Compute web tags
-        id: meta-web
-        uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893  # v5.9.0
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.WEB_IMAGE }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix=sha-,format=long
-
-      - name: Build & push web
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7.1.0
-        with:
-          context: ./reimbursement
-          file: ./reimbursement/Dockerfile.web
-          push: true
-          tags: ${{ steps.meta-web.outputs.tags }}
-          labels: ${{ steps.meta-web.outputs.labels }}
-          cache-from: type=gha,scope=reimbursement-v2-web
-          cache-to: type=gha,mode=max,scope=reimbursement-v2-web
-          platforms: linux/amd64
-
-      - name: Summary
-        run: |
-          {
-            echo "## Reimbursement-v2 images"
-            echo ""
-            echo "### api"
-            echo '```'
-            echo "${{ steps.meta-api.outputs.tags }}"
-            echo '```'
-            echo ""
-            echo "### web"
-            echo '```'
-            echo "${{ steps.meta-web.outputs.tags }}"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  # ──────────────────────────────────────────────────────────────────────
-  # This deploy and the root deploy.yml (payroll + kbiz-bot) are two
-  # independent, previously-ungated pipelines that both ship out of
-  # packages/shared — the KBIZ queue contract kbiz-bot compiles against.
-  # A push touching reimbursement/packages/shared/** used to be able to
-  # deploy the new API here while deploy.yml's `test` job (which is what
-  # actually exercises kbiz-bot/test/shared-contract.test.ts) failed and
-  # correctly skipped that side's deploy — leaving the bot on an old image
-  # reading a queue format the new API just started writing.
-  #
-  # Run the SAME root-level suite here so a broken contract blocks BOTH
-  # rollouts, not just whichever pipeline's CI happened to catch it first.
-  # See root CLAUDE.md.
-  # ──────────────────────────────────────────────────────────────────────
   contract:
     name: Root contract check (packages/shared)
     runs-on: ubuntu-latest
@@ -151,6 +108,16 @@ jobs:
       - name: Root test suite (covers kbiz-bot/test/shared-contract.test.ts)
         run: bun test
 
+      # The typecheck that used to run INSIDE Dockerfile.api's build stage —
+      # here it costs zero wall-clock (this job finishes well inside the image
+      # builds' shadow) instead of ~15s on the api image's critical path.
+      - name: Reimbursement typecheck
+        working-directory: reimbursement
+        run: |
+          bun install --frozen-lockfile
+          bun --filter api db:generate
+          bun run typecheck
+
   # ──────────────────────────────────────────────────────────────────────
   # Deploy to evergreen via SSH from a GitHub-hosted runner.
   #
@@ -158,6 +125,9 @@ jobs:
   # service token) → SSH (deploy user, ed25519 key) → evergreen.
   # ──────────────────────────────────────────────────────────────────────
   deploy:
+    concurrency:
+      group: deploy-evergreen
+      cancel-in-progress: false
     name: Deploy to evergreen
     runs-on: ubuntu-latest
     needs: [build, contract]
@@ -364,7 +334,6 @@ jobs:
           cd /home/reimbursement-v2/production
           docker compose pull
           docker compose up -d --remove-orphans
-          docker image prune -f
           REMOTE
 
       - name: Health check
@@ -424,6 +393,11 @@ jobs:
 
           echo "deploy looks healthy."
           REMOTE
+
+      # Housekeeping AFTER the health gate: pruning inside the rollout step put
+      # ~5-8s of dead-image cleanup on the critical path before health checks.
+      - name: Prune old images (non-blocking)
+        run: ssh evergreen "docker image prune -f" || true
 
       - name: Summary
         run: |
