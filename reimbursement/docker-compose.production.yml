@@ -1,0 +1,183 @@
+# Reimbursement — production compose for the `evergreen` host.
+#
+# Topology:
+#
+#   Cloudflare Tunnel (asgard) ──▶ host:5800 (LAN-bound) ──▶ reimbursement-v2-web
+#                                                                    │
+#                                                                    ▼
+#                                                          reimbursement-v2-api
+#                                                                    │
+#                                                                    ▼
+#                                                       reimbursement-v2-postgres
+#                                                       (internal-only)
+#
+# The web container's own nginx (apps/web/nginx.conf) handles SPA fallback
+# and proxies /api + /uploads to the api container over the
+# reimbursement_v2_internal Docker network. There is NO host-level nginx in
+# front — cloudflared routes the public hostname directly to host port 5800.
+# The port binds on all interfaces (cloudflared talks to apps via the host's
+# LAN IP, not loopback), but evergreen sits behind a firewall + Cloudflare
+# Tunnel so the only path from public to this port is via the tunnel.
+#
+# Postgres has no host port mapping in production. To inspect prod data, exec
+# into the postgres container directly:
+#     docker exec -it reimbursement-v2-postgres psql -U postgres -d reimbursement
+#
+# All secrets come from `.env` (materialized by the GitHub Actions deploy job
+# from repo Secrets). Do NOT bake any secret defaults into this file.
+
+# Pin the project name so the running containers + named volumes are
+# recognized regardless of the deploy directory's path. Without this,
+# compose derives the project from the cwd basename — so renaming the
+# deploy dir would orphan the existing reimbursement-v2-* containers and
+# data volumes.
+name: reimbursement-v2
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: reimbursement-v2-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-reimbursement}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - reimbursement_v2_internal
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-reimbursement}
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api:
+    image: ghcr.io/thehfhotel/reimbursement-v2-api:${IMAGE_TAG:-latest}
+    container_name: reimbursement-v2-api
+    restart: unless-stopped
+    # No host port binding — only reachable through the web container's nginx.
+    environment:
+      NODE_ENV: production
+      API_PORT: "3001"
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      WEB_BASE_URL: ${WEB_BASE_URL}
+      # Cloudflare Access login. CF_ACCESS_AUD absent → CF login fails closed
+      # (503); card login fails closed the same way without
+      # READER_RESOLVE_SECRET, below — the two are independent.
+      CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:-laikaexpress.cloudflareaccess.com}
+      CF_ACCESS_AUD: ${CF_ACCESS_AUD:-}
+      # NFC staff-card login → central HF-ID service. Compose only forwards
+      # vars listed here, so these MUST be enumerated (they come from .env,
+      # materialized by the deploy job). READER_RESOLVE_SECRET absent → card
+      # login fails closed (503).
+      READER_RESOLVE_SECRET: ${READER_RESOLVE_SECRET:-}
+      HF_ID_BASE_URL: ${HF_ID_BASE_URL:-http://192.168.100.228:5000}
+      HF_ID_ISSUER: ${HF_ID_ISSUER:-https://id.thehfhotel.org/oidc}
+      # Shared terminals, as `email=kiosk-id,…` (HF One's KIOSK_EMAILS format).
+      # These Google accounts clear Cloudflare Access as a PLACE, not a person:
+      # instead of a session they get the card-tap screen, so a receipt is
+      # attributed to whoever taps rather than to the PC. Absent/empty → no
+      # session is ever a kiosk and every identity takes the employee path.
+      KIOSK_EMAILS: ${KIOSK_EMAILS:-}
+      # Push notifications into the HF One portal's notification centre when a
+      # request is submitted. Absent token → no notification is ever sent, same
+      # fail-dark posture as the other integrations here.
+      NOTIFY_INGRESS_TOKEN: ${NOTIFY_INGRESS_TOKEN:-}
+      HF_ERP_BASE_URL: ${HF_ERP_BASE_URL:-http://192.168.100.228:4020}
+      # KBIZ payment automation. This is the path INSIDE the container; the
+      # host side is the bind mount below, shared with kbiz-bot in the payroll
+      # stack.
+      #
+      # Setting this does NOT turn the feature on. The api requires the
+      # `queue/` sub-directory to already exist inside it (runbook step 1) —
+      # Docker creates a missing bind-mount source by itself, so anything the
+      # daemon can conjure is worthless as a gate. Until ops provisions the
+      # tree, "จ่ายผ่าน KBIZ" answers 503 and the poller never starts, so a
+      # wrong path cannot strand a bundle mid-payment.
+      KBIZ_QUEUE_DIR: ${KBIZ_QUEUE_DIR:-/kbiz-queue}
+      KBIZ_POLL_MS: ${KBIZ_POLL_MS:-5000}
+      # How long a bundle may sit in PAYING with no word from kbiz-bot before
+      # the poller flags it for a human and alerts (default 15 minutes).
+      KBIZ_STALE_MS: ${KBIZ_STALE_MS:-900000}
+      # Slack alerts for payments that need a human (shared payroll webhook).
+      # Absent → no Slack, same fail-dark posture as the portal token above.
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+    volumes:
+      # Persistent storage for receipt photos and transfer screenshots.
+      # Mount path matches the apps/api/uploads directory inside the image.
+      - uploads_data:/app/apps/api/uploads
+      # The shared KBIZ queue, a host directory rather than a named volume: the
+      # kbiz-bot container in the payroll stack mounts the same path, and named
+      # volumes do not cross compose projects. Ops creates it once with the
+      # queue/, queue/archive/, vouchers/ and slips/ sub-directories — see
+      # docs/change-requests/CR-2026-08-12-kbiz-payment-automation.md.
+      #
+      # Docker will happily invent this host path if it does not exist, which
+      # is why the app gates on `queue/` inside it rather than on the mount:
+      # an un-provisioned (or typo'd) path yields an empty directory and a dark
+      # feature instead of a queue nobody reads.
+      - ${KBIZ_QUEUE_HOST_DIR:-/home/deploy/kbiz-queue}:/kbiz-queue
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - reimbursement_v2_internal
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS --max-time 3 http://localhost:3001/health > /dev/null || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  web:
+    image: ghcr.io/thehfhotel/reimbursement-v2-web:${IMAGE_TAG:-latest}
+    container_name: reimbursement-v2-web
+    restart: unless-stopped
+    # Cloudflare Tunnel routes reimbursement.thehfhotel.org directly to this
+    # host port. The web container's own nginx handles SPA fallback and
+    # /api + /uploads proxying to the api container — no host-level nginx
+    # in front. Pick a host port that doesn't collide with the asgard
+    # tunnel's existing routes.
+    ports:
+      # Bound on all interfaces so cloudflared (which reaches the app via
+      # the host's LAN IP, like every other app on this fleet) can connect.
+      # The port isn't reachable from the public internet — only the LAN
+      # and the cloudflared tunnel.
+      - "5800:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - reimbursement_v2_internal
+    healthcheck:
+      # Probe THROUGH the /api proxy path (nginx → api /health), not nginx's
+      # own static /healthz. A static probe stays green when the api upstream
+      # is dead or stale, which is exactly how the 2026-08-10 login outage hid
+      # itself: all three containers reported healthy while every /api/ request
+      # returned 502. See apps/web/nginx.conf.
+      test:
+        - CMD-SHELL
+        - wget --quiet --tries=1 --spider http://127.0.0.1/healthz/upstream || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  postgres_data:
+    name: reimbursement_v2_postgres_data
+  uploads_data:
+    name: reimbursement_v2_uploads_data
+
+networks:
+  # Per-app private network: web ↔ api ↔ postgres.
+  reimbursement_v2_internal:
+    name: reimbursement_v2_internal
+    driver: bridge
