@@ -76,7 +76,14 @@ export function Pay({ theme, state, nav, bundleId, setState }: PayProps) {
     setError(null);
     setSubmitting(true);
     try {
-      const updated = await api.bundles.pay(b.id, payFormFromFields(ref.trim(), proofFile));
+      // Closing a 'paying' bundle by hand overrules the automation: either it
+      // came back needing verification, or it is stranded with no result at
+      // all. The API audits it as an override and refuses it on any other
+      // status, so sending the flag whenever the bundle is in flight is safe.
+      const updated = await api.bundles.pay(
+        b.id,
+        payFormFromFields(ref.trim(), proofFile, { force: b.status === 'paying' }),
+      );
       setState((s) => ({
         ...s,
         bundles: s.bundles.some((x) => x.id === updated.id)
@@ -343,7 +350,20 @@ export function Pay({ theme, state, nav, bundleId, setState }: PayProps) {
         <ConfirmDialog
           theme={theme}
           title={`ยืนยันว่าโอนแล้ว ${fmt(total)}?`}
-          message={`จ่ายให้ ${b.submitter.name} — การดำเนินการนี้ไม่สามารถยกเลิกได้`}
+          message={
+            b.status === 'paying' && !b.paymentError ? (
+              <span>
+                <span style={{ display: 'block', marginBottom: 8 }}>
+                  จ่ายให้ {b.submitter.name} — การดำเนินการนี้ไม่สามารถยกเลิกได้
+                </span>
+                <span style={{ display: 'block', color: theme.warn }}>
+                  คำขอนี้ยังค้างอยู่ที่ KBIZ — ยืนยันเฉพาะเมื่อเห็นสลิปจริงในแอป K BIZ แล้วเท่านั้น
+                </span>
+              </span>
+            ) : (
+              `จ่ายให้ ${b.submitter.name} — การดำเนินการนี้ไม่สามารถยกเลิกได้`
+            )
+          }
           confirmLabel="ยืนยัน"
           loading={submitting}
           onConfirm={() => { void handleConfirmPay(); }}

@@ -89,10 +89,39 @@ services:
       # fail-dark posture as the other integrations here.
       NOTIFY_INGRESS_TOKEN: ${NOTIFY_INGRESS_TOKEN:-}
       HF_ERP_BASE_URL: ${HF_ERP_BASE_URL:-http://192.168.100.228:4020}
+      # KBIZ payment automation. This is the path INSIDE the container; the
+      # host side is the bind mount below, shared with kbiz-bot in the payroll
+      # stack.
+      #
+      # Setting this does NOT turn the feature on. The api requires the
+      # `queue/` sub-directory to already exist inside it (runbook step 1) —
+      # Docker creates a missing bind-mount source by itself, so anything the
+      # daemon can conjure is worthless as a gate. Until ops provisions the
+      # tree, "จ่ายผ่าน KBIZ" answers 503 and the poller never starts, so a
+      # wrong path cannot strand a bundle mid-payment.
+      KBIZ_QUEUE_DIR: ${KBIZ_QUEUE_DIR:-/kbiz-queue}
+      KBIZ_POLL_MS: ${KBIZ_POLL_MS:-5000}
+      # How long a bundle may sit in PAYING with no word from kbiz-bot before
+      # the poller flags it for a human and alerts (default 15 minutes).
+      KBIZ_STALE_MS: ${KBIZ_STALE_MS:-900000}
+      # Slack alerts for payments that need a human (shared payroll webhook).
+      # Absent → no Slack, same fail-dark posture as the portal token above.
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
     volumes:
       # Persistent storage for receipt photos and transfer screenshots.
       # Mount path matches the apps/api/uploads directory inside the image.
       - uploads_data:/app/apps/api/uploads
+      # The shared KBIZ queue, a host directory rather than a named volume: the
+      # kbiz-bot container in the payroll stack mounts the same path, and named
+      # volumes do not cross compose projects. Ops creates it once with the
+      # queue/, queue/archive/, vouchers/ and slips/ sub-directories — see
+      # docs/change-requests/CR-2026-08-12-kbiz-payment-automation.md.
+      #
+      # Docker will happily invent this host path if it does not exist, which
+      # is why the app gates on `queue/` inside it rather than on the mount:
+      # an un-provisioned (or typo'd) path yields an empty directory and a dark
+      # feature instead of a queue nobody reads.
+      - ${KBIZ_QUEUE_HOST_DIR:-/srv/kbiz-queue}:/kbiz-queue
     depends_on:
       postgres:
         condition: service_healthy

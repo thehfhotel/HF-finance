@@ -128,7 +128,7 @@ export function Timeline({ theme, bundle }: TimelineProps) {
       date: bundle.status === 'pending' ? 'pending' : bundle.approvedAt,
       done: bundle.status !== 'pending',
     },
-    { label: 'อนุมัติแล้ว', date: bundle.approvedAt, done: ['approved', 'paid'].includes(bundle.status) },
+    { label: 'อนุมัติแล้ว', date: bundle.approvedAt, done: ['approved', 'paying', 'paid'].includes(bundle.status) },
     { label: 'จ่ายแล้ว', date: bundle.paidAt, done: bundle.status === 'paid' },
   ];
 

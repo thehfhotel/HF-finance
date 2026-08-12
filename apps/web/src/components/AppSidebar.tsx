@@ -32,7 +32,8 @@ export type SidebarKey =
   | 'my-paid'
   | 'my-rejected'
   | 'overview'
-  | 'employees';
+  | 'employees'
+  | 'admin-kbiz';
 
 export interface SidebarCounts {
   pending?: number;
@@ -203,6 +204,7 @@ export function AppSidebar({
         <>
           <Section theme={theme} label="การจัดการ" />
           {item('employees', 'พนักงาน', Icon.user)}
+          {item('admin-kbiz', 'ตั้งค่า KBIZ', Icon.bank)}
         </>
       )}
       {onLogout && (

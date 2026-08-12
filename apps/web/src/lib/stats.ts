@@ -1,7 +1,7 @@
 import type { BundleWithDetails, Property } from './types';
 
 /**
- * Aggregations for the approver overview screen.
+ * Aggregations and derived bundle facts for the approver screens.
  *
  * Everything here is derived in the browser from the bundle list the approver
  * already holds — `GET /api/bundles` returns every bundle with its receipts,
@@ -20,6 +20,32 @@ export const bundleTotal = (bundle: BundleWithDetails): number =>
 
 export const sumTotals = (bundles: BundleWithDetails[]): number =>
   bundles.reduce((acc, b) => acc + bundleTotal(b), 0);
+
+/**
+ * How long a `paying` bundle may sit before the console offers the manual
+ * override actions.
+ *
+ * The transfer itself takes seconds; the rest is the approver walking to their
+ * phone to release it in the K BIZ app. Past this, the likely explanation is
+ * that nothing is coming back at all — kbiz-bot is down, or died mid-flight —
+ * and the human needs a way out rather than a spinner.
+ */
+export const PAYMENT_STUCK_MS = 10 * 60_000;
+
+/**
+ * True when a bundle has been in flight at the bank far longer than plausible.
+ *
+ * Only the server can act on this: the API re-checks the queue before it lets
+ * anything move. This is purely about when to SHOW the two override actions.
+ */
+export function isPaymentStuck(bundle: BundleWithDetails, now: number = Date.now()): boolean {
+  if (bundle.status !== 'paying' || bundle.paymentError !== null) return false;
+  // A row with no timestamp predates the watchdog; offering the way out beats
+  // leaving it unreachable.
+  if (!bundle.payingSince) return true;
+  const since = new Date(bundle.payingSince).getTime();
+  return !Number.isFinite(since) || now - since >= PAYMENT_STUCK_MS;
+}
 
 /** Whole days between `submittedAt` and now, floored, never negative. */
 export function daysWaiting(bundle: BundleWithDetails, now: number = Date.now()): number {

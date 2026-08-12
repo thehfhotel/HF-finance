@@ -55,13 +55,12 @@ export function BundleBuilder({ theme, state, nav, setState, preselectId }: Bund
   };
 
   const submit = async () => {
-    if (selectedLoose.length === 0 || submitting) return;
+    if (selectedLoose.length === 0 || !name.trim() || submitting) return;
     setError(null);
     setSubmitting(true);
     try {
-      const effectiveName = name.trim() || todayAutoName();
       const created = await api.bundles.create({
-        name: effectiveName,
+        name: name.trim(),
         receiptIds: selectedLoose.map((r) => r.id),
         note,
       });
@@ -97,6 +96,17 @@ export function BundleBuilder({ theme, state, nav, setState, preselectId }: Bund
 
       <div style={{ padding: '20px 20px 0' }}>
         <FormRow theme={theme} label="ชื่อ" value={name} onChange={setName} placeholder={todayAutoName()} />
+        <div
+          style={{
+            marginTop: -12,
+            marginBottom: 18,
+            fontFamily: FONT_UI,
+            fontSize: 12,
+            color: theme.inkSofter,
+          }}
+        >
+          กรุณาตั้งชื่อคำขอ เช่น ค่าอุปกรณ์ซ่อมแอร์
+        </div>
         <FormRow
           theme={theme}
           label="หมายเหตุถึงผู้อนุมัติ"
@@ -190,7 +200,7 @@ export function BundleBuilder({ theme, state, nav, setState, preselectId }: Bund
             {error}
           </div>
         )}
-        <PrimaryButton theme={theme} disabled={selectedLoose.length === 0 || submitting} onClick={submit}>
+        <PrimaryButton theme={theme} disabled={selectedLoose.length === 0 || !name.trim() || submitting} onClick={submit}>
           {submitting ? 'กำลังส่ง...' : 'ส่งขออนุมัติ'}
         </PrimaryButton>
       </div>

@@ -14,6 +14,7 @@ export type Route =
   | { name: 'approver-pay'; id: string }
   | { name: 'login' }
   | { name: 'admin-employees' }
+  | { name: 'admin-kbiz' }
   | { name: 'my-requests'; view?: 'drafts' | 'pending' | 'approved' | 'paid' | 'rejected' };
 
 export type RouteName = Route['name'];

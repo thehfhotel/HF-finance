@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { AppState, BundleWithDetails, Receipt, Theme } from '../../lib/types';
 import type { Nav } from '../../lib/router';
 import { fmt, fmtN, formatThaiDate } from '../../lib/format';
+import { isPaymentStuck } from '../../lib/stats';
 import { FONT_DISPLAY, FONT_UI } from '../../lib/theme';
 import { api } from '../../lib/api';
 import { AppBar } from '../../components/AppBar';
@@ -18,6 +19,7 @@ import {
 import { Icon } from '../../components/icons';
 import { ReceiptPhoto, ReceiptThumb } from '../../components/Receipts';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { Toast, useToast } from '../../components/Toast';
 
 interface ReviewProps {
   theme: Theme;
@@ -27,7 +29,11 @@ interface ReviewProps {
   setState: (updater: (s: AppState) => AppState) => void;
 }
 
-type ConfirmKind = 'approve' | 'reject';
+type ConfirmKind = 'approve' | 'reject' | 'pay-kbiz' | 'retry' | 'force-retry';
+
+/** How often to re-fetch the bundle while it's 'paying' — the panel promises
+ *  to update itself once the transfer settles, so it has to poll. */
+const PAYMENT_POLL_MS = 8000;
 
 export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
   const found = state.bundles.find((x) => x.id === bundleId);
@@ -38,6 +44,7 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
   const [error, setError] = useState<string | null>(null);
   const [confirmKind, setConfirmKind] = useState<ConfirmKind | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const { toast, showToast } = useToast();
 
   // The bundle may be absent from client state (deep link, stale list) —
   // fetch it directly instead of rendering a blank screen.
@@ -56,6 +63,31 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
       cancelled = true;
     };
   }, [b, bundleId]);
+
+  // The in-flight banner tells the approver this page updates itself once the
+  // KBIZ transfer settles — poll while that's true, or the promise is a lie
+  // until they back out and reopen the request.
+  useEffect(() => {
+    if (b?.status !== 'paying') return;
+    const id = b.id;
+    const timer = window.setInterval(() => {
+      api.bundles
+        .get(id)
+        .then((updated) => {
+          setB(updated);
+          setState((s) => ({
+            ...s,
+            bundles: s.bundles.some((x) => x.id === updated.id)
+              ? s.bundles.map((x) => (x.id === updated.id ? updated : x))
+              : [updated, ...s.bundles],
+          }));
+        })
+        .catch(() => {
+          // Transient network hiccup — the next tick tries again.
+        });
+    }, PAYMENT_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [b?.id, b?.status, setState]);
 
   if (!b) {
     return (
@@ -111,6 +143,41 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
     }
   };
 
+  const handlePayViaKbiz = async () => {
+    if (submitting) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      const updated = await api.bundles.payViaKbiz(b.id);
+      applyServerUpdate(updated);
+      showToast('ส่งคำสั่งโอนแล้ว — ยืนยันบนแอป K BIZ ในมือถือ');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
+    } finally {
+      setSubmitting(false);
+      setConfirmKind(null);
+    }
+  };
+
+  // `force` is only sent from the stuck-payment actions, where the approver has
+  // just been told to check K BIZ first: it overrules an intent kbiz-bot still
+  // owns. Without it the API releases only what the queue proves never armed.
+  const handlePaymentRetry = async (force = false) => {
+    if (submitting) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      const updated = await api.bundles.paymentRetry(b.id, { force });
+      applyServerUpdate(updated);
+      showToast('ย้อนกลับไปสถานะอนุมัติแล้ว — ลองโอนผ่าน KBIZ ใหม่ได้');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
+    } finally {
+      setSubmitting(false);
+      setConfirmKind(null);
+    }
+  };
+
   return (
     <div style={{ position: 'relative' }}>
       <AppBar
@@ -158,6 +225,70 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
           >
             <span style={{ fontWeight: 600, color: theme.danger, marginRight: 6 }}>เหตุผลที่ปฏิเสธ:</span>
             {b.rejectReason}
+          </div>
+        )}
+        {b.status === 'paying' && !b.paymentError && (
+          <div
+            style={{
+              marginTop: 10,
+              padding: '8px 12px',
+              borderRadius: 8,
+              background: `${theme.statusPaying}18`,
+              borderLeft: `3px solid ${theme.statusPaying}`,
+              fontFamily: FONT_UI,
+              fontSize: 13,
+              color: theme.ink,
+              lineHeight: 1.5,
+            }}
+          >
+            <span style={{ fontWeight: 600, marginRight: 6 }}>กำลังโอนผ่าน KBIZ — รอยืนยันบนมือถือ</span>
+            <span style={{ display: 'block', color: theme.inkSoft, marginTop: 2 }}>
+              หน้าจะอัปเดตให้อัตโนมัติเมื่อโอนสำเร็จ — ลองรีเฟรชอีกครั้งภายหลังหากรอนาน
+            </span>
+          </div>
+        )}
+        {b.status === 'paying' && b.paymentError && (
+          <div
+            style={{
+              marginTop: 10,
+              padding: '8px 12px',
+              borderRadius: 8,
+              background: `${theme.danger}18`,
+              borderLeft: `3px solid ${theme.danger}`,
+              fontFamily: FONT_UI,
+              fontSize: 13,
+              color: theme.ink,
+              lineHeight: 1.5,
+            }}
+          >
+            <span style={{ fontWeight: 600, color: theme.danger, marginRight: 6 }}>
+              โอนผ่าน KBIZ ไม่สำเร็จ / ไม่ทราบผล:
+            </span>
+            {b.paymentError}
+          </div>
+        )}
+        {/* A confirmed-failed KBIZ attempt returns the bundle to 'approved'
+            with paymentError set (kbiz-poller.ts) — surface it here too, or
+            the phone-based approver re-fires a transfer that already failed
+            with no idea why (desktop console shows this at Desktop.tsx:1018). */}
+        {b.status === 'approved' && b.paymentError && (
+          <div
+            style={{
+              marginTop: 10,
+              padding: '8px 12px',
+              borderRadius: 8,
+              background: `${theme.danger}18`,
+              borderLeft: `3px solid ${theme.danger}`,
+              fontFamily: FONT_UI,
+              fontSize: 13,
+              color: theme.ink,
+              lineHeight: 1.5,
+            }}
+          >
+            <span style={{ fontWeight: 600, color: theme.danger, marginRight: 6 }}>
+              โอนผ่าน KBIZ ครั้งก่อนไม่สำเร็จ:
+            </span>
+            {b.paymentError}
           </div>
         )}
       </div>
@@ -318,11 +449,99 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
             bottom: 0,
             padding: '24px 20px 28px',
             background: `linear-gradient(180deg, transparent, ${theme.paper} 25%)`,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
           }}
         >
+          {error && (
+            <div style={{ fontFamily: FONT_UI, fontSize: 12, color: theme.danger, textAlign: 'center' }}>
+              {error}
+            </div>
+          )}
+          {/* Manual pay always stays available; KBIZ appears only once the
+              bundle has a mapped payee to fire the bot at. */}
+          {b.kbizPayable && (
+            <PrimaryButton theme={theme} onClick={() => setConfirmKind('pay-kbiz')} disabled={submitting}>
+              โอนผ่าน KBIZ
+            </PrimaryButton>
+          )}
+          {b.kbizPayable ? (
+            <GhostButton theme={theme} full onClick={() => nav({ name: 'approver-pay', id: b.id })}>
+              บันทึกจ่ายเงิน &amp; แนบสลิปเอง
+            </GhostButton>
+          ) : (
+            <PrimaryButton theme={theme} onClick={() => nav({ name: 'approver-pay', id: b.id })}>
+              บันทึกจ่ายเงิน &amp; แนบสลิป
+            </PrimaryButton>
+          )}
+        </div>
+      )}
+
+      {b.status === 'paying' && b.paymentError && (
+        <div
+          style={{
+            position: 'sticky',
+            bottom: 0,
+            padding: '24px 20px 28px',
+            background: `linear-gradient(180deg, transparent, ${theme.paper} 25%)`,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }}
+        >
+          {error && (
+            <div style={{ fontFamily: FONT_UI, fontSize: 12, color: theme.danger, textAlign: 'center' }}>
+              {error}
+            </div>
+          )}
           <PrimaryButton theme={theme} onClick={() => nav({ name: 'approver-pay', id: b.id })}>
-            บันทึกจ่ายเงิน &amp; แนบสลิป
+            ยืนยันว่าโอนแล้ว (แนบสลิป)
           </PrimaryButton>
+          <GhostButton theme={theme} full onClick={() => setConfirmKind('retry')}>
+            ยังไม่ได้โอน — ลองใหม่
+          </GhostButton>
+        </div>
+      )}
+
+      {/* Nobody is coming back for this one. kbiz-bot can die without ever
+          writing a result — and a result is the only thing that flags a bundle
+          — so after a while the approver gets the same two ways out by hand,
+          rather than a request stuck in "กำลังโอน" that no screen can close. */}
+      {isPaymentStuck(b) && (
+        <div
+          style={{
+            position: 'sticky',
+            bottom: 0,
+            padding: '24px 20px 28px',
+            background: `linear-gradient(180deg, transparent, ${theme.paper} 25%)`,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }}
+        >
+          {error && (
+            <div style={{ fontFamily: FONT_UI, fontSize: 12, color: theme.danger, textAlign: 'center' }}>
+              {error}
+            </div>
+          )}
+          <div
+            style={{
+              fontFamily: FONT_UI,
+              fontSize: 12,
+              color: theme.inkSoft,
+              textAlign: 'center',
+              lineHeight: 1.5,
+            }}
+          >
+            ค้างนานผิดปกติ — เปิดแอป K BIZ เพื่อดูว่าโอนไปแล้วหรือยัง แล้วเลือกด้านล่าง
+          </div>
+          <GhostButton theme={theme} full onClick={() => nav({ name: 'approver-pay', id: b.id })}>
+            โอนไปแล้ว — แนบสลิปเอง
+          </GhostButton>
+          <GhostButton theme={theme} full onClick={() => setConfirmKind('force-retry')}>
+            ยังไม่ได้โอน — ปล่อยกลับไปอนุมัติ
+          </GhostButton>
         </div>
       )}
 
@@ -412,6 +631,54 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
           onCancel={() => { setConfirmKind(null); setRejectReason(''); }}
         />
       )}
+
+      {confirmKind === 'pay-kbiz' && (
+        <ConfirmDialog
+          theme={theme}
+          title={`โอน ${fmt(total)} ผ่าน KBIZ?`}
+          message={
+            <span>
+              <span style={{ display: 'block', marginBottom: 8 }}>
+                โอนเข้าบัญชีที่บันทึกไว้ใน KBIZ ให้ {b.submitter.name}
+              </span>
+              <span style={{ display: 'block', color: theme.warn }}>
+                ต้องกดยืนยันในแอป K BIZ บนมือถือ — หากไม่ยืนยัน การโอนจะไม่สำเร็จ
+              </span>
+            </span>
+          }
+          confirmLabel="โอนผ่าน KBIZ"
+          loading={submitting}
+          onConfirm={() => void handlePayViaKbiz()}
+          onCancel={() => setConfirmKind(null)}
+        />
+      )}
+
+      {confirmKind === 'retry' && (
+        <ConfirmDialog
+          theme={theme}
+          title="ลองโอนใหม่?"
+          message="ตรวจสอบในแอป K BIZ แล้วว่ารายการก่อนหน้าไม่สำเร็จ"
+          confirmLabel="ลองใหม่"
+          loading={submitting}
+          onConfirm={() => void handlePaymentRetry()}
+          onCancel={() => setConfirmKind(null)}
+        />
+      )}
+
+      {confirmKind === 'force-retry' && (
+        <ConfirmDialog
+          theme={theme}
+          title="ปล่อยกลับไปสถานะอนุมัติ?"
+          message="ยืนยันว่าเปิดแอป K BIZ ดูแล้วและยังไม่มีการโอนออกจริง — ถ้าโอนไปแล้วให้เลือก “โอนไปแล้ว — แนบสลิปเอง” แทน ไม่อย่างนั้นอาจโอนซ้ำ"
+          confirmLabel="ยังไม่ได้โอน"
+          danger
+          loading={submitting}
+          onConfirm={() => void handlePaymentRetry(true)}
+          onCancel={() => setConfirmKind(null)}
+        />
+      )}
+
+      <Toast toast={toast} theme={theme} />
     </div>
   );
 }
