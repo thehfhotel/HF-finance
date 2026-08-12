@@ -167,7 +167,7 @@ recovers on its own never pages anybody.
 | Var | Where | Default | Meaning |
 |---|---|---|---|
 | `KBIZ_QUEUE_DIR` | api container | *(unset in dev)* | Shared queue dir. Unset, missing at runtime, **or without a `queue/` sub-directory** → feature dark: 503 on จ่ายผ่าน KBIZ, poller never starts. Compose sets `/kbiz-queue`. |
-| `KBIZ_QUEUE_HOST_DIR` | host / `.env` | `/srv/kbiz-queue` | Host side of the bind mount. |
+| `KBIZ_QUEUE_HOST_DIR` | host / `.env` | `/home/deploy/kbiz-queue` | Host side of the bind mount. |
 | `KBIZ_POLL_MS` | api container | `5000` | Sweep interval (floor 1000). |
 | `KBIZ_STALE_MS` | api container | `900000` | How long a bundle may be `PAYING` with no word from the bot before the watchdog flags/alerts (floor 60000). |
 | `SLACK_WEBHOOK_URL` | api container | *(unset)* | Payment alerts. Unset → no Slack. |
@@ -182,12 +182,12 @@ account; account numbers live in KBIZ and in the bot's own gitignored
 **1 — create the shared queue directory** (once, as root on evergreen):
 
 ```bash
-sudo mkdir -p /srv/kbiz-queue/{queue,queue/archive,vouchers,slips}
+sudo mkdir -p /home/deploy/kbiz-queue/{queue,queue/archive,vouchers,slips}
 # The api container runs as the image's `bun` user, UID 1000 (Dockerfile.api).
 # kbiz-bot must be able to read/write the same tree — give both write access,
 # via a shared group if the bot's uid differs.
-sudo chown -R 1000:1000 /srv/kbiz-queue
-sudo chmod -R 2775 /srv/kbiz-queue
+sudo chown -R 1000:1000 /home/deploy/kbiz-queue
+sudo chmod -R 2775 /home/deploy/kbiz-queue
 ```
 
 **This step is what turns the feature on.** The API gates on `<dir>/queue`
@@ -203,7 +203,7 @@ than a queue nobody reads. Ownership matters too: the api container runs as UID
 1000, so a root-owned tree makes every write fail.
 
 **2 — reimbursement side.** Already in `docker-compose.production.yml`: the api
-service mounts `${KBIZ_QUEUE_HOST_DIR:-/srv/kbiz-queue}:/kbiz-queue` and sets
+service mounts `${KBIZ_QUEUE_HOST_DIR:-/home/deploy/kbiz-queue}:/kbiz-queue` and sets
 `KBIZ_QUEUE_DIR=/kbiz-queue`. Nothing to do beyond deploying.
 
 The bind deliberately keeps Docker's default `create_host_path`. Pinning it to
@@ -216,7 +216,7 @@ where it belongs: the feature stays off, the app keeps serving.
 **3 — payroll side (kbiz-bot).** **Nested binds — the only supported topology**
 (payroll's `docker-compose.yml` has them drafted, commented out): bind the
 shared sub-directories OVER the bot's existing data dir —
-`/srv/kbiz-queue/queue:/app/data/queue`, `…/slips:/app/data/slips`,
+`/home/deploy/kbiz-queue/queue:/app/data/queue`, `…/slips:/app/data/slips`,
 `…/vouchers:/app/data/vouchers` — plus the **same `queue` bind on the
 `payroll` service**, and leave every `KBIZ_*` env var unset. Mind the order:
 nested binds must be listed after their parent.
@@ -229,13 +229,13 @@ nested binds must be listed after their parent.
 > both producers use stays the same. Accepted tradeoff: payroll queue items
 > become readable by the reimbursement-api container (same host, same owner).
 > Migrate the existing queue contents first: see payroll's `EVERGREEN.md`
-> switch-over steps (`rsync data/queue/ → /srv/kbiz-queue/queue/`).
+> switch-over steps (`rsync data/queue/ → /home/deploy/kbiz-queue/queue/`).
 
 **4 — secrets (GitHub → this repo).** Both optional; unset keeps the feature
 dark rather than breaking a deploy:
 
 - `SLACK_WEBHOOK_URL` — the payroll incoming webhook.
-- `KBIZ_QUEUE_HOST_DIR` — only if the host path differs from `/srv/kbiz-queue`.
+- `KBIZ_QUEUE_HOST_DIR` — only if the host path differs from `/home/deploy/kbiz-queue`.
 
 **5 — configure payees + categories** at `/api/admin/kbiz-settings` (approver
 session). `payees` maps `User.id` → the bot's payee handle; the handle must
@@ -288,3 +288,14 @@ api log (the bot writing a slip name outside the agreed basename contract).
   imports the bot's screenshot as evidence on `unconfirmed`, the bot treats
   KBIZ's generic "เกิดข้อผิดพลาด" page as unconfirmed (never retryable), and a
   withdrawn queue file no longer aborts the bot's whole batch.
+
+## Post-deploy correction (2026-08-12)
+
+The shared tree lives at `/home/deploy/kbiz-queue` (payee book at
+`/home/deploy/kbiz-bot/`), NOT `/srv/...` as first planned: evergreen runs
+Docker as a **snap**, whose confined daemon cannot use bind sources outside
+`/home` — `/srv` mounts fail container start with `error while creating mount
+source path … read-only file system` even though the path exists. Both
+2026-08-12 deploys tripped this and briefly took the stacks down; recovery was
+relocating the tree + pointing `KBIZ_QUEUE_HOST_DIR` (env/secret) at the new
+path. Compose/workflow defaults now say `/home/deploy/kbiz-queue`.

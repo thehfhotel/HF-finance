@@ -250,7 +250,7 @@ jobs:
           # you) the "จ่ายผ่าน KBIZ" action answers 503 and the poller never
           # starts, and without the webhook nothing goes to Slack.
           # The host directory is shared with kbiz-bot in the payroll stack.
-          KBIZ_QUEUE_HOST_DIR: ${{ secrets.KBIZ_QUEUE_HOST_DIR || '/srv/kbiz-queue' }}
+          KBIZ_QUEUE_HOST_DIR: ${{ secrets.KBIZ_QUEUE_HOST_DIR || '/home/deploy/kbiz-queue' }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           IMAGE_TAG: sha-${{ github.sha }}
         run: |
