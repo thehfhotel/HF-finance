@@ -36,7 +36,10 @@ swap between seeded users without going through Cloudflare Access.
 - `apps/web` — Vite + React + TS SPA
 - `packages/shared` — API contract types shared by both
 - `Dockerfile.api`, `Dockerfile.web`, `docker-compose.production.yml` — prod images
-- `.github/workflows/deploy.yml` — build → SSH-deploy to evergreen
+- `.github/workflows/deploy-reimbursement.yml` (build → SSH-deploy) and
+  `.github/workflows/reimbursement-ci.yml` (typecheck + PR image smoke) —
+  both at the monorepo root (this app lives at `reimbursement/` inside
+  `thehfhotel/payroll` since 2026-08-12), not under this directory
 - `DEPLOYMENT.md` — first-deploy walkthrough (DNS, Cloudflare Access, secrets)
 - `CLAUDE.md` — contributor guide for AI-assisted edits
 - `SECURITY.md` — auth model and disclosure policy

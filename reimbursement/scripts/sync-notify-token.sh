@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-REPO="${REPO:-thehfhotel/reimbursement-v2}"
+REPO="${REPO:-thehfhotel/payroll}"
 SECRET_NAME="NOTIFY_INGRESS_TOKEN"
 REMOTE="${REMOTE:-evergreen}"
 CONTAINER="${CONTAINER:-hf-erp-portal}"
@@ -46,7 +46,7 @@ if gh secret list --repo "$REPO" | grep -q "^${SECRET_NAME}"; then
   echo "✔ ${SECRET_NAME} is set on ${REPO}"
   echo
   echo "It takes effect on the next deploy. To apply it now:"
-  echo "  gh workflow run 'Build & Deploy' --repo ${REPO}"
+  echo "  gh workflow run 'Reimbursement Build & Deploy' --repo ${REPO}"
 else
   echo "✖ upload reported success but the secret is not listed — check ${REPO}"
   exit 1

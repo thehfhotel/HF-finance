@@ -3,6 +3,13 @@ name: Build, push, and deploy payroll
 on:
   push:
     branches: [main]
+  # PR-time run of `test` only (kbiz-bot typecheck + the root shared-contract
+  # suite) so a broken KBIZ contract is a merge-blocking check, not something
+  # discovered after main already moved. build-payroll/build-kbiz-bot/deploy
+  # explicitly exclude pull_request (push and manual workflow_dispatch still
+  # build/deploy as before) — see their `if:` guards below.
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 # Mirrors the new-hotel Phase-1 pattern (docs/runbook-deploy-modernization.md
@@ -18,8 +25,11 @@ on:
 env:
   REGISTRY: ghcr.io
 
+# SAME group as deploy-reimbursement.yml's concurrency group: both stacks
+# bind-mount the one shared /home/deploy/kbiz-queue dir on evergreen, so a
+# payroll rollout and a reimbursement rollout must queue, never interleave.
 concurrency:
-  group: deploy-evergreen-payroll
+  group: deploy-evergreen
   cancel-in-progress: false
 
 jobs:
@@ -55,6 +65,10 @@ jobs:
               # the bot imports the contract from the reimbursement subtree —
               # a shared change must rebuild the bot image too
               - 'reimbursement/packages/shared/**'
+              # kbiz-bot/Dockerfile's whole @reimbursement/shared resolution
+              # strategy (node_modules symlink vs COPYing tsconfig.json) is
+              # conditioned on what this file excludes from the build context.
+              - '.dockerignore'
             deploy:
               - 'docker-compose.yml'
               - 'scripts/deploy/**'
@@ -77,13 +91,45 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      # Covers both packages: kbiz-bot's tests import only pure parsing code
-      # (its `playwright` import is type-only), so no browser install needed.
+      # Guard the invariant kbiz-bot's tsconfig `paths` mapping silently
+      # relies on: root `bun install` has no `workspaces` in package.json, so
+      # it never walks into reimbursement/ — @reimbursement/shared resolves
+      # here only because it has zero third-party imports today. A dependency
+      # added there would pass reimbursement's own CI (its bun.lock has it)
+      # while breaking THIS install with an unresolved-import stack trace
+      # pointing at a file in another app.
+      - name: Contract must stay dependency-free
+        run: |
+          if grep -rnE "from ['\"][^./]" reimbursement/packages/shared/src; then
+            echo "::error::@reimbursement/shared gained a third-party import — root 'bun install' cannot resolve it (root package.json has no workspaces)"
+            exit 1
+          fi
+
+      # Covers payroll-form: bun test at root only sees src/ and test/ (no
+      # workspaces), so kbiz-bot's own suite runs separately below.
       - run: bun test
+
+      # kbiz-bot has its own package.json + committed bun.lock (not a bun
+      # workspace member of root) — install and typecheck it independently.
+      # This is the compile-time half of the shared-contract guarantee
+      # kbiz-bot/tsconfig.json documents; nothing invoked it before this.
+      # `playwright` here has no postinstall script (verified: its installed
+      # package.json carries no "scripts" key), so this does not trigger a
+      # Chromium download.
+      - name: Install kbiz-bot dependencies
+        run: bun install --frozen-lockfile
+        working-directory: kbiz-bot
+
+      - name: Typecheck kbiz-bot
+        run: bun run typecheck
+        working-directory: kbiz-bot
 
   build-payroll:
     needs: [changes, test]
-    if: needs.changes.outputs.payroll == 'true'
+    # Not on pull_request — it exists so `test` (and its kbiz-bot typecheck)
+    # gates a PR before merge; a PR must NOT push images or reach deploy.
+    # push and workflow_dispatch (manual re-deploy) both still build.
+    if: needs.changes.outputs.payroll == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -113,7 +159,8 @@ jobs:
 
   build-kbiz-bot:
     needs: [changes, test]
-    if: needs.changes.outputs.kbiz == 'true'
+    # Not on pull_request — see build-payroll's comment.
+    if: needs.changes.outputs.kbiz == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -154,6 +201,7 @@ jobs:
     # "skipped" alone would otherwise read as permission to re-roll :latest.
     if: |
       always() &&
+      github.event_name != 'pull_request' &&
       (needs.test.result == 'success' || needs.test.result == 'skipped') &&
       (needs.build-payroll.result == 'success' || needs.build-payroll.result == 'skipped') &&
       (needs.build-kbiz-bot.result == 'success' || needs.build-kbiz-bot.result == 'skipped') &&

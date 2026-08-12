@@ -2,8 +2,8 @@ FROM oven/bun:1-alpine
 
 WORKDIR /app
 
-COPY package.json ./
-RUN bun install --production --frozen-lockfile || bun install --production
+COPY package.json bun.lock ./
+RUN bun install --production --frozen-lockfile
 
 COPY src ./src
 # One-off ops scripts (run via `docker exec`, not by the app itself) —

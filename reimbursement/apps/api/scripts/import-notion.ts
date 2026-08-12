@@ -20,7 +20,7 @@
  *     --env-file ~/production/.env \
  *     -v /tmp/notion-import:/import:ro \
  *     -v reimbursement_v2_uploads_data:/app/apps/api/uploads \
- *     ghcr.io/thehfhotel/reimbursement-v2-api:latest \
+ *     ghcr.io/thehfhotel/payroll-reimbursement-api:latest \
  *     bun run scripts/import-notion.ts
  */
 

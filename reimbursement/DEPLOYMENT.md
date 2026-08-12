@@ -40,18 +40,42 @@ The public hostname itself sits behind a Cloudflare Access application
 the app JWT exchange re-verifies the Access assertion at the origin rather
 than trusting the edge.
 
-## Repo secrets (Settings → Secrets and variables → Actions)
+## Repo secrets (Settings → Secrets and variables → Actions, on `thehfhotel/payroll` — the monorepo repo, since the 2026-08-12 cutover)
 
-| Secret | Purpose |
-|---|---|
-| `SSH_PRIVATE_KEY` | ed25519 private key for `reimbursement-v2@evergreen` |
-| `SSH_KNOWN_HOSTS` | host key — `evergreen.thehfhotel.org ssh-ed25519 …` |
-| `CF_ACCESS_CLIENT_ID` | *(optional)* Cloudflare Access service token id, only if the evergreen SSH tunnel has an Access app |
-| `CF_ACCESS_CLIENT_SECRET` | *(optional)* Cloudflare Access service token secret |
-| `JWT_SECRET` | App JWT signing key — `openssl rand -base64 48` |
-| `CF_ACCESS_TEAM_DOMAIN` | *(optional)* Team domain for the login-verifying Access app, e.g. `laikaexpress.cloudflareaccess.com` — falls back to that default if unset |
-| `CF_ACCESS_AUD` | **Required.** AUD tag of the reimbursement Access application (Cloudflare Zero Trust → Access → Applications → app → Overview); read back via the Cloudflare API (`GET /accounts/:id/access/apps`) when auditing the app |
-| `POSTGRES_PASSWORD` | Strong DB password — `openssl rand -base64 32` |
+> All reimbursement-specific secrets that could collide with the payroll
+> stack's own names are prefixed `REIMB_`. Secrets below WITHOUT that prefix
+> (`JWT_SECRET`, `CF_ACCESS_AUD`, `POSTGRES_PASSWORD`, `READER_RESOLVE_SECRET`,
+> `HF_ID_BASE_URL`, `HF_ID_ISSUER`, `SLACK_WEBHOOK_URL`) are deliberately
+> shared with the root `deploy.yml` (payroll + kbiz-bot) pipeline — one
+> HF-ID service, one Slack webhook, read by both. Rotating any of those
+> requires redeploying BOTH stacks (push here AND to `main` for the root
+> pipeline) or they drift out of sync silently. See root `CLAUDE.md`.
+
+| Secret | Required? | Purpose |
+|---|---|---|
+| `REIMB_SSH_PRIVATE_KEY` | **Required** | ed25519 private key for `reimbursement-v2@evergreen` |
+| `REIMB_SSH_KNOWN_HOSTS` | **Required** | host key — `evergreen.thehfhotel.org ssh-ed25519 …` |
+| `CF_ACCESS_CLIENT_ID` | optional | Cloudflare Access service token id, only if the evergreen SSH tunnel has an Access app |
+| `CF_ACCESS_CLIENT_SECRET` | optional | Cloudflare Access service token secret |
+| `JWT_SECRET` | **Required** | App JWT signing key — `openssl rand -base64 48` |
+| `CF_ACCESS_TEAM_DOMAIN` | optional, has default | Team domain for the login-verifying Access app, e.g. `laikaexpress.cloudflareaccess.com` — falls back to that default if unset |
+| `CF_ACCESS_AUD` | **Required** | AUD tag of the reimbursement Access application (Cloudflare Zero Trust → Access → Applications → app → Overview); read back via the Cloudflare API (`GET /accounts/:id/access/apps`) when auditing the app |
+| `POSTGRES_PASSWORD` | **Required** | Strong DB password — `openssl rand -base64 32` |
+| `READER_RESOLVE_SECRET` | optional, fails **dark** | app↔central HF-ID card-login secret. Unset ⇒ card login stays disabled (503), nothing else breaks. Shared with the root pipeline. |
+| `HF_ID_BASE_URL` | optional, has default | central HF ID base URL (default `http://192.168.100.228:5000`). Shared with the root pipeline. |
+| `HF_ID_ISSUER` | optional, has default | expected card-assertion issuer (default `https://id.thehfhotel.org/oidc`). Shared with the root pipeline. |
+| `KIOSK_EMAILS` | optional, has default | shared-terminal `email=kiosk-id,…` pairs; defaults to the two reception PCs |
+| `NOTIFY_INGRESS_TOKEN` | optional, fails **dark** | HF One portal notification ingress token. Unset ⇒ approver "request submitted" notifications silently never send — nothing else fails or reports it. New to this repo at cutover (was already set on the old `reimbursement-v2` repo); verify it's set as a **post-deploy check**, not just a copy-the-secret checklist item. |
+| `HF_ERP_BASE_URL` | optional, has default | base URL for the HF One portal (default `http://192.168.100.228:4020`) |
+| `SLACK_WEBHOOK_URL` | optional, fails dark | KBIZ queue alerts. Shared with the root pipeline. |
+
+`KBIZ_QUEUE_HOST_DIR` is **not** a secret — it's a fixed literal
+(`/home/deploy/kbiz-queue`) hardcoded in `deploy-reimbursement.yml`, because
+it must stay identical to the payroll/kbiz-bot stack's own compose default.
+Making it secret-configurable here without a matching change on the payroll
+side would let one repo secret silently split the two stacks onto different
+directories with no error anywhere. If the path ever needs to change, change
+it in both workflows in the same commit.
 
 ## First-time setup
 
@@ -62,7 +86,7 @@ ssh-keygen -t ed25519 -N '' -f ~/.ssh/reimbursement-v2-deploy \
   -C 'gh-actions deploy@reimbursement-v2'
 
 cat ~/.ssh/reimbursement-v2-deploy.pub   # → goes to evergreen (next step)
-cat ~/.ssh/reimbursement-v2-deploy       # → goes into SSH_PRIVATE_KEY secret
+cat ~/.ssh/reimbursement-v2-deploy       # → goes into REIMB_SSH_PRIVATE_KEY secret (on thehfhotel/payroll)
 ```
 
 ### 2. Provision the deploy user on evergreen
@@ -83,7 +107,7 @@ authorized key or recreate the app directory.
 
 ```bash
 ssh-keyscan -t ed25519 evergreen.thehfhotel.org > /tmp/evergreen-known-host
-cat /tmp/evergreen-known-host   # paste into the SSH_KNOWN_HOSTS GitHub secret
+cat /tmp/evergreen-known-host   # paste into the REIMB_SSH_KNOWN_HOSTS GitHub secret (on thehfhotel/payroll)
 ```
 
 ### 4. Cloudflare Access service token *(optional)*
@@ -102,8 +126,8 @@ If you later add an Access app for `evergreen.thehfhotel.org` of type SSH:
    with action `Service Auth`, including the new token.
 3. Set the two GitHub secrets:
    ```bash
-   printf '%s' '<client-id>'     | gh secret set CF_ACCESS_CLIENT_ID --repo thehfhotel/reimbursement-v2
-   printf '%s' '<client-secret>' | gh secret set CF_ACCESS_CLIENT_SECRET --repo thehfhotel/reimbursement-v2
+   printf '%s' '<client-id>'     | gh secret set CF_ACCESS_CLIENT_ID --repo thehfhotel/payroll
+   printf '%s' '<client-secret>' | gh secret set CF_ACCESS_CLIENT_SECRET --repo thehfhotel/payroll
    ```
 
 The deploy workflow auto-detects whether the secrets are set; if both are
@@ -148,7 +172,10 @@ in place of `:5800`. Cloudflare propagates the change in under 60 seconds.
 git push origin main
 ```
 
-Watch the run at <https://github.com/thehfhotel/reimbursement-v2/actions>.
+Watch the run at <https://github.com/thehfhotel/payroll/actions> (workflow:
+"Reimbursement Build & Deploy", `.github/workflows/deploy-reimbursement.yml`
+at the monorepo root — the old `thehfhotel/reimbursement-v2` repo is archived
+history and no longer runs any pipeline).
 
 ## Day-2 operations
 
@@ -180,6 +207,34 @@ docker compose pull
 docker compose up -d --remove-orphans
 SH
 ```
+
+> **Cutover gap (2026-08-12 monorepo move):** this only works for shas built
+> under the CURRENT image names,
+> `ghcr.io/thehfhotel/payroll-reimbursement-{api,web}`. Those are brand-new
+> GHCR packages — the rename in `deploy-reimbursement.yml` means every
+> pre-cutover sha lives only under the OLD package names,
+> `ghcr.io/thehfhotel/reimbursement-v2-{api,web}`. Rolling back to anything
+> older than the first monorepo deploy needs `IMAGE_TAG=` AND the image
+> repository in `docker-compose.yml` on the host both changed back to the
+> old name — editing `IMAGE_TAG=` alone gets "manifest unknown" from
+> `docker compose pull`.
+>
+> **Before merging the monorepo cutover**, mirror the last pre-cutover
+> production sha into the new package names so a same-name rollback target
+> exists for the deploy most likely to need one:
+>
+> ```bash
+> docker buildx imagetools create \
+>   -t ghcr.io/thehfhotel/payroll-reimbursement-api:sha-<last-good> \
+>   ghcr.io/thehfhotel/reimbursement-v2-api:sha-<last-good>
+> docker buildx imagetools create \
+>   -t ghcr.io/thehfhotel/payroll-reimbursement-web:sha-<last-good> \
+>   ghcr.io/thehfhotel/reimbursement-v2-web:sha-<last-good>
+> ```
+>
+> This is a manual, credentialed registry operation — not something CI does
+> for you, and not done as part of this doc edit. It's tracked as a cutover
+> checklist item in `docs/change-requests/CR-2026-08-12-finance-monorepo.md`.
 
 ### Logs
 
