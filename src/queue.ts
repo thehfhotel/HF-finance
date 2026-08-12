@@ -126,9 +126,15 @@ export async function listRequests(): Promise<QueueRequest[]> {
   const reqs: QueueRequest[] = [];
   for (const f of files) {
     if (!f.endsWith(".json")) continue;
+    // The queue dir is shared with kbiz-bot + the reimbursement app since the
+    // 2026-08-12 switch-over: skip the bot's published manifests and any item
+    // another app owns, or they render as bogus rows in this UI's list.
+    if (f === "payee-handles.json" || f === "kbiz-favorites.json") continue;
     try {
       const buf = await readFile(join(QUEUE_DIR, f), "utf8");
-      reqs.push(JSON.parse(buf) as QueueRequest);
+      const parsed = JSON.parse(buf) as QueueRequest & { app?: string };
+      if (parsed.app && parsed.app !== "payroll") continue;
+      reqs.push(parsed);
     } catch {}
   }
   reqs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));

@@ -1,6 +1,7 @@
 import type { Page } from "playwright";
 import { gotoAuthenticated, isUnauthenticatedUrl } from "../lib/session";
 import { captureSlip, ensureSlipsDir, SLIPS_DIR, type SlipCapture } from "../lib/capture-slip";
+import { matchFavoriteRows } from "../lib/scrape-favorites";
 
 /**
  * Ad-hoc single transfer on KBIZ's "โอนเงินไปบัญชีบุคคลอื่น" page
@@ -10,7 +11,9 @@ import { captureSlip, ensureSlipsDir, SLIPS_DIR, type SlipCapture } from "../lib
  *     finds the one row matching ALL THREE of { nickname, account number, bank },
  *     requires EXACTLY ONE, clicks it, and re-reads "To" to confirm KBIZ filled
  *     OUR account. A mis-keyed number can't misroute — it's only a lookup key
- *     into the vetted list. This is the safe default.
+ *     into the vetted list. This is the safe default. The account verifier is
+ *     the full number when the payee book has one, or the last 4 digits when
+ *     the payee came from the synced (masked) favorites list.
  *   - "custom": type the bank + account number for a payee not in the saved list.
  *     Less safe (the number is typed); use only when a saved favorite doesn't
  *     exist. The account name KBIZ resolves + your phone approval are the checks.
@@ -37,8 +40,18 @@ export interface Payee {
   mode: "favorite" | "custom";
   /** Favorite only: Display Name (nickname) to select + verify, e.g. "พี่วิว". */
   nickname?: string;
-  /** Destination account number (favorite: verifier; custom: typed). Dashes optional. */
-  accountNo: string;
+  /**
+   * Destination account number (favorite: verifier; custom: typed). Dashes
+   * optional. REQUIRED for "custom"; a "favorite" may instead carry only
+   * `accountLast4`, which is all a synced favorite ever knows.
+   */
+  accountNo?: string;
+  /**
+   * Favorite only: last 4 digits, when the full number isn't available (the
+   * synced favorites list is masked by contract). Used as the row verifier
+   * and re-checked against the filled "To" field after selection.
+   */
+  accountLast4?: string;
   /** Destination bank, matched case-insensitively as a substring / alternation. */
   bank: string;
   /** Name on the account (logging + a soft check). */
@@ -80,6 +93,20 @@ export type TransferOtherResult =
 
 const digitsOnly = (s: string) => s.replace(/\D+/g, "");
 
+/**
+ * Last 4 digits only ("…7394"), for anything that names a destination account
+ * in a message. Every throw below becomes `result.error` in the queue file,
+ * which process-queue posts to Slack and reimbursement persists as
+ * `bundle.paymentError` — a full account number belongs in none of those (the
+ * same rule describeDestination applies, and ADR 0001 decision 4). Nothing
+ * diagnostic is lost: each throw captures a screenshot first, and the number
+ * is in the queue file's own destination.
+ */
+const maskAccount = (s: string) => {
+  const d = digitsOnly(s);
+  return d ? `…${d.slice(-4)}` : "?";
+};
+
 /** KBIZ memo rejects special characters — keep only Thai, alphanumerics, space. */
 export function sanitizeMemo(s: string): string {
   return s
@@ -91,9 +118,23 @@ export function sanitizeMemo(s: string): string {
 
 /** Select a SAVED payee via the picker, triple-verified. Throws on any ambiguity. */
 async function selectFavoritePayee(page: Page, payee: Payee, slug: string): Promise<void> {
-  const acctD = digitsOnly(payee.accountNo);
-  const bankRe = new RegExp(payee.bank.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+  const acctD = payee.accountNo ? digitsOnly(payee.accountNo) : "";
+  const last4 = payee.accountLast4 ? digitsOnly(payee.accountLast4) : "";
   const nickname = payee.nickname ?? "";
+  // matchFavoriteRows tests `t.includes(criteria.nickname)`, which every row
+  // passes when the nickname is "" — that would quietly degrade the
+  // triple-verify to bank + verifier. Refuse before opening the picker.
+  if (!nickname) throw new Error('A "favorite" payee needs a nickname (the KBIZ Display Name) — none was given.');
+  // The verifier is what makes this path safe — without one, "the row whose
+  // nickname matches" is a single unverified check. Fail before opening it.
+  if (!acctD && last4.length !== 4) {
+    throw new Error(
+      `Favorite "${nickname}" carries neither an account number nor a 4-digit accountLast4 — refusing to select.`,
+    );
+  }
+  // What errors name the destination as — masked either way, since they travel
+  // to Slack and into reimbursement's stored paymentError.
+  const shown = maskAccount(payee.accountNo ?? last4);
 
   console.log("→ Open saved-payee picker");
   const pick = page.locator("a.input-search-acc").first();
@@ -112,18 +153,21 @@ async function selectFavoritePayee(page: Page, payee: Payee, slug: string): Prom
 
   const rows = page.locator("div.lists").filter({ has: page.locator("a.c-bold.c-green.pointer") });
   const n = await rows.count();
-  const matches: number[] = [];
+  const texts: string[] = [];
   for (let i = 0; i < n; i++) {
-    const t = (await rows.nth(i).innerText().catch(() => "")).replace(/\s+/g, " ").trim();
-    if (t.includes(nickname) && (t.includes(payee.accountNo) || t.includes(acctD)) && bankRe.test(t)) {
-      matches.push(i);
-    }
+    texts.push(await rows.nth(i).innerText().catch(() => ""));
   }
+  const matches = matchFavoriteRows(texts, {
+    nickname,
+    bank: payee.bank,
+    accountNo: payee.accountNo,
+    accountLast4: last4 || undefined,
+  });
   console.log(`   scanned ${n} saved rows, ${matches.length} triple-verified`);
   if (matches.length !== 1) {
     await page.screenshot({ path: `${SLIPS_DIR}/_picker-${slug}.png`, fullPage: true }).catch(() => {});
     throw new Error(
-      `Favorite "${nickname}" (${payee.accountNo}, ${payee.bank}): expected exactly one matching ` +
+      `Favorite "${nickname}" (${shown}, ${payee.bank}): expected exactly one matching ` +
         `saved account, found ${matches.length}. Refusing to select.`,
     );
   }
@@ -133,9 +177,16 @@ async function selectFavoritePayee(page: Page, payee: Payee, slug: string): Prom
   await page.waitForTimeout(2_000);
 
   const filled = await page.locator('input[name="accountTo"]').first().inputValue().catch(() => "");
-  if (digitsOnly(filled) !== acctD) {
+  const filledD = digitsOnly(filled);
+  // Full number when we have one; otherwise the last 4 KBIZ itself filled in —
+  // over a field that must still hold a whole account number. 8 is the same
+  // floor rowHasAccountEndingWith uses to decide a token IS an account, and it
+  // stops a masked or half-rendered field ("…5678") from confirming only the 4
+  // digits we already assumed.
+  const toOk = acctD ? filledD === acctD : filledD.length >= 8 && filledD.endsWith(last4);
+  if (!toOk) {
     await page.screenshot({ path: `${SLIPS_DIR}/_toMismatch-${slug}.png`, fullPage: true }).catch(() => {});
-    throw new Error(`After selecting "${nickname}", To account is "${filled}", expected ${payee.accountNo}.`);
+    throw new Error(`After selecting "${nickname}", To account is ${maskAccount(filled)}, expected ${shown}.`);
   }
   console.log(`   ✓ To account = ${filled}`);
 }
@@ -181,6 +232,9 @@ async function selectCategory(page: Page, kbizCategoryId: string): Promise<void>
 
 /** Type the bank + account for a payee NOT in the saved list. */
 async function selectCustomAccount(page: Page, payee: Payee, slug: string): Promise<void> {
+  // Custom is the one mode that must type the number, so it must have one —
+  // a favorite's masked last-4 is not enough to address a transfer.
+  if (!payee.accountNo) throw new Error('A "custom" payee needs a full account number — none was given.');
   const acctD = digitsOnly(payee.accountNo);
 
   console.log(`→ Custom account: select bank "${payee.bank}"`);
@@ -216,7 +270,7 @@ async function selectCustomAccount(page: Page, payee: Payee, slug: string): Prom
   const filled = await acct.inputValue().catch(() => "");
   if (digitsOnly(filled) !== acctD) {
     await page.screenshot({ path: `${SLIPS_DIR}/_toMismatch-${slug}.png`, fullPage: true }).catch(() => {});
-    throw new Error(`Typed account did not stick: field shows "${filled}", expected ${payee.accountNo}.`);
+    throw new Error(`Typed account did not stick: field shows ${maskAccount(filled)}, expected ${maskAccount(payee.accountNo)}.`);
   }
   console.log(`   ✓ To account = ${filled}`);
 }
@@ -234,7 +288,10 @@ export async function runTransferOtherFlow(
   }
 
   console.log("\n──────── โอนเงินไปบัญชีบุคคลอื่น (fundtranfer-other) ────────");
-  console.log(`   payee:  [${p.mode}] ${p.nickname ?? p.accountName ?? "?"} · ${p.bank} · ${p.accountNo}`);
+  console.log(
+    `   payee:  [${p.mode}] ${p.nickname ?? p.accountName ?? "?"} · ${p.bank} · ` +
+      `${maskAccount(p.accountNo ?? p.accountLast4 ?? "")}`,
+  );
   console.log(`   amount: ฿${amountStr}`);
   console.log(`   memo:   ${memo || "—"}${memo !== input.memo.trim() ? "  (sanitized)" : ""}`);
   console.log(`   mode:   ${input.confirm ? "CONFIRM (Next arms the phone push)" : "PREVIEW (stops before Next)"}`);
