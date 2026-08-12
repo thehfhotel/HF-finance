@@ -3,6 +3,22 @@ name: Build, push, and deploy payroll
 on:
   push:
     branches: [main]
+    # Mirror of the paths-filter union below: a push touching ONLY the
+    # reimbursement app (not its shared contract) never spins this workflow.
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'package.json'
+      - 'bun.lock'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'KBIZTemplateAddPayrollAccount.xlsx'
+      - 'KBIZTemplateUploadPayroll.xlsx'
+      - 'kbiz-bot/**'
+      - 'reimbursement/packages/shared/**'
+      - 'docker-compose.yml'
+      - 'scripts/deploy/**'
+      - '.github/workflows/deploy.yml'
   # PR-time run of `test` only (kbiz-bot typecheck + the root shared-contract
   # suite) so a broken KBIZ contract is a merge-blocking check, not something
   # discovered after main already moved. build-payroll/build-kbiz-bot/deploy
@@ -25,12 +41,11 @@ on:
 env:
   REGISTRY: ghcr.io
 
-# SAME group as deploy-reimbursement.yml's concurrency group: both stacks
-# bind-mount the one shared /home/deploy/kbiz-queue dir on evergreen, so a
-# payroll rollout and a reimbursement rollout must queue, never interleave.
-concurrency:
-  group: deploy-evergreen
-  cancel-in-progress: false
+# Deploy serialization moved to the DEPLOY JOB (same shared group as
+# deploy-reimbursement.yml's deploy job): two pipelines' BUILDS may run
+# concurrently — only the ssh/compose window on evergreen must never
+# interleave. Workflow-level grouping made a reimbursement deploy wait
+# through payroll's builds too, which was pure lost wall-clock.
 
 jobs:
   changes:
@@ -193,6 +208,9 @@ jobs:
           cache-to: type=gha,mode=max,scope=kbiz-bot
 
   deploy:
+    concurrency:
+      group: deploy-evergreen
+      cancel-in-progress: false
     needs: [changes, test, build-payroll, build-kbiz-bot]
     runs-on: ubuntu-latest
     permissions:
