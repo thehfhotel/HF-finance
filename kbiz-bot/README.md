@@ -31,6 +31,91 @@ npm run add-payroll -- <file> --observe
                      # can inspect entries before committing
 ```
 
+### Ad-hoc transfer to another person's account (fundtranfer-other)
+
+A single transfer to an unregistered account — used to pay a reimbursement to
+one recipient. Unlike the payroll flow this is not a batch and needs no
+registered beneficiary; it carries a free-text memo and an optional file
+attachment, and it captures the e-slip afterwards (the audit artifact the
+payroll flows never produced).
+
+```sh
+cp transfer-other.config.example.json transfer-other.config.json
+# fill in sourceAccount + the recipient's bank/account (kept out of git)
+
+npm run transfer-other-probe
+                     # READ-ONLY. Opens the transfer page in your session and
+                     # dumps its inputs/selects/buttons so the flow's selectors
+                     # can be pinned to the real DOM. Run this first.
+
+npm run transfer-other -- --amount 1234.50 --memo "REIMB-08 Revew"
+                     # PREVIEW (default): fills the form, stops at KBIZ's review
+                     # screen, screenshots it. Nothing submitted, no phone push.
+
+npm run transfer-other -- --amount 1234.50 --memo "REIMB-08 Revew" --confirm
+                     # arms the transfer; then you approve on your K BIZ phone
+                     # app. On success the slip is saved to ../data/slips/.
+```
+
+**Two gates stand between the script and moved money:** `--confirm` (absent =
+preview only) and your physical phone tap (KBIZ pushes the approval to the app;
+the script waits, it never approves). A `maxTransfer` ceiling in the config is a
+third backstop against a wrong amount. Screenshots (filled form, review, slip)
+land in `../data/slips/`.
+
+The optional transfer category is chosen by **KBIZ's own picker anchor id**
+(`kbizCategoryId` in `transfer-other.config.json`, e.g. `"30"` = Refund/คืนเงิน)
+— never by clicking on label text, which was a live-verified bug that silently
+left the category on "Other". See `KBIZ_CATEGORIES` in reimbursement's
+`packages/shared/src/index.ts` for the full id/label table.
+
+## Payment queue (process-queue.ts)
+
+`npm run process-queue -- --watch` polls a queue dir for JSON files with
+`status: "approved"`, claims one (`running`), drives the matching KBIZ flow,
+and patches the result back into the same file. Item `type`:
+
+- `add-payroll` / `transfer-payroll` / `list-registered` — the payroll-form
+  batch flows (xlsx-driven).
+- `transfer-other` — a single ad-hoc transfer queued by the **reimbursement**
+  app (a separate repo/stack), driving the exact flow above but headless and
+  unattended except for the phone tap. The queue file is
+  reimbursement's `KbizPaymentIntent` — see
+  `docs/adr/0001-kbiz-transfer-automation.md` and `packages/shared/src/index.ts`
+  there for the authoritative field list. The payee is a **handle** only
+  (e.g. `"revew"`); the bot resolves it through its own
+  `transfer-other.config.json` — reimbursement never sends bank details. An
+  unmapped handle fails the item rather than guessing. If the intent carries
+  a `voucherFile` (a Thai payment voucher, rendered as HTML by reimbursement),
+  the bot converts it to PDF with a throwaway Chromium instance
+  (`lib/html-to-pdf.ts`, not the persistent KBIZ session) and attaches it; a
+  failed or oversized (>3MB) conversion is a warning, never a
+  transfer-blocker. Outcomes map straight onto the ADR's three-way split:
+  `success` → `done`, `confirmed-failed` → `failed` (safe to retry),
+  `unconfirmed` → `needs-review` (never auto-retried; a human resolves it in
+  reimbursement).
+
+  Rendering that voucher's Thai text into a PDF needs Thai fonts in the
+  headless-Chromium image — the `Dockerfile` installs `fonts-thai-tlwg` for
+  exactly this; if you run `process-queue.ts` outside the container, make
+  sure your machine has a Thai font too or the PDF will show tofu boxes.
+
+Three env vars decouple the bot's data dir from its default `../data` layout
+(all optional; unset preserves today's behavior):
+
+| env var          | default          | what it's for                                                        |
+| ------------------ | ------------------ | ----------------------------------------------------------------------- |
+| `KBIZ_QUEUE_DIR`  | `../data/queue` | where the watch loop looks for queue files                          |
+| `KBIZ_SLIPS_DIR`  | `../data/slips` | where captured e-slip screenshots are written                       |
+| `KBIZ_SHARED_DIR` | `../data`       | root a `transfer-other` intent's relative paths (`voucherFile`) resolve against |
+
+See `EVERGREEN.md` for the `/srv/kbiz-queue` cross-repo mount this is meant
+to enable in production — and, alongside it, the separate `/srv/kbiz-bot`
+mount that gets `transfer-other.config.json` (the payee book) into the
+container. Without that second mount, every `transfer-other` queue item
+fails immediately: the container has no config to resolve the payee's bank
+details from.
+
 ## Session model
 
 All scripts go through `src/lib/session.ts`:
@@ -56,6 +141,8 @@ confirmation flows that still need a phone tap.
 ## Files not in git
 
 - `.env` — credentials
+- `transfer-other.config.json` — the payee book + source account (PII).
+  Only `transfer-other.config.example.json` is committed.
 - `browser-data/` — persistent Chromium profile (cookies, localStorage)
 - `storageState.json` (legacy, no longer written)
-- traces, screenshots, xlsx test files
+- traces, screenshots, xlsx test files, `../data/slips/` e-slips

@@ -7,6 +7,12 @@ services:
       - "${PAYROLL_PORT:-3000}:3000"
     volumes:
       - ./data:/app/data
+      # Cross-repo shared queue — NESTED bind over ./data/queue above, so
+      # payroll-form keeps writing to the exact same in-container path
+      # (/app/data/queue, its QUEUE_DIR default) while the files physically
+      # land in the shared dir kbiz-bot and reimbursement-api also mount.
+      # ACTIVE since 2026-08-12 together with the kbiz-bot binds below.
+      - ${KBIZ_QUEUE_HOST_DIR:-/srv/kbiz-queue}/queue:/app/data/queue
     env_file:
       - .env
     restart: unless-stopped
@@ -20,8 +26,46 @@ services:
     volumes:
       - ./data:/app/data
       - kbiz-bot-profile:/app/kbiz-bot/browser-data
+      # Cross-repo shared queue dir (reimbursement writes KBIZ payment intents
+      # here; kbiz-bot picks them up and writes results back into the same
+      # files) — see docs/adr/0001-kbiz-transfer-automation.md in the
+      # reimbursement repo.
+      #
+      # NESTED binds over ./data above, NOT a separate /app/kbiz-queue tree:
+      # the bot watches exactly ONE queue dir (its ../data/queue default), and
+      # payroll-form writes its add-payroll/transfer-payroll items to that same
+      # path — repointing only the bot via KBIZ_QUEUE_DIR would silently strand
+      # every payroll queue item forever. With nested binds every default path
+      # keeps working in BOTH containers (no environment block needed at all);
+      # the payroll service gets the matching queue bind above.
+      #
+      # Note the tradeoff: payroll queue items (salary xlsx + results) become
+      # readable by the reimbursement-api container, which mounts the same
+      # shared dir. Same host, same owner, CF-gated apps — accepted; see
+      # EVERGREEN.md.
+      #
+      # ACTIVE since 2026-08-12: /srv/kbiz-queue + /srv/kbiz-bot were provisioned
+      # per EVERGREEN.md (queue history rsynced in first).
+      - ${KBIZ_QUEUE_HOST_DIR:-/srv/kbiz-queue}/queue:/app/data/queue
+      - ${KBIZ_QUEUE_HOST_DIR:-/srv/kbiz-queue}/slips:/app/data/slips
+      - ${KBIZ_QUEUE_HOST_DIR:-/srv/kbiz-queue}/vouchers:/app/data/vouchers
+      # The transfer-other payee book (PII: real bank account numbers).
+      # Deliberately NOT under /srv/kbiz-queue above — that dir is also
+      # bind-mounted into reimbursement-api, and reimbursement never sends
+      # bank details (see kbiz-bot/README.md), so the payee book stays
+      # kbiz-bot-only. loadTransferConfig() resolves the bare filename
+      # relative to the container's WORKDIR (/app/kbiz-bot), which is
+      # exactly this mount's target — no extra env var needed. Ops creates
+      # the real file at /srv/kbiz-bot/transfer-other.config.json (copied
+      # from kbiz-bot/transfer-other.config.example.json) before
+      # uncommenting; see EVERGREEN.md's switch-over steps.
+      - ${KBIZ_TRANSFER_CONFIG_HOST_PATH:-/srv/kbiz-bot/transfer-other.config.json}:/app/kbiz-bot/transfer-other.config.json:ro
     env_file:
       - .env
+    # No KBIZ_* environment overrides: with the nested binds above, the bot's
+    # built-in ../data defaults already point at the shared tree. Repointing
+    # KBIZ_QUEUE_DIR alone is exactly the misconfiguration that strands
+    # payroll's own queue — don't.
     depends_on:
       - payroll
     restart: unless-stopped
