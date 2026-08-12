@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AppState, Property, Theme } from '../../lib/types';
 import type { Nav } from '../../lib/router';
-import { RECEIPT_CATEGORIES } from '../../lib/types';
+import { useReceiptCategories } from '../../lib/useReceiptCategories';
 import { fmt } from '../../lib/format';
 import { FONT_DISPLAY, FONT_UI } from '../../lib/theme';
 import { api, receiptFormFromFields } from '../../lib/api';
@@ -19,7 +19,6 @@ interface UploadProps {
   editId?: string;
 }
 
-const CATEGORIES = RECEIPT_CATEGORIES;
 
 const PALETTE = [
   ['#F5EBD9', '#7E5E3A'],
@@ -38,7 +37,8 @@ export function Upload({ theme, nav, state, setState, editId }: UploadProps) {
   );
   const [amount, setAmount] = useState(existing ? String(existing.amount) : '');
   const [merchant, setMerchant] = useState(existing?.merchant ?? '');
-  const [category, setCategory] = useState<string>(existing?.category ?? CATEGORIES[0]);
+  const categories = useReceiptCategories();
+  const [category, setCategory] = useState<string>(existing?.category ?? categories[0]);
   const [property, setProperty] = useState<Property>(existing?.property ?? 'hf-hotel');
   const [quantity, setQuantity] = useState(existing?.quantity != null ? String(existing.quantity) : '');
   const [note, setNote] = useState(existing?.note ?? '');
@@ -307,7 +307,7 @@ export function Upload({ theme, nav, state, setState, editId }: UploadProps) {
           value={category}
           onChange={setCategory}
           select
-          options={CATEGORIES}
+          options={categories}
         />
         <FormRow
           theme={theme}

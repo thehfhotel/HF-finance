@@ -4,6 +4,7 @@ import { auth } from '../auth';
 import { prisma } from '../db';
 import { saveUploadedFile } from '../uploads';
 import { serializeReceipt } from '../serializers';
+import { getReceiptCategories } from '../settings';
 
 /**
  * Multipart fields shared by POST/PATCH receipt endpoints.
@@ -119,6 +120,9 @@ function assertRequiredCreateFields(input: ParsedReceiptInput): asserts input is
 
 export const receiptRoutes = new Elysia({ prefix: '/receipts' })
   .use(auth)
+
+  /** The receipt form's live category list (admin-managed; seeded default). */
+  .get('/categories', async () => ({ categories: await getReceiptCategories() }))
 
   .get(
     '/',

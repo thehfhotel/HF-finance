@@ -31,7 +31,7 @@ function sanitizeAmountInput(raw: string): string {
 }
 
 // Pulled from `@reimbursement/shared` to stay in sync with the rest of the app.
-import { RECEIPT_CATEGORIES } from '../../lib/types';
+import { useReceiptCategories } from '../../lib/useReceiptCategories';
 
 type View = 'drafts' | 'bundle-detail' | 'bundle-list';
 type BundleFilter = 'pending' | 'approved' | 'paid' | 'rejected';
@@ -1654,7 +1654,8 @@ function CreateReceiptModal({ theme, initial, saving, onClose, onSave }: CreateR
   const [photo, setPhoto] = useState<string | null>(null);
   const [amount, setAmount] = useState<string>(initial ? String(initial.amount) : '');
   const [merchant, setMerchant] = useState<string>(initial?.merchant ?? '');
-  const [category, setCategory] = useState<string>(initial?.category ?? RECEIPT_CATEGORIES[0]);
+  const categories = useReceiptCategories();
+  const [category, setCategory] = useState<string>(initial?.category ?? categories[0]);
   const [property, setProperty] = useState<'hf-hotel' | 'hf-ville'>(initial?.property ?? 'hf-hotel');
   const [quantity, setQuantity] = useState<string>(initial?.quantity != null ? String(initial.quantity) : '');
   const [date, setDate] = useState<string>(initial?.date ?? modalToday);
@@ -1983,7 +1984,7 @@ function CreateReceiptModal({ theme, initial, saving, onClose, onSave }: CreateR
             <div style={{ marginBottom: 16 }}>
               <div style={sectionLabelStyle}>หมวดหมู่</div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {RECEIPT_CATEGORIES.map((opt) => {
+                {categories.map((opt) => {
                   const active = category === opt;
                   return (
                     <button
