@@ -11,8 +11,8 @@ services:
       # payroll-form keeps writing to the exact same in-container path
       # (/app/data/queue, its QUEUE_DIR default) while the files physically
       # land in the shared dir kbiz-bot and reimbursement-api also mount.
-      # Uncomment together with the kbiz-bot binds below (see EVERGREEN.md).
-      # - ${KBIZ_QUEUE_HOST_DIR:-/srv/kbiz-queue}/queue:/app/data/queue
+      # ACTIVE since 2026-08-12 together with the kbiz-bot binds below.
+      - ${KBIZ_QUEUE_HOST_DIR:-/srv/kbiz-queue}/queue:/app/data/queue
     env_file:
       - .env
     restart: unless-stopped
@@ -44,12 +44,11 @@ services:
       # shared dir. Same host, same owner, CF-gated apps — accepted; see
       # EVERGREEN.md.
       #
-      # Commented out = everything behaves exactly like today, until ops runs
-      # the switch-over in EVERGREEN.md and uncomments all four nested binds
-      # (these three + the payroll service's queue bind).
-      # - ${KBIZ_QUEUE_HOST_DIR:-/srv/kbiz-queue}/queue:/app/data/queue
-      # - ${KBIZ_QUEUE_HOST_DIR:-/srv/kbiz-queue}/slips:/app/data/slips
-      # - ${KBIZ_QUEUE_HOST_DIR:-/srv/kbiz-queue}/vouchers:/app/data/vouchers
+      # ACTIVE since 2026-08-12: /srv/kbiz-queue + /srv/kbiz-bot were provisioned
+      # per EVERGREEN.md (queue history rsynced in first).
+      - ${KBIZ_QUEUE_HOST_DIR:-/srv/kbiz-queue}/queue:/app/data/queue
+      - ${KBIZ_QUEUE_HOST_DIR:-/srv/kbiz-queue}/slips:/app/data/slips
+      - ${KBIZ_QUEUE_HOST_DIR:-/srv/kbiz-queue}/vouchers:/app/data/vouchers
       # The transfer-other payee book (PII: real bank account numbers).
       # Deliberately NOT under /srv/kbiz-queue above — that dir is also
       # bind-mounted into reimbursement-api, and reimbursement never sends
@@ -60,7 +59,7 @@ services:
       # the real file at /srv/kbiz-bot/transfer-other.config.json (copied
       # from kbiz-bot/transfer-other.config.example.json) before
       # uncommenting; see EVERGREEN.md's switch-over steps.
-      # - ${KBIZ_TRANSFER_CONFIG_HOST_PATH:-/srv/kbiz-bot/transfer-other.config.json}:/app/kbiz-bot/transfer-other.config.json:ro
+      - ${KBIZ_TRANSFER_CONFIG_HOST_PATH:-/srv/kbiz-bot/transfer-other.config.json}:/app/kbiz-bot/transfer-other.config.json:ro
     env_file:
       - .env
     # No KBIZ_* environment overrides: with the nested binds above, the bot's
