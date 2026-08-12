@@ -204,7 +204,7 @@ export function AppSidebar({
         <>
           <Section theme={theme} label="การจัดการ" />
           {item('employees', 'พนักงาน', Icon.user)}
-          {item('admin-kbiz', 'ตั้งค่า KBIZ', Icon.bank)}
+          {item('admin-kbiz', 'ตั้งค่า', Icon.bank)}
         </>
       )}
       {onLogout && (

@@ -8,8 +8,11 @@ export type Property = 'hf-hotel' | 'hf-ville';
 
 /**
  * The hotel-ops categories actually used in the historical Notion data.
- * Stored as plain strings so admins can add new ones without a migration,
- * but the UI dropdown uses this fixed list.
+ * Stored as plain strings on receipts, so this list is only the FORM's
+ * vocabulary — since 2026-08-12 the live list is admin-managed in the
+ * `receipt.categories` AppSetting (see SETTING_RECEIPT_CATEGORIES) and this
+ * constant is the seed/default a fresh install starts with, plus the offline
+ * fallback the web form uses while the live list loads.
  */
 export const RECEIPT_CATEGORIES = [
   'ต้นทุนอาหารเช้า HF',
@@ -462,3 +465,10 @@ export const SETTING_KBIZ_CATEGORY_MAPPING = 'kbiz.categoryMapping';
 
 /** AppSetting key holding a `KbizPayeeHandles`. */
 export const SETTING_KBIZ_PAYEES = 'kbiz.payees';
+
+/**
+ * AppSetting key for the admin-managed receipt-category list (string[]).
+ * Absent → RECEIPT_CATEGORIES. Existing receipts keep whatever string they
+ * were saved with — removing or renaming a category never rewrites history.
+ */
+export const SETTING_RECEIPT_CATEGORIES = 'receipt.categories';

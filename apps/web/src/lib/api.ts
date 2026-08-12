@@ -260,8 +260,20 @@ export interface NamedAmount {
   amount: number;
 }
 
+/** Per-handle details the bot publishes (masked account — never the full number). */
+export interface PublishedPayee {
+  handle: string;
+  mode?: 'favorite' | 'custom';
+  nickname?: string;
+  bank?: string;
+  accountName?: string;
+  accountMasked?: string;
+}
+
 /** Shape of GET/PUT /api/admin/kbiz-settings. */
 export interface KbizSettings {
+  /** The receipt form's live category list (admin-managed). */
+  receiptCategories: string[];
   mapping: KbizCategoryMapping;
   payees: KbizPayeeHandles;
   /** False when the server has no queue dir / KBIZ bot wired up yet. */
@@ -272,6 +284,8 @@ export interface KbizSettings {
    * pre-switch-over), in which case free text entry still works.
    */
   availableHandles?: string[] | null;
+  /** Details behind each handle, for the admin dropdown labels. */
+  availablePayees?: PublishedPayee[] | null;
   handlesUpdatedAt?: string | null;
 }
 
@@ -354,6 +368,9 @@ export const api = {
   },
 
   receipts: {
+    /** The live category list for the receipt form (admin-managed). */
+    categories: (): Promise<{ categories: string[] }> =>
+      request<{ categories: string[] }>('/api/receipts/categories'),
     list: (opts?: { mine?: boolean }): Promise<Receipt[]> =>
       request<Receipt[]>(opts?.mine ? '/api/receipts?mine=1' : '/api/receipts'),
     create: (form: FormData): Promise<Receipt> =>
@@ -431,6 +448,7 @@ export const api = {
       request<void>(`/api/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     getKbizSettings: (): Promise<KbizSettings> => request<KbizSettings>('/api/admin/kbiz-settings'),
     putKbizSettings: (body: {
+      receiptCategories?: string[];
       mapping?: KbizCategoryMapping;
       payees?: KbizPayeeHandles;
     }): Promise<KbizSettings> =>

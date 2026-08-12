@@ -217,8 +217,20 @@ export async function intentFileExists(intentId: string): Promise<boolean> {
  */
 const PAYEE_HANDLES_FILE = 'payee-handles.json';
 
+export interface PublishedPayee {
+  handle: string;
+  mode?: 'favorite' | 'custom';
+  nickname?: string;
+  bank?: string;
+  accountName?: string;
+  /** Last 4 digits only — the bot never publishes full numbers. */
+  accountMasked?: string;
+}
+
 export interface PayeeHandlesManifest {
   handles: string[];
+  /** Details per handle (bot manifest v2); absent from older manifests. */
+  payees: PublishedPayee[] | null;
   updatedAt: string | null;
 }
 
@@ -228,10 +240,17 @@ export async function readPayeeHandlesManifest(): Promise<PayeeHandlesManifest |
   try {
     const raw = JSON.parse(
       await Bun.file(join(QUEUE_DIR, QUEUE_SUBDIR, PAYEE_HANDLES_FILE)).text(),
-    ) as { handles?: unknown; updatedAt?: unknown };
+    ) as { handles?: unknown; payees?: unknown; updatedAt?: unknown };
     if (!Array.isArray(raw.handles) || !raw.handles.every((h) => typeof h === 'string')) return null;
+    const payees = Array.isArray(raw.payees)
+      ? raw.payees.filter(
+          (p): p is PublishedPayee =>
+            typeof p === 'object' && p !== null && typeof (p as PublishedPayee).handle === 'string',
+        )
+      : null;
     return {
       handles: raw.handles,
+      payees,
       updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : null,
     };
   } catch {

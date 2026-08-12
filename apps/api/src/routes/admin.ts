@@ -6,12 +6,13 @@ import {
   type KbizCategoryMapping,
   type KbizPayeeHandles,
   type Role,
+  SETTING_RECEIPT_CATEGORIES,
 } from '@reimbursement/shared';
 import { auth } from '../auth';
 import { prisma } from '../db';
 import { isKbizConfigured, readPayeeHandlesManifest } from '../kbiz';
 import { serializeAdminUser } from '../serializers';
-import { getKbizCategoryMapping, getKbizPayees, isKbizCategoryId, putSetting } from '../settings';
+import { getKbizCategoryMapping, getKbizPayees, getReceiptCategories, isKbizCategoryId, putSetting } from '../settings';
 
 function roleFromShared(role: Role): 'EMPLOYEE' | 'APPROVER' {
   if (role === 'approver') return 'APPROVER';
@@ -196,20 +197,25 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
    * letting someone map payees into a feature that will answer 503.
    */
   .get('/kbiz-settings', async () => {
-    const [mapping, payees, configured, handlesManifest] = await Promise.all([
+    const [mapping, payees, configured, handlesManifest, receiptCategories] = await Promise.all([
       getKbizCategoryMapping(),
       getKbizPayees(),
       isKbizConfigured(),
       readPayeeHandlesManifest(),
+      getReceiptCategories(),
     ]);
     return {
       mapping,
       payees,
       configured,
+      receiptCategories,
       // The bot-published handle list (names only) — the admin screen renders
       // these as a dropdown so nobody free-types a handle that doesn't exist.
       // null = the bot hasn't published (down, or pre-switch-over host).
       availableHandles: handlesManifest?.handles ?? null,
+      // Per-handle details (nickname/bank/masked account) so the admin sees
+      // WHAT a handle pays, not just its name. Bot manifest v2; may be null.
+      availablePayees: handlesManifest?.payees ?? null,
       handlesUpdatedAt: handlesManifest?.updatedAt ?? null,
     };
   })
@@ -217,6 +223,32 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
   .put(
     '/kbiz-settings',
     async ({ body, status }) => {
+      // ── receipt categories (the form's vocabulary) ──
+      let nextCategories: string[] | null = null;
+      if (body.receiptCategories) {
+        const seen = new Set<string>();
+        const cleaned: string[] = [];
+        for (const raw of body.receiptCategories) {
+          const c = raw.trim();
+          if (c.length === 0) continue; // blank rows are just dropped
+          if (c.length > 60) {
+            return status(400, { message: `ชื่อหมวดหมู่ยาวเกิน 60 ตัวอักษร: ${c.slice(0, 30)}…` });
+          }
+          if (seen.has(c)) {
+            return status(400, { message: `หมวดหมู่ซ้ำกัน: ${c}` });
+          }
+          seen.add(c);
+          cleaned.push(c);
+        }
+        if (cleaned.length === 0) {
+          return status(400, { message: 'ต้องมีหมวดหมู่อย่างน้อย 1 รายการ' });
+        }
+        if (cleaned.length > 50) {
+          return status(400, { message: 'หมวดหมู่ได้ไม่เกิน 50 รายการ' });
+        }
+        nextCategories = cleaned;
+      }
+
       let nextMapping: KbizCategoryMapping | null = null;
       if (body.mapping) {
         const { defaultCategoryId } = body.mapping;
@@ -286,18 +318,34 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
         nextPayees = payees;
       }
 
-      if (nextMapping) await putSetting(SETTING_KBIZ_CATEGORY_MAPPING, nextMapping);
+      if (nextCategories) await putSetting(SETTING_RECEIPT_CATEGORIES, nextCategories);
+      if (nextMapping) {
+        // Keep the KBIZ mapping tidy: entries for categories that no longer
+        // exist are dead weight (resolution falls back to the default anyway).
+        if (nextCategories) {
+          const live = new Set(nextCategories);
+          nextMapping = {
+            defaultCategoryId: nextMapping.defaultCategoryId,
+            categories: Object.fromEntries(
+              Object.entries(nextMapping.categories).filter(([cat]) => live.has(cat)),
+            ),
+          };
+        }
+        await putSetting(SETTING_KBIZ_CATEGORY_MAPPING, nextMapping);
+      }
       if (nextPayees) await putSetting(SETTING_KBIZ_PAYEES, nextPayees);
 
-      const [mapping, payees, configured] = await Promise.all([
+      const [mapping, payees, configured, receiptCategories] = await Promise.all([
         getKbizCategoryMapping(),
         getKbizPayees(),
         isKbizConfigured(),
+        getReceiptCategories(),
       ]);
-      return { mapping, payees, configured };
+      return { mapping, payees, configured, receiptCategories };
     },
     {
       body: t.Object({
+        receiptCategories: t.Optional(t.Array(t.String())),
         mapping: t.Optional(
           t.Object({
             categories: t.Record(t.String(), t.String()),

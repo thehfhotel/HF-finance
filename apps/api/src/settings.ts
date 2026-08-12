@@ -6,6 +6,8 @@ import {
   type KbizCategoryId,
   type KbizCategoryMapping,
   type KbizPayeeHandles,
+  RECEIPT_CATEGORIES,
+  SETTING_RECEIPT_CATEGORIES,
 } from '@reimbursement/shared';
 import { prisma } from './db';
 import { Prisma } from './generated/prisma';
@@ -95,4 +97,20 @@ export async function getKbizPayees(): Promise<KbizPayeeHandles> {
     }
   }
   return payees;
+}
+
+
+/**
+ * The receipt form's category list — admin-managed, seeded from
+ * RECEIPT_CATEGORIES. Fail-safe like every other settings reader: a missing or
+ * malformed row falls back to the built-in list rather than an empty form.
+ */
+export async function getReceiptCategories(): Promise<string[]> {
+  const raw = await getSetting<unknown>(SETTING_RECEIPT_CATEGORIES, null);
+  if (!Array.isArray(raw)) return [...RECEIPT_CATEGORIES];
+  const cleaned = raw
+    .filter((c): c is string => typeof c === 'string')
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0);
+  return cleaned.length > 0 ? [...new Set(cleaned)] : [...RECEIPT_CATEGORIES];
 }

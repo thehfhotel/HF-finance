@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { ApiError, api } from '../../lib/api';
+import type { PublishedPayee } from '../../lib/api';
 import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../../lib/theme';
 import type {
   AdminUser,
@@ -10,7 +11,7 @@ import type {
   Theme,
   User,
 } from '../../lib/types';
-import { KBIZ_CATEGORIES, RECEIPT_CATEGORIES } from '../../lib/types';
+import { KBIZ_CATEGORIES } from '../../lib/types';
 import { useViewportPlatform } from '../../lib/useViewportPlatform';
 import { AppSidebar } from '../../components/AppSidebar';
 import type { SidebarCounts } from '../../components/AppSidebar';
@@ -43,8 +44,8 @@ interface ToastMessage {
 
 /** Deterministic string of the mapping's editable content — key order in the
  *  underlying object may drift as rows are edited, but the compare must not. */
-function mappingKey(categories: Record<string, string>, defaultCategoryId: string): string {
-  const rows = RECEIPT_CATEGORIES.map((cat) => `${cat}=${categories[cat] ?? ''}`).sort();
+function mappingKey(list: string[], categories: Record<string, string>, defaultCategoryId: string): string {
+  const rows = list.map((cat) => `${cat}=${categories[cat] ?? ''}`).sort();
   return `${defaultCategoryId}|${rows.join(',')}`;
 }
 
@@ -70,6 +71,9 @@ export function AdminKbiz({
   const [configured, setConfigured] = useState(true);
   const [users, setUsers] = useState<AdminUser[]>([]);
 
+  const [savedCategories, setSavedCategories] = useState<string[]>([]);
+  const [categoriesDraft, setCategoriesDraft] = useState<string[]>([]);
+  const [newCategory, setNewCategory] = useState('');
   const [savedMapping, setSavedMapping] = useState<KbizCategoryMapping | null>(null);
   const [savedPayees, setSavedPayees] = useState<KbizPayeeHandles>({});
   const [categoryDraft, setCategoryDraft] = useState<Record<string, KbizCategoryId>>({});
@@ -79,6 +83,7 @@ export function AdminKbiz({
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [availableHandles, setAvailableHandles] = useState<string[] | null>(null);
+  const [availablePayees, setAvailablePayees] = useState<PublishedPayee[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,6 +94,8 @@ export function AdminKbiz({
           api.admin.listUsers(),
         ]);
         if (cancelled) return;
+        setSavedCategories(settings.receiptCategories);
+        setCategoriesDraft(settings.receiptCategories);
         setSavedMapping(settings.mapping);
         setCategoryDraft(settings.mapping.categories);
         setDefaultCategoryDraft(settings.mapping.defaultCategoryId);
@@ -96,6 +103,7 @@ export function AdminKbiz({
         setPayeeDraft(settings.payees);
         setConfigured(settings.configured);
         setAvailableHandles(settings.availableHandles ?? null);
+        setAvailablePayees(settings.availablePayees ?? null);
         setUsers(userList);
       } catch (err) {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : 'โหลดการตั้งค่าไม่สำเร็จ');
@@ -123,11 +131,13 @@ export function AdminKbiz({
     setToast({ id: Date.now(), text, tone: 'info' });
   };
 
+  const categoriesDirty = categoriesDraft.join('\u0001') !== savedCategories.join('\u0001');
   const mappingDirty =
     savedMapping !== null &&
-    mappingKey(categoryDraft, defaultCategoryDraft) !== mappingKey(savedMapping.categories, savedMapping.defaultCategoryId);
+    mappingKey(categoriesDraft, categoryDraft, defaultCategoryDraft) !==
+      mappingKey(savedCategories, savedMapping.categories, savedMapping.defaultCategoryId);
   const payeesDirty = payeesKey(payeeDraft, users) !== payeesKey(savedPayees, users);
-  const dirty = mappingDirty || payeesDirty;
+  const dirty = categoriesDirty || mappingDirty || payeesDirty;
 
   const handleSave = async (): Promise<void> => {
     if (saving || !dirty) return;
@@ -135,7 +145,7 @@ export function AdminKbiz({
     try {
       const mapping: KbizCategoryMapping = {
         categories: Object.fromEntries(
-          RECEIPT_CATEGORIES.map((cat) => [cat, categoryDraft[cat] ?? defaultCategoryDraft]),
+          categoriesDraft.map((cat) => [cat, categoryDraft[cat] ?? defaultCategoryDraft]),
         ) as Record<string, KbizCategoryId>,
         defaultCategoryId: defaultCategoryDraft,
       };
@@ -146,14 +156,16 @@ export function AdminKbiz({
           .map((u) => [u.id, (payeeDraft[u.id] ?? '').trim()] as const)
           .filter(([, handle]) => handle !== ''),
       );
-      const result = await api.admin.putKbizSettings({ mapping, payees });
+      const result = await api.admin.putKbizSettings({ receiptCategories: categoriesDraft, mapping, payees });
+      setSavedCategories(result.receiptCategories);
+      setCategoriesDraft(result.receiptCategories);
       setSavedMapping(result.mapping);
       setCategoryDraft(result.mapping.categories);
       setDefaultCategoryDraft(result.mapping.defaultCategoryId);
       setSavedPayees(result.payees);
       setPayeeDraft(result.payees);
       setConfigured(result.configured);
-      showInfo('บันทึกการตั้งค่า KBIZ แล้ว');
+      showInfo('บันทึกการตั้งค่าแล้ว');
     } catch (err) {
       showError(err);
     } finally {
@@ -169,12 +181,42 @@ export function AdminKbiz({
     }
   };
 
+  const addCategory = (): void => {
+    const c = newCategory.trim();
+    if (!c) return;
+    if (categoriesDraft.includes(c)) {
+      setToast({ id: Date.now(), text: `มีหมวดหมู่ "${c}" อยู่แล้ว`, tone: 'error' });
+      return;
+    }
+    setCategoriesDraft((prev) => [...prev, c]);
+    setNewCategory('');
+  };
+  const removeCategory = (cat: string): void => {
+    setCategoriesDraft((prev) => (prev.length > 1 ? prev.filter((c) => c !== cat) : prev));
+  };
+  const moveCategory = (cat: string, dir: -1 | 1): void => {
+    setCategoriesDraft((prev) => {
+      const i = prev.indexOf(cat);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+  };
+
   const body = (
     <SettingsBody
       theme={theme}
       configured={configured}
       loading={loading}
       loadError={loadError}
+      receiptCategories={categoriesDraft}
+      newCategory={newCategory}
+      onNewCategoryChange={setNewCategory}
+      onAddCategory={addCategory}
+      onRemoveCategory={removeCategory}
+      onMoveCategory={moveCategory}
       categoryDraft={categoryDraft}
       defaultCategoryDraft={defaultCategoryDraft}
       onCategoryChange={(cat, id) => setCategoryDraft((prev) => ({ ...prev, [cat]: id }))}
@@ -182,6 +224,7 @@ export function AdminKbiz({
       users={users}
       payeeDraft={payeeDraft}
       availableHandles={availableHandles}
+      availablePayees={availablePayees}
       onPayeeChange={(userId, handle) => setPayeeDraft((prev) => ({ ...prev, [userId]: handle }))}
     />
   );
@@ -195,7 +238,7 @@ export function AdminKbiz({
           theme={theme}
           large
           subtitle="การจัดการ"
-          title="ตั้งค่า KBIZ"
+          title="ตั้งค่า"
           leading={
             <button
               onClick={handleBack}
@@ -320,13 +363,13 @@ function TopBar({ theme, dirty, saving, onSave }: TopBarProps): JSX.Element {
             color: theme.ink,
           }}
         >
-          ตั้งค่า KBIZ
+          ตั้งค่า
         </h1>
         <div style={{ marginTop: 4, fontFamily: FONT_UI, fontSize: 13, color: theme.inkSoft }}>
           {dirty ? (
             <span style={{ color: theme.warn }}>มีการเปลี่ยนแปลงที่ยังไม่บันทึก</span>
           ) : (
-            'การโอนอัตโนมัติผ่าน KBIZ สำหรับคำขอที่อนุมัติแล้ว'
+            'หมวดหมู่ใบเสร็จ · การโอนอัตโนมัติผ่าน KBIZ'
           )}
         </div>
       </div>
@@ -346,6 +389,12 @@ interface SettingsBodyProps {
   configured: boolean;
   loading: boolean;
   loadError: string | null;
+  receiptCategories: string[];
+  newCategory: string;
+  onNewCategoryChange: (v: string) => void;
+  onAddCategory: () => void;
+  onRemoveCategory: (cat: string) => void;
+  onMoveCategory: (cat: string, dir: -1 | 1) => void;
   categoryDraft: Record<string, KbizCategoryId>;
   defaultCategoryDraft: KbizCategoryId;
   onCategoryChange: (category: string, id: KbizCategoryId) => void;
@@ -353,6 +402,7 @@ interface SettingsBodyProps {
   users: AdminUser[];
   payeeDraft: Record<string, string>;
   availableHandles: string[] | null;
+  availablePayees: PublishedPayee[] | null;
   onPayeeChange: (userId: string, handle: string) => void;
 }
 
@@ -361,6 +411,12 @@ function SettingsBody({
   configured,
   loading,
   loadError,
+  receiptCategories,
+  newCategory,
+  onNewCategoryChange,
+  onAddCategory,
+  onRemoveCategory,
+  onMoveCategory,
   categoryDraft,
   defaultCategoryDraft,
   onCategoryChange,
@@ -368,6 +424,7 @@ function SettingsBody({
   users,
   payeeDraft,
   availableHandles,
+  availablePayees,
   onPayeeChange,
 }: SettingsBodyProps): JSX.Element {
   if (loading) {
@@ -409,6 +466,91 @@ function SettingsBody({
         </div>
       )}
 
+      <SectionLabel theme={theme}>หมวดหมู่ใบเสร็จ (แบบฟอร์มบันทึกใบเสร็จ)</SectionLabel>
+      <div style={{ fontFamily: FONT_UI, fontSize: 12, color: theme.inkSofter, marginBottom: 10, lineHeight: 1.5 }}>
+        ใบเสร็จเดิมยังใช้ชื่อหมวดหมู่เดิม — การลบ/เปลี่ยนชื่อมีผลเฉพาะใบเสร็จใหม่
+      </div>
+      <Card theme={theme} padding={0}>
+        {receiptCategories.map((cat, i) => (
+          <div
+            key={cat}
+            style={{
+              padding: '9px 14px 9px 18px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              borderBottom: `0.5px solid ${theme.hairline}`,
+            }}
+          >
+            <span style={{ flex: 1, fontFamily: FONT_UI, fontSize: 13, fontWeight: 500, color: theme.ink }}>{cat}</span>
+            <button
+              onClick={() => onMoveCategory(cat, -1)}
+              disabled={i === 0}
+              title="เลื่อนขึ้น"
+              style={{ ...catBtnStyle(theme), opacity: i === 0 ? 0.25 : 1 }}
+            >
+              ↑
+            </button>
+            <button
+              onClick={() => onMoveCategory(cat, 1)}
+              disabled={i === receiptCategories.length - 1}
+              title="เลื่อนลง"
+              style={{ ...catBtnStyle(theme), opacity: i === receiptCategories.length - 1 ? 0.25 : 1 }}
+            >
+              ↓
+            </button>
+            <button
+              onClick={() => onRemoveCategory(cat)}
+              disabled={receiptCategories.length <= 1}
+              title="ลบหมวดหมู่"
+              style={{ ...catBtnStyle(theme), color: theme.danger, opacity: receiptCategories.length <= 1 ? 0.25 : 1 }}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+        <div style={{ padding: '10px 14px 10px 18px', display: 'flex', gap: 10 }}>
+          <input
+            value={newCategory}
+            onChange={(e) => onNewCategoryChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onAddCategory();
+            }}
+            placeholder="เพิ่มหมวดหมู่ใหม่…"
+            maxLength={60}
+            style={{
+              flex: 1,
+              padding: '9px 12px',
+              borderRadius: 10,
+              background: theme.surface,
+              border: `0.5px solid ${theme.hairlineStrong}`,
+              fontFamily: FONT_UI,
+              fontSize: 13,
+              color: theme.ink,
+              outline: 'none',
+              boxSizing: 'border-box',
+            }}
+          />
+          <button
+            onClick={onAddCategory}
+            disabled={newCategory.trim() === ''}
+            style={{
+              padding: '9px 16px',
+              borderRadius: 10,
+              background: newCategory.trim() === '' ? theme.surface : theme.ink,
+              color: newCategory.trim() === '' ? theme.inkSofter : theme.paper,
+              border: 'none',
+              fontFamily: FONT_UI,
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: newCategory.trim() === '' ? 'default' : 'pointer',
+            }}
+          >
+            เพิ่ม
+          </button>
+        </div>
+      </Card>
+
       <SectionLabel theme={theme}>จับคู่หมวดหมู่ใบเสร็จ → หมวดหมู่ KBIZ</SectionLabel>
       <Card theme={theme} padding={0}>
         <SelectRow
@@ -418,14 +560,14 @@ function SettingsBody({
           onChange={(id) => onDefaultCategoryChange(id)}
           strong
         />
-        {RECEIPT_CATEGORIES.map((cat, i) => (
+        {receiptCategories.map((cat, i) => (
           <SelectRow
             key={cat}
             theme={theme}
             label={cat}
             value={categoryDraft[cat] ?? defaultCategoryDraft}
             onChange={(id) => onCategoryChange(cat, id)}
-            isLast={i === RECEIPT_CATEGORIES.length - 1}
+            isLast={i === receiptCategories.length - 1}
           />
         ))}
       </Card>
@@ -449,6 +591,7 @@ function SettingsBody({
               user={u}
               value={payeeDraft[u.id] ?? ''}
               availableHandles={availableHandles}
+              availablePayees={availablePayees}
               onChange={(v) => onPayeeChange(u.id, v)}
               isLast={i === users.length - 1}
             />
@@ -457,6 +600,21 @@ function SettingsBody({
       </Card>
     </div>
   );
+}
+
+function catBtnStyle(theme: Theme): CSSProperties {
+  return {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    background: 'transparent',
+    border: `0.5px solid ${theme.hairlineStrong}`,
+    color: theme.inkSoft,
+    fontFamily: FONT_UI,
+    fontSize: 13,
+    cursor: 'pointer',
+    lineHeight: 1,
+  };
 }
 
 function SectionLabel({ theme, children }: { theme: Theme; children: ReactNode }): JSX.Element {
@@ -549,11 +707,23 @@ interface PayeeRowProps {
   value: string;
   /** Bot-published handle options; null = not published, fall back to typing. */
   availableHandles: string[] | null;
+  /** Details behind each handle (nickname/bank/masked account), when published. */
+  availablePayees: PublishedPayee[] | null;
   onChange: (v: string) => void;
   isLast: boolean;
 }
 
-function PayeeRow({ theme, user, value, availableHandles, onChange, isLast }: PayeeRowProps): JSX.Element {
+/** "revew — พี่วิว · Siam Commercial …7394" — what the handle actually pays. */
+function payeeOptionLabel(handle: string, payees: PublishedPayee[] | null): string {
+  const p = payees?.find((x) => x.handle === handle);
+  if (!p) return handle;
+  const parts = [p.nickname, [p.bank, p.accountMasked].filter(Boolean).join(' ')].filter(
+    (x): x is string => !!x && x.length > 0,
+  );
+  return parts.length > 0 ? `${handle} — ${parts.join(' · ')}` : handle;
+}
+
+function PayeeRow({ theme, user, value, availableHandles, availablePayees, onChange, isLast }: PayeeRowProps): JSX.Element {
   const roleLabel = user.role === 'approver' ? 'ผู้อนุมัติ' : 'พนักงาน';
   return (
     <div
@@ -580,7 +750,19 @@ function PayeeRow({ theme, user, value, availableHandles, onChange, isLast }: Pa
         >
           {user.name}
         </div>
-        <div style={{ fontFamily: FONT_UI, fontSize: 11, color: theme.inkSoft }}>{roleLabel}</div>
+        <div style={{ fontFamily: FONT_UI, fontSize: 11, color: theme.inkSoft }}>
+          {roleLabel}
+          {value !== '' && availablePayees && (
+            <span style={{ marginLeft: 8, color: theme.inkSofter }}>
+              → {(() => {
+                const p = availablePayees.find((x) => x.handle === value);
+                return p
+                  ? [p.accountName ?? p.nickname, p.bank, p.accountMasked].filter(Boolean).join(' · ')
+                  : 'ไม่พบรายละเอียดจากบอท';
+              })()}
+            </span>
+          )}
+        </div>
       </div>
       {availableHandles !== null ? (
         <select
@@ -604,7 +786,7 @@ function PayeeRow({ theme, user, value, availableHandles, onChange, isLast }: Pa
           <option value="">— ไม่โอนผ่าน KBIZ —</option>
           {availableHandles.map((h) => (
             <option key={h} value={h}>
-              {h}
+              {payeeOptionLabel(h, availablePayees)}
             </option>
           ))}
           {/* A saved handle the bot no longer knows stays visible + flagged,
