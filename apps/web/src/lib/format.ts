@@ -35,3 +35,24 @@ export function formatThaiDate(s: string | null | undefined): string {
   if (Number.isNaN(day) || Number.isNaN(monthIdx) || !THAI_MONTHS[monthIdx]) return s;
   return `${day} ${THAI_MONTHS[monthIdx]}`;
 }
+
+/**
+ * Thai relative time — "5 นาทีที่แล้ว", "2 ชั่วโมงที่แล้ว", "3 วันที่แล้ว" — for
+ * timestamps someone glances at right after the fact (a sync, a submit). Past
+ * a week it falls back to the absolute Thai date, since "12 วันที่แล้ว" reads
+ * worse than a date once it's that stale.
+ */
+export function formatThaiRelative(s: string | null | undefined): string {
+  if (!s || typeof s !== 'string') return '';
+  const then = new Date(s).getTime();
+  if (Number.isNaN(then)) return '';
+  const diffMs = Date.now() - then;
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (diffMs < minute) return 'เมื่อสักครู่';
+  if (diffMs < hour) return `${Math.floor(diffMs / minute)} นาทีที่แล้ว`;
+  if (diffMs < day) return `${Math.floor(diffMs / hour)} ชั่วโมงที่แล้ว`;
+  if (diffMs < 7 * day) return `${Math.floor(diffMs / day)} วันที่แล้ว`;
+  return formatThaiDate(s);
+}

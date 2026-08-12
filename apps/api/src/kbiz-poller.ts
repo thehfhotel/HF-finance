@@ -465,6 +465,23 @@ async function sweep(): Promise<void> {
   try {
     for (const fileName of await listQueueFiles()) {
       const raw = await readQueueFile(fileName);
+
+      // A finished favorites-sync is bookkeeping, not a payment: archive it so
+      // sync_*.json files don't accumulate in the hot queue forever (one per
+      // ซิงค์ click, each re-read by every 5s sweep otherwise).
+      const item = raw as { app?: unknown; type?: unknown; status?: unknown } | null;
+      if (
+        item &&
+        item.app === 'reimbursement' &&
+        item.type === 'list-favorites' &&
+        (item.status === 'done' || item.status === 'failed')
+      ) {
+        await archiveQueueFile(fileName).catch((error) =>
+          console.error(`[kbiz] could not archive finished sync ${fileName}:`, error),
+        );
+        continue;
+      }
+
       if (!isOurTerminalIntent(raw)) continue;
 
       try {

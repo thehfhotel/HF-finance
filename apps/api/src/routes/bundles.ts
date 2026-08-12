@@ -11,18 +11,23 @@ import {
   loadKbizPaymentContext,
   newPaymentIntentId,
   readIntentState,
+  readKbizFavorites,
+  readPayeeHandlesManifest,
   withdrawQueuedIntent,
   writeIntent,
   writeVoucherHtml,
+  type KbizQueuedIntent,
 } from '../kbiz';
 import { getKbizCategoryMapping, getKbizPayees } from '../settings';
 import { sumReceiptAmounts } from '../money';
 import { renderVoucherHtml } from '../voucher';
 import {
   buildKbizMemo,
+  KBIZ_BANKS,
   resolveKbizCategoryId,
   type BundleStatus,
-  type KbizPaymentIntent,
+  type KbizBank,
+  type KbizDestination,
 } from '@reimbursement/shared';
 
 const SHARED_BUNDLE_STATUSES: readonly BundleStatus[] = [
@@ -36,6 +41,42 @@ const SHARED_BUNDLE_STATUSES: readonly BundleStatus[] = [
 
 function isSharedBundleStatus(value: string): value is BundleStatus {
   return (SHARED_BUNDLE_STATUSES as readonly string[]).includes(value);
+}
+
+/** One of KBIZ's own destination-bank options, matched verbatim by the bot. */
+function isKbizBank(value: string): value is KbizBank {
+  return (KBIZ_BANKS as readonly string[]).includes(value);
+}
+
+/**
+ * The destination as the AUDIT TRAIL records it — the one place a typed account
+ * number is deliberately dropped.
+ *
+ * The full number is needed exactly once, by the bot, and so lives only in the
+ * queue file it reads — which `archiveQueueFile` redacts the moment that file is
+ * filed away. The database keeps the last four, which is all anyone reading the
+ * history back needs in order to recognise the account.
+ */
+function auditDestination(destination: KbizDestination): Record<string, string> {
+  switch (destination.kind) {
+    case 'handle':
+      return { kind: 'handle', handle: destination.handle };
+    case 'favorite':
+      return {
+        kind: 'favorite',
+        nickname: destination.nickname,
+        bank: destination.bank,
+        accountLast4: destination.accountLast4,
+        ...(destination.accountName ? { accountName: destination.accountName } : {}),
+      };
+    case 'custom':
+      return {
+        kind: 'custom',
+        bank: destination.bank,
+        accountLast4: destination.accountNo.slice(-4),
+        ...(destination.accountName ? { accountName: destination.accountName } : {}),
+      };
+  }
 }
 
 /** Enough to fill a long screen without another round trip; a caller that wants
@@ -89,8 +130,9 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
       const take = Math.min(Math.max(Number(query.limit ?? DEFAULT_PAGE_SIZE) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
       const skip = Math.max(Number(query.offset ?? 0) || 0, 0);
 
-      // The KBIZ payee mapping is read once for the whole page, not once per
-      // bundle — `kbizPayable` is a per-row answer built from a per-request fact.
+      // Whether KBIZ payment is live is read once for the whole page, not once
+      // per bundle — `kbizPayable` is a per-row answer built from a per-request
+      // fact.
       const [bundles, kbiz] = await Promise.all([
         prisma.bundle.findMany({
           where: filters,
@@ -580,8 +622,9 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
    * This is the only place in the app that starts money moving, so the order of
    * operations is the whole design:
    *
-   *  1. Everything that can refuse, refuses first — feature off, no payee
-   *     handle, nothing to pay — while the bundle is still untouched.
+   *  1. Everything that can refuse, refuses first — feature off, a destination
+   *     that does not check out, nothing to pay — while the bundle is still
+   *     untouched.
    *  2. The atomic `UPDATE … WHERE status = 'APPROVED'` claims the bundle. That
    *     WHERE clause IS the double-pay guard: of two concurrent clicks exactly
    *     one matches a row, and the loser gets a 409 instead of a second intent.
@@ -590,129 +633,279 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
    *     bundle — a file written before the guard would be executed even if the
    *     guard then lost.
    *
-   * We never send a bank or account number: the intent carries a payee *handle*
-   * that the bot resolves against a saved, vetted KBIZ account. This app stores
-   * no bank data at all (ADR 0001, decision 4).
+   * Where the money goes is the approver's choice at pay time (`destination`),
+   * and no body at all still means what it always did: the admin-mapped payee
+   * handle, which the bot resolves against a saved, vetted KBIZ account. This
+   * app persists no bank data (ADR 0001, decision 4) — a `custom` destination's
+   * account number is typed once, travels in the queue file the bot consumes,
+   * is redacted out of that file when it is archived, and is masked to its last
+   * four everywhere else.
    */
-  .post('/:id/pay-via-kbiz', async ({ user, params, status }) => {
-    if (user.role !== 'APPROVER') {
-      return status(403, { message: 'Only approvers can pay bundles' });
-    }
+  .post(
+    '/:id/pay-via-kbiz',
+    async ({ user, params, body, status }) => {
+      if (user.role !== 'APPROVER') {
+        return status(403, { message: 'Only approvers can pay bundles' });
+      }
 
-    if (!(await isKbizConfigured())) {
-      return status(503, {
-        message: 'เซิร์ฟเวอร์นี้ยังไม่ได้เปิดใช้งานการจ่ายผ่าน KBIZ',
-      });
-    }
-
-    const bundle = await prisma.bundle.findUnique({
-      where: { id: params.id },
-      include: { receipts: true, user: true, approver: true },
-    });
-    if (!bundle) {
-      return status(404, { message: 'Bundle not found' });
-    }
-
-    const payees = await getKbizPayees();
-    const handle = payees[bundle.userId];
-    if (!handle) {
-      return status(409, {
-        message: `ยังไม่ได้ตั้งค่าบัญชีปลายทางของ ${bundle.user.name} — ตั้งค่าที่หน้าผู้ดูแลระบบก่อน`,
-      });
-    }
-
-    // Server-computed, exactly like /pay: the amount is Σ receipts and never
-    // something the client sent.
-    const amount = sumReceiptAmounts(bundle.receipts);
-    if (amount <= 0) {
-      return status(409, { message: 'คำขอนี้ไม่มียอดที่ต้องจ่าย' });
-    }
-
-    const memo = buildKbizMemo(bundle.name, bundle.id);
-    const kbizCategoryId = resolveKbizCategoryId(
-      bundle.receipts.map((receipt) => ({
-        category: receipt.category,
-        amount: Number(receipt.amount),
-      })),
-      await getKbizCategoryMapping(),
-    );
-    const intentId = newPaymentIntentId();
-
-    const claimed = await prisma.bundle.updateMany({
-      where: { id: params.id, status: 'APPROVED' },
-      data: {
-        status: 'PAYING',
-        paymentIntentId: intentId,
-        paymentError: null,
-        // The clock the stranded-payment watchdog reads. Stamped by the claim
-        // itself so it is set even if this process dies before the intent file
-        // is written — that crash window is exactly what strands a bundle.
-        payingSince: new Date(),
-      },
-    });
-    if (claimed.count !== 1) {
-      return status(409, { message: 'คำขอนี้ไม่อยู่ในสถานะที่จ่ายได้' });
-    }
-
-    try {
-      const voucherFile = await writeVoucherHtml(
-        intentId,
-        renderVoucherHtml(bundle, bundle.receipts, bundle.user, bundle.approver),
-      );
-
-      const intent: KbizPaymentIntent = {
-        id: intentId,
-        app: 'reimbursement',
-        type: 'transfer-other',
-        status: 'approved',
-        createdAt: new Date().toISOString(),
-        bundleId: bundle.id,
-        payee: { handle },
-        amount,
-        memo,
-        kbizCategoryId,
-        voucherFile,
-      };
-      await writeIntent(intent);
-    } catch (error) {
-      console.error(`[kbiz] could not queue intent ${intentId}:`, error);
-
-      // Release the claim only when we are certain nothing is queued. If the
-      // intent file made it into queue/ the bot may already be driving the
-      // bank, and flipping the bundle back to APPROVED would invite a second
-      // transfer for the same money.
-      if (await intentFileExists(intentId)) {
-        return status(500, {
-          message: 'ส่งคำสั่งจ่ายไม่สมบูรณ์ กรุณาตรวจสอบสถานะการโอนก่อนสั่งจ่ายซ้ำ',
+      if (!(await isKbizConfigured())) {
+        return status(503, {
+          message: 'เซิร์ฟเวอร์นี้ยังไม่ได้เปิดใช้งานการจ่ายผ่าน KBIZ',
         });
       }
 
-      await prisma.bundle.updateMany({
-        where: { id: params.id, status: 'PAYING', paymentIntentId: intentId },
-        data: { status: 'APPROVED', paymentIntentId: null, paymentError: null, payingSince: null },
-      });
-      return status(500, { message: 'ส่งคำสั่งจ่ายไม่สำเร็จ คำขอกลับสู่สถานะอนุมัติแล้ว' });
-    }
-
-    await prisma.auditEvent.create({
-      data: {
-        type: 'pay-via-kbiz',
-        bundleId: params.id,
-        actorId: user.id,
-        metadata: { intentId, amount, memo, kbizCategoryId },
-      },
-    });
-
-    const [updated, kbiz] = await Promise.all([
-      prisma.bundle.findUniqueOrThrow({
+      const bundle = await prisma.bundle.findUnique({
         where: { id: params.id },
         include: { receipts: true, user: true, approver: true },
-      }),
-      loadKbizPaymentContext(),
-    ]);
+      });
+      if (!bundle) {
+        return status(404, { message: 'Bundle not found' });
+      }
 
-    return serializeBundleWithDetails(updated, kbiz);
-  })
+      // ── where the money goes ──────────────────────────────────────────
+      // Resolved here, with every other refusal, so a rejected destination can
+      // never leave a bundle claimed into PAYING.
+      //
+      // Nothing the client sends is taken at face value: a handle has to be the
+      // submitter's own mapping or one the bot has actually published, a
+      // favorite is copied wholesale off the synced row (the request only picks
+      // WHICH row), and a custom account — the single shape that carries a real
+      // account number — is checked against KBIZ's own bank list and digit
+      // rules before it can be typed into a bank form.
+      const payees = await getKbizPayees();
+      const mappedHandle = payees[bundle.userId] ?? null;
+      const requested = body?.destination ?? null;
+      let destination: KbizDestination;
+
+      if (requested === null) {
+        // No body: the pre-picker behaviour, unchanged.
+        if (!mappedHandle) {
+          return status(409, {
+            message: `ยังไม่ได้ตั้งค่าบัญชีปลายทางของ ${bundle.user.name} — ตั้งค่าที่หน้าผู้ดูแลระบบก่อน`,
+          });
+        }
+        destination = { kind: 'handle', handle: mappedHandle };
+      } else if (requested.kind === 'handle') {
+        const handle = requested.handle?.trim() ?? '';
+        const known =
+          handle.length > 0 &&
+          (handle === mappedHandle ||
+            ((await readPayeeHandlesManifest())?.handles.includes(handle) ?? false));
+        if (!known) {
+          return status(409, {
+            message: 'ไม่พบบัญชีปลายทางนี้ในสมุดบัญชีของบอท',
+          });
+        }
+        destination = { kind: 'handle', handle };
+      } else if (requested.kind === 'favorite') {
+        const synced = await readKbizFavorites();
+        if (!synced) {
+          return status(409, { message: 'ยังไม่ได้ซิงค์รายชื่อจาก KBIZ' });
+        }
+
+        // Nickname + last-4 is the same pair the bot re-verifies against the
+        // live picker, and it demands exactly one hit there — so two saved
+        // accounts wearing it are refused here rather than resolved by
+        // ordering, which could hand the transfer a different bank entirely.
+        //
+        // BOTH sides are trimmed. A KBIZ display name reaches the manifest with
+        // whatever whitespace the bot scraped out of the table cell, and
+        // trimming only the request made such a row permanently unpayable:
+        // offered by the picker, refused here, and a re-sync reproduces the
+        // identical row. An empty pair matches nothing rather than a row whose
+        // nickname is nothing but spaces. What is handed to the bot below is
+        // still the synced row verbatim, so it re-verifies against exactly the
+        // text it published.
+        const nickname = requested.nickname?.trim() ?? '';
+        const accountLast4 = requested.accountLast4?.trim() ?? '';
+        const matches =
+          nickname.length === 0 || accountLast4.length === 0
+            ? []
+            : synced.favorites.filter(
+                (favorite) =>
+                  favorite.nickname.trim() === nickname &&
+                  favorite.accountLast4.trim() === accountLast4,
+              );
+        if (matches.length === 0) {
+          return status(409, {
+            message: 'ไม่พบบัญชีนี้ในรายชื่อที่ซิงค์จาก KBIZ — ซิงค์รายชื่อใหม่แล้วลองอีกครั้ง',
+          });
+        }
+        if (matches.length > 1) {
+          return status(409, {
+            message: 'มีบัญชีชื่อนี้ซ้ำกันใน KBIZ — แก้ชื่อในธนาคารให้ไม่ซ้ำแล้วซิงค์ใหม่',
+          });
+        }
+
+        // Bank and name come off the synced row, never off the request: the
+        // client's copy could be stale, or edited.
+        const match = matches[0];
+        destination = {
+          kind: 'favorite',
+          nickname: match.nickname,
+          bank: match.bank,
+          accountLast4: match.accountLast4,
+          accountName: match.accountName,
+        };
+      } else {
+        const bank = requested.bank?.trim() ?? '';
+        if (!isKbizBank(bank)) {
+          return status(400, { message: 'ธนาคารปลายทางไม่ถูกต้อง' });
+        }
+
+        // Whatever the approver typed — spaces, dashes — reduced to the digits
+        // KBIZ's own account field accepts.
+        const accountNo = (requested.accountNo ?? '').replace(/\D/g, '');
+        if (accountNo.length < 8 || accountNo.length > 15) {
+          return status(400, { message: 'เลขที่บัญชีไม่ถูกต้อง — ต้องเป็นตัวเลข 8-15 หลัก' });
+        }
+
+        const accountName = requested.accountName?.trim() ?? '';
+        if (accountName.length > 80) {
+          return status(400, { message: 'ชื่อบัญชียาวเกิน 80 ตัวอักษร' });
+        }
+
+        destination = {
+          kind: 'custom',
+          bank,
+          accountNo,
+          ...(accountName.length > 0 ? { accountName } : {}),
+        };
+      }
+
+      // Server-computed, exactly like /pay: the amount is Σ receipts and never
+      // something the client sent.
+      const amount = sumReceiptAmounts(bundle.receipts);
+      if (amount <= 0) {
+        return status(409, { message: 'คำขอนี้ไม่มียอดที่ต้องจ่าย' });
+      }
+
+      const memo = buildKbizMemo(bundle.name, bundle.id);
+      const kbizCategoryId = resolveKbizCategoryId(
+        bundle.receipts.map((receipt) => ({
+          category: receipt.category,
+          amount: Number(receipt.amount),
+        })),
+        await getKbizCategoryMapping(),
+      );
+      const intentId = newPaymentIntentId();
+
+      const claimed = await prisma.bundle.updateMany({
+        where: { id: params.id, status: 'APPROVED' },
+        data: {
+          status: 'PAYING',
+          paymentIntentId: intentId,
+          paymentError: null,
+          // The clock the stranded-payment watchdog reads. Stamped by the claim
+          // itself so it is set even if this process dies before the intent file
+          // is written — that crash window is exactly what strands a bundle.
+          payingSince: new Date(),
+        },
+      });
+      if (claimed.count !== 1) {
+        return status(409, { message: 'คำขอนี้ไม่อยู่ในสถานะที่จ่ายได้' });
+      }
+
+      try {
+        const voucherFile = await writeVoucherHtml(
+          intentId,
+          renderVoucherHtml(bundle, bundle.receipts, bundle.user, bundle.approver),
+        );
+
+        const intent: KbizQueuedIntent = {
+          id: intentId,
+          app: 'reimbursement',
+          type: 'transfer-other',
+          status: 'approved',
+          createdAt: new Date().toISOString(),
+          bundleId: bundle.id,
+          // Both fields, deliberately: `destination` is what a reader should
+          // use, and `payee` keeps a handle transfer legible to a bot build
+          // that predates the picker. A favorite or a typed account has no
+          // handle to state, so it states none rather than a stale one.
+          payee: destination.kind === 'handle' ? { handle: destination.handle } : null,
+          destination,
+          amount,
+          memo,
+          kbizCategoryId,
+          voucherFile,
+        };
+        await writeIntent(intent);
+      } catch (error) {
+        console.error(`[kbiz] could not queue intent ${intentId}:`, error);
+
+        // Release the claim only when we are certain nothing is queued. If the
+        // intent file made it into queue/ the bot may already be driving the
+        // bank, and flipping the bundle back to APPROVED would invite a second
+        // transfer for the same money.
+        if (await intentFileExists(intentId)) {
+          return status(500, {
+            message: 'ส่งคำสั่งจ่ายไม่สมบูรณ์ กรุณาตรวจสอบสถานะการโอนก่อนสั่งจ่ายซ้ำ',
+          });
+        }
+
+        await prisma.bundle.updateMany({
+          where: { id: params.id, status: 'PAYING', paymentIntentId: intentId },
+          data: { status: 'APPROVED', paymentIntentId: null, paymentError: null, payingSince: null },
+        });
+        return status(500, { message: 'ส่งคำสั่งจ่ายไม่สำเร็จ คำขอกลับสู่สถานะอนุมัติแล้ว' });
+      }
+
+      await prisma.auditEvent.create({
+        data: {
+          type: 'pay-via-kbiz',
+          bundleId: params.id,
+          actorId: user.id,
+          // `auditDestination` is what keeps a typed account number out of the
+          // database — the history gets a last-4, the bot gets the number.
+          metadata: {
+            intentId,
+            amount,
+            memo,
+            kbizCategoryId,
+            destination: auditDestination(destination),
+          },
+        },
+      });
+
+      const [updated, kbiz] = await Promise.all([
+        prisma.bundle.findUniqueOrThrow({
+          where: { id: params.id },
+          include: { receipts: true, user: true, approver: true },
+        }),
+        loadKbizPaymentContext(),
+      ]);
+
+      return serializeBundleWithDetails(updated, kbiz);
+    },
+    {
+      /**
+       * The destination, loosely typed here and narrowed by hand in the handler.
+       *
+       * A per-kind TypeBox union would turn every "wrong field for this kind"
+       * into a 422 whose body is a schema error — unreadable, and untranslatable
+       * into the Thai the approver actually needs. One permissive object plus
+       * the manual narrowing in the handler keeps every refusal a Thai sentence,
+       * and the handler re-derives every field from the payee mapping, the
+       * synced favorites or KBIZ's own bank list regardless.
+       */
+      body: t.Optional(
+        t.Object({
+          destination: t.Optional(
+            t.Object({
+              kind: t.Union([t.Literal('handle'), t.Literal('favorite'), t.Literal('custom')]),
+              handle: t.Optional(t.String()),
+              nickname: t.Optional(t.String()),
+              bank: t.Optional(t.String()),
+              accountLast4: t.Optional(t.String()),
+              accountNo: t.Optional(t.String()),
+              accountName: t.Optional(t.String()),
+            }),
+          ),
+        }),
+      ),
+    },
+  )
 
   /**
    * "ยังไม่โอน" — release a payment that never moved money, so it can be paid

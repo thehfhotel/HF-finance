@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { ApiError, api } from '../../lib/api';
-import type { PublishedPayee } from '../../lib/api';
+import type { KbizSettings, PublishedPayee } from '../../lib/api';
+import { formatThaiRelative } from '../../lib/format';
+import { formatKbizAccountLabel } from '../../lib/kbizDestination';
 import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../../lib/theme';
 import type {
   AdminUser,
   KbizCategoryId,
   KbizCategoryMapping,
+  KbizFavorite,
   KbizPayeeHandles,
   Theme,
   User,
@@ -41,6 +44,10 @@ interface ToastMessage {
   text: string;
   tone: 'error' | 'info';
 }
+
+/** Favorites-sync poll cadence and give-up window — see handleSyncFavorites. */
+const SYNC_POLL_MS = 3000;
+const SYNC_TIMEOUT_MS = 90_000;
 
 /** Deterministic string of the mapping's editable content — key order in the
  *  underlying object may drift as rows are edited, but the compare must not. */
@@ -84,6 +91,19 @@ export function AdminKbiz({
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [availableHandles, setAvailableHandles] = useState<string[] | null>(null);
   const [availablePayees, setAvailablePayees] = useState<PublishedPayee[] | null>(null);
+  const [favorites, setFavorites] = useState<KbizFavorite[] | null>(null);
+  const [favoritesUpdatedAt, setFavoritesUpdatedAt] = useState<string | null>(null);
+  const [syncingFavorites, setSyncingFavorites] = useState(false);
+
+  // Guards state updates from the sync-poll loop (setTimeout chain) once the
+  // screen has gone away — the loop has no other way to know to stop.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,6 +124,8 @@ export function AdminKbiz({
         setConfigured(settings.configured);
         setAvailableHandles(settings.availableHandles ?? null);
         setAvailablePayees(settings.availablePayees ?? null);
+        setFavorites(settings.favorites ?? null);
+        setFavoritesUpdatedAt(settings.favoritesUpdatedAt ?? null);
         setUsers(userList);
       } catch (err) {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : 'โหลดการตั้งค่าไม่สำเร็จ');
@@ -129,6 +151,75 @@ export function AdminKbiz({
   };
   const showInfo = (text: string): void => {
     setToast({ id: Date.now(), text, tone: 'info' });
+  };
+  const showErrorText = (text: string): void => {
+    setToast({ id: Date.now(), text, tone: 'error' });
+  };
+
+  /**
+   * "ซิงค์จาก KBIZ" — queue the read-only favorites scrape, then poll
+   * GET kbiz-settings until `favoritesUpdatedAt` moves OR the favorites list
+   * itself changes — a manifest the bot publishes without a timestamp
+   * (`readKbizFavorites` maps a missing/non-string `updatedAt` to `null`)
+   * still carries a real account list, so waiting on the timestamp alone
+   * would spin for the full 90s and then discard accounts that already
+   * arrived. Either that, or 90s pass with no answer, in which case the
+   * button releases and the toast points at kbiz-bot rather than spinning
+   * forever on a bot that may be down — but even then the last poll's
+   * favorites are applied first, so data already in hand is never thrown
+   * away.
+   */
+  const handleSyncFavorites = async (): Promise<void> => {
+    if (syncingFavorites || !configured) return;
+    setSyncingFavorites(true);
+    try {
+      await api.admin.syncKbizFavorites();
+    } catch (err) {
+      if (mountedRef.current) {
+        setSyncingFavorites(false);
+        showError(err);
+      }
+      return;
+    }
+
+    const startedAt = favoritesUpdatedAt;
+    const startedFavorites = JSON.stringify(favorites);
+    const deadline = Date.now() + SYNC_TIMEOUT_MS;
+
+    const poll = async (): Promise<void> => {
+      if (!mountedRef.current) return;
+      let settings: KbizSettings | null = null;
+      try {
+        settings = await api.admin.getKbizSettings();
+      } catch {
+        // Transient — keep polling until the deadline decides.
+      }
+      if (!mountedRef.current) return;
+      if (settings !== null) {
+        const changed =
+          settings.favoritesUpdatedAt !== startedAt || JSON.stringify(settings.favorites) !== startedFavorites;
+        if (changed) {
+          setFavorites(settings.favorites ?? null);
+          setFavoritesUpdatedAt(settings.favoritesUpdatedAt);
+          setSyncingFavorites(false);
+          showInfo('ซิงค์บัญชีจาก KBIZ แล้ว');
+          return;
+        }
+      }
+      if (Date.now() >= deadline) {
+        // Apply whatever the last poll returned before giving up — a
+        // manifest without a timestamp still carries real accounts.
+        if (settings !== null) {
+          setFavorites(settings.favorites ?? null);
+          setFavoritesUpdatedAt(settings.favoritesUpdatedAt);
+        }
+        setSyncingFavorites(false);
+        showErrorText('บอทยังไม่ตอบ — ตรวจสอบว่า kbiz-bot ทำงานอยู่');
+        return;
+      }
+      window.setTimeout(() => void poll(), SYNC_POLL_MS);
+    };
+    window.setTimeout(() => void poll(), SYNC_POLL_MS);
   };
 
   const categoriesDirty = categoriesDraft.join('\u0001') !== savedCategories.join('\u0001');
@@ -226,6 +317,10 @@ export function AdminKbiz({
       availableHandles={availableHandles}
       availablePayees={availablePayees}
       onPayeeChange={(userId, handle) => setPayeeDraft((prev) => ({ ...prev, [userId]: handle }))}
+      favorites={favorites}
+      favoritesUpdatedAt={favoritesUpdatedAt}
+      syncingFavorites={syncingFavorites}
+      onSyncFavorites={() => void handleSyncFavorites()}
     />
   );
 
@@ -404,6 +499,10 @@ interface SettingsBodyProps {
   availableHandles: string[] | null;
   availablePayees: PublishedPayee[] | null;
   onPayeeChange: (userId: string, handle: string) => void;
+  favorites: KbizFavorite[] | null;
+  favoritesUpdatedAt: string | null;
+  syncingFavorites: boolean;
+  onSyncFavorites: () => void;
 }
 
 function SettingsBody({
@@ -426,6 +525,10 @@ function SettingsBody({
   availableHandles,
   availablePayees,
   onPayeeChange,
+  favorites,
+  favoritesUpdatedAt,
+  syncingFavorites,
+  onSyncFavorites,
 }: SettingsBodyProps): JSX.Element {
   if (loading) {
     return (
@@ -598,9 +701,89 @@ function SettingsBody({
           ))
         )}
       </Card>
+
+      <SectionLabel theme={theme}>บัญชีที่บันทึกไว้ใน KBIZ</SectionLabel>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 12,
+          flexWrap: 'wrap',
+          marginBottom: 10,
+        }}
+      >
+        <div style={{ fontFamily: FONT_UI, fontSize: 12, color: theme.inkSoft, lineHeight: 1.5 }}>
+          {favoritesUpdatedAt
+            ? `ซิงค์ล่าสุด ${formatThaiRelative(favoritesUpdatedAt)}`
+            : favorites !== null
+              ? 'ซิงค์แล้ว แต่ไม่ทราบเวลาซิงค์ล่าสุด'
+              : 'ยังไม่เคยซิงค์บัญชีจาก KBIZ'}
+        </div>
+        <div style={{ minWidth: 140 }}>
+          <PrimaryButton theme={theme} full={false} disabled={!configured || syncingFavorites} onClick={onSyncFavorites}>
+            {syncingFavorites ? 'กำลังซิงค์…' : 'ซิงค์จาก KBIZ'}
+          </PrimaryButton>
+        </div>
+      </div>
+      <Card theme={theme} padding={0}>
+        {!favorites || favorites.length === 0 ? (
+          <div style={{ padding: '18px', textAlign: 'center', fontFamily: FONT_UI, fontSize: 13, color: theme.inkSofter, lineHeight: 1.5 }}>
+            {favorites === null
+              ? 'ยังไม่มีบัญชีที่ซิงค์จาก KBIZ — กด "ซิงค์จาก KBIZ" ด้านบนเพื่อดึงรายชื่อบัญชีที่บันทึกไว้'
+              : 'ซิงค์แล้ว แต่ไม่มีบัญชีที่บันทึกไว้ใน KBIZ'}
+          </div>
+        ) : (
+          <>
+            <div
+              style={{
+                padding: '10px 18px',
+                display: 'grid',
+                gridTemplateColumns: FAVORITES_GRID_COLUMNS,
+                gap: 14,
+                fontFamily: FONT_UI,
+                fontSize: 11,
+                color: theme.inkSoft,
+                letterSpacing: 0.6,
+                textTransform: 'uppercase',
+                borderBottom: `0.5px solid ${theme.hairline}`,
+                fontWeight: 500,
+              }}
+            >
+              <span>ชื่อบัญชี</span>
+              <span>ธนาคาร</span>
+              <span>เลขบัญชี</span>
+              <span>ชื่อที่บันทึกใน KBIZ</span>
+            </div>
+            {favorites.map((f, i) => (
+              <div
+                key={`${f.nickname}-${f.accountLast4}-${i}`}
+                style={{
+                  padding: '12px 18px',
+                  display: 'grid',
+                  gridTemplateColumns: FAVORITES_GRID_COLUMNS,
+                  gap: 14,
+                  alignItems: 'center',
+                  borderBottom: i < favorites.length - 1 ? `0.5px solid ${theme.hairline}` : 'none',
+                  fontFamily: FONT_UI,
+                  fontSize: 13,
+                  color: theme.ink,
+                }}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.accountName}</span>
+                <span style={{ color: theme.inkSoft, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.bank}</span>
+                <span style={{ fontFamily: FONT_MONO, fontSize: 12 }}>{f.accountMasked}</span>
+                <span style={{ color: theme.inkSoft, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.nickname}</span>
+              </div>
+            ))}
+          </>
+        )}
+      </Card>
     </div>
   );
 }
+
+const FAVORITES_GRID_COLUMNS = '1.3fr 1fr 0.9fr 1fr';
 
 function catBtnStyle(theme: Theme): CSSProperties {
   return {
@@ -713,14 +896,15 @@ interface PayeeRowProps {
   isLast: boolean;
 }
 
-/** "revew — พี่วิว · Siam Commercial …7394" — what the handle actually pays. */
+/** "นางสาว ทดสอบ ตัวอย่าง · Siam Commercial …7394" — the account name
+ *  leads, since that's what actually identifies who a handle pays; the handle
+ *  itself is a plain <option>'s text, so it's omitted here rather than tacked
+ *  on as an unstyleable technical suffix (see the detail line below, which can
+ *  style it small). */
 function payeeOptionLabel(handle: string, payees: PublishedPayee[] | null): string {
   const p = payees?.find((x) => x.handle === handle);
   if (!p) return handle;
-  const parts = [p.nickname, [p.bank, p.accountMasked].filter(Boolean).join(' ')].filter(
-    (x): x is string => !!x && x.length > 0,
-  );
-  return parts.length > 0 ? `${handle} — ${parts.join(' · ')}` : handle;
+  return formatKbizAccountLabel(p, handle);
 }
 
 function PayeeRow({ theme, user, value, availableHandles, availablePayees, onChange, isLast }: PayeeRowProps): JSX.Element {
@@ -754,12 +938,14 @@ function PayeeRow({ theme, user, value, availableHandles, availablePayees, onCha
           {roleLabel}
           {value !== '' && availablePayees && (
             <span style={{ marginLeft: 8, color: theme.inkSofter }}>
-              → {(() => {
+              →{' '}
+              {(() => {
                 const p = availablePayees.find((x) => x.handle === value);
-                return p
-                  ? [p.accountName ?? p.nickname, p.bank, p.accountMasked].filter(Boolean).join(' · ')
-                  : 'ไม่พบรายละเอียดจากบอท';
+                return p ? formatKbizAccountLabel(p, value) : 'ไม่พบรายละเอียดจากบอท';
               })()}
+              {/* Handle as a small technical suffix — useful for cross-checking
+                  against the bot's book, never the primary label. */}
+              <span style={{ fontFamily: FONT_MONO, opacity: 0.7, marginLeft: 6 }}>#{value}</span>
             </span>
           )}
         </div>

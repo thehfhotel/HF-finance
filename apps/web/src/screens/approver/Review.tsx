@@ -20,6 +20,8 @@ import { Icon } from '../../components/icons';
 import { ReceiptPhoto, ReceiptThumb } from '../../components/Receipts';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Toast, useToast } from '../../components/Toast';
+import { KbizDestinationPicker } from '../../components/KbizDestinationPicker';
+import type { KbizChosenDestination } from '../../components/KbizDestinationPicker';
 
 interface ReviewProps {
   theme: Theme;
@@ -44,6 +46,11 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
   const [error, setError] = useState<string | null>(null);
   const [confirmKind, setConfirmKind] = useState<ConfirmKind | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [kbizPickerOpen, setKbizPickerOpen] = useState(false);
+  // Set by the destination picker's own "ยืนยัน" step; the pay-kbiz confirm
+  // dialog below reads it for the summary line and payViaKbiz sends it — no
+  // destination change once that confirm dialog is open.
+  const [chosenDestination, setChosenDestination] = useState<KbizChosenDestination | null>(null);
   const { toast, showToast } = useToast();
 
   // The bundle may be absent from client state (deep link, stale list) —
@@ -144,12 +151,13 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
   };
 
   const handlePayViaKbiz = async () => {
-    if (submitting) return;
+    if (submitting || !chosenDestination) return;
     setError(null);
     setSubmitting(true);
     try {
-      const updated = await api.bundles.payViaKbiz(b.id);
+      const updated = await api.bundles.payViaKbiz(b.id, chosenDestination.destination);
       applyServerUpdate(updated);
+      setChosenDestination(null);
       showToast('ส่งคำสั่งโอนแล้ว — ยืนยันบนแอป K BIZ ในมือถือ');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
@@ -459,10 +467,10 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
               {error}
             </div>
           )}
-          {/* Manual pay always stays available; KBIZ appears only once the
-              bundle has a mapped payee to fire the bot at. */}
+          {/* Manual pay always stays available; KBIZ appears once this host is
+              wired up for it — the destination itself is chosen in the picker. */}
           {b.kbizPayable && (
-            <PrimaryButton theme={theme} onClick={() => setConfirmKind('pay-kbiz')} disabled={submitting}>
+            <PrimaryButton theme={theme} onClick={() => setKbizPickerOpen(true)} disabled={submitting}>
               โอนผ่าน KBIZ
             </PrimaryButton>
           )}
@@ -639,7 +647,7 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
           message={
             <span>
               <span style={{ display: 'block', marginBottom: 8 }}>
-                โอนเข้าบัญชีที่บันทึกไว้ใน KBIZ ให้ {b.submitter.name}
+                โอนเข้า <strong>{chosenDestination?.summary ?? 'บัญชีที่เลือก'}</strong> ให้ {b.submitter.name}
               </span>
               <span style={{ display: 'block', color: theme.warn }}>
                 ต้องกดยืนยันในแอป K BIZ บนมือถือ — หากไม่ยืนยัน การโอนจะไม่สำเร็จ
@@ -649,7 +657,24 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
           confirmLabel="โอนผ่าน KBIZ"
           loading={submitting}
           onConfirm={() => void handlePayViaKbiz()}
-          onCancel={() => setConfirmKind(null)}
+          onCancel={() => { setConfirmKind(null); setChosenDestination(null); }}
+        />
+      )}
+
+      {kbizPickerOpen && (
+        <KbizDestinationPicker
+          theme={theme}
+          bundle={b}
+          onClose={() => setKbizPickerOpen(false)}
+          onConfirm={(chosen) => {
+            setChosenDestination(chosen);
+            setKbizPickerOpen(false);
+            setConfirmKind('pay-kbiz');
+          }}
+          onGotoSettings={() => {
+            setKbizPickerOpen(false);
+            nav({ name: 'admin-kbiz' });
+          }}
         />
       )}
 

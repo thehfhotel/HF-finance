@@ -114,9 +114,11 @@ export interface Bundle {
   payingSince: string | null;
   /**
    * Server-computed: true when this bundle can actually be paid through KBIZ
-   * right now (approved, has a mapped payee handle, non-zero amount). The web
+   * right now (the host is wired up for it, approved, non-zero amount). The web
    * app uses it to show/hide the "จ่ายผ่าน KBIZ" action instead of re-deriving
-   * the payee mapping client-side. Absent on payloads that don't compute it.
+   * whether payment is live client-side. It says nothing about WHERE the money
+   * would go — that is the pay-time picker's job. Absent on payloads that don't
+   * compute it.
    */
   kbizPayable?: boolean;
   createdAt: string;
@@ -411,7 +413,13 @@ export interface KbizPaymentIntent {
   payee: {
     /** Bot-side payee handle, e.g. `'revew'` → its saved-account nickname. */
     handle: string;
-  };
+  } | null;
+  /**
+   * Where the money goes — the bot PREFERS this when present and falls back to
+   * `payee.handle`. `payee` is non-null exactly when `destination.kind` is
+   * `'handle'` (kept for old-bot back-compat during rolling deploys).
+   */
+  destination?: KbizDestination;
   /** Baht, server-computed as Σ receipts. Decimal, e.g. 1234.5. */
   amount: number;
   /** Already sanitized by `buildKbizMemo` — the bot types it verbatim. */
@@ -453,10 +461,10 @@ export interface KbizPaymentIntent {
 
 /**
  * Reimbursement `User.id` → kbiz-bot payee handle (e.g. `'revew'`). Stored as
- * an AppSetting under `SETTING_KBIZ_PAYEES`. A user with no entry simply
- * cannot be paid by the bot (`kbizPayable: false`) — which is the intended
- * fail-closed default, since the bot may only pay accounts already saved and
- * vetted inside KBIZ.
+ * an AppSetting under `SETTING_KBIZ_PAYEES`. A user with no entry has no
+ * default destination: "จ่ายผ่าน KBIZ" with no destination in the body is
+ * refused, and the approver has to pick a synced favorite or type an account in
+ * the pay-time picker instead.
  */
 export type KbizPayeeHandles = Record<string, string>;
 
@@ -472,3 +480,75 @@ export const SETTING_KBIZ_PAYEES = 'kbiz.payees';
  * were saved with — removing or renaming a category never rewrites history.
  */
 export const SETTING_RECEIPT_CATEGORIES = 'receipt.categories';
+
+/**
+ * KBIZ's own destination-bank dropdown, exact option texts pinned from the live
+ * fundtranfer-other page (2026-08-12). The bot matches these as substrings
+ * against the real <select>, so send them verbatim.
+ */
+export const KBIZ_BANKS = [
+  'Kasikornbank',
+  'Bangkok Bank',
+  'Krung Thai Bank',
+  'TMBThanachart Bank',
+  'Siam Commercial Bank',
+  'CITIBANK',
+  'Sumitomo Mitsui Banking',
+  'Standard Chartered Bank',
+  'CIMB THAI BANK',
+  'United Overseas Bank (Thai)',
+  'Bank of Ayudhya',
+  'Government Savings Bank',
+  'The Hongkong and Shanghai',
+  'Deutsche Bank',
+  'The Government Housing Bank',
+  'BAAC',
+  'Mizuho Bank',
+  'BNP Paribas',
+  'Bank of China (Thai)',
+  'Islamic Bank',
+  'Tisco Bank',
+  'Kiatnakin Phatra Bank',
+  'ICBC (Thai)',
+  'Thai Credit Bank',
+  'Land and Houses Bank',
+] as const;
+export type KbizBank = (typeof KBIZ_BANKS)[number];
+
+/**
+ * One saved account from KBIZ's fundtranfer-other favorites, as synced by the
+ * bot ('list-favorites' queue item → queue/kbiz-favorites.json). MASKED —
+ * full account numbers never enter the shared tree; the bot re-verifies
+ * against the live picker by nickname + bank + last-4 at transfer time.
+ */
+export interface KbizFavorite {
+  /** Display Name in KBIZ — what the bot matches to select the row. */
+  nickname: string;
+  /** The bank's own name-on-account. */
+  accountName: string;
+  bank: string;
+  /** e.g. "…7394" — display only. */
+  accountMasked: string;
+  /** Last 4 digits — the verifier the bot matches at transfer time. */
+  accountLast4: string;
+}
+
+/** Shared-file name for the synced favorites (bot writes, api reads). */
+export const KBIZ_FAVORITES_FILE = 'kbiz-favorites.json';
+
+/**
+ * Where a payment goes — chosen by the approver at pay time.
+ *
+ *  - 'handle': the admin-mapped payee (the bot's own gitignored book resolves
+ *    it; reimbursement holds no bank data). The default when a mapping exists.
+ *  - 'favorite': a synced KBIZ saved account. Carries NO full account number;
+ *    the bot triple-verifies nickname + bank + last-4 against the live picker
+ *    and requires exactly one match.
+ *  - 'custom': a typed destination — the one kind that must carry the full
+ *    account number (the bot has to type it). Same live-verified path as the
+ *    CLI custom mode; the phone approval shows the resolved recipient.
+ */
+export type KbizDestination =
+  | { kind: 'handle'; handle: string }
+  | { kind: 'favorite'; nickname: string; bank: string; accountLast4: string; accountName?: string }
+  | { kind: 'custom'; bank: string; accountNo: string; accountName?: string };
