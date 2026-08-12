@@ -9,7 +9,7 @@ import {
 } from '@reimbursement/shared';
 import { auth } from '../auth';
 import { prisma } from '../db';
-import { isKbizConfigured } from '../kbiz';
+import { isKbizConfigured, readPayeeHandlesManifest } from '../kbiz';
 import { serializeAdminUser } from '../serializers';
 import { getKbizCategoryMapping, getKbizPayees, isKbizCategoryId, putSetting } from '../settings';
 
@@ -196,12 +196,22 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
    * letting someone map payees into a feature that will answer 503.
    */
   .get('/kbiz-settings', async () => {
-    const [mapping, payees, configured] = await Promise.all([
+    const [mapping, payees, configured, handlesManifest] = await Promise.all([
       getKbizCategoryMapping(),
       getKbizPayees(),
       isKbizConfigured(),
+      readPayeeHandlesManifest(),
     ]);
-    return { mapping, payees, configured };
+    return {
+      mapping,
+      payees,
+      configured,
+      // The bot-published handle list (names only) — the admin screen renders
+      // these as a dropdown so nobody free-types a handle that doesn't exist.
+      // null = the bot hasn't published (down, or pre-switch-over host).
+      availableHandles: handlesManifest?.handles ?? null,
+      handlesUpdatedAt: handlesManifest?.updatedAt ?? null,
+    };
   })
 
   .put(
@@ -253,6 +263,23 @@ export const adminRoutes = new Elysia({ prefix: '/admin' })
           const missing = userIds.filter((id) => !knownIds.has(id));
           if (missing.length > 0) {
             return status(400, { message: `ไม่พบพนักงานรหัส: ${missing.join(', ')}` });
+          }
+
+          // When the bot has published its handle list, a handle outside it is
+          // a typo waiting to fail every payment — refuse it here, with the
+          // valid options in the message. No manifest (bot down / not yet
+          // switched over) = no basis to reject, so free entry still works.
+          const manifest = await readPayeeHandlesManifest();
+          if (manifest) {
+            const valid = new Set(manifest.handles);
+            const unknown = [...new Set(Object.values(payees))].filter((h) => !valid.has(h));
+            if (unknown.length > 0) {
+              return status(400, {
+                message:
+                  `ไม่พบผู้รับเงิน "${unknown.join(', ')}" ในสมุดบัญชีของบอท — ` +
+                  `ตัวเลือกที่ใช้ได้: ${manifest.handles.join(', ') || '(ว่าง)'}`,
+              });
+            }
           }
         }
 

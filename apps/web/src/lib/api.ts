@@ -266,6 +266,13 @@ export interface KbizSettings {
   payees: KbizPayeeHandles;
   /** False when the server has no queue dir / KBIZ bot wired up yet. */
   configured: boolean;
+  /**
+   * Handle names the bot published from its payee book (names only, no bank
+   * data) — the dropdown options. null = the bot hasn't published (down or
+   * pre-switch-over), in which case free text entry still works.
+   */
+  availableHandles?: string[] | null;
+  handlesUpdatedAt?: string | null;
 }
 
 /** Shape of GET /api/bundles/stats. */

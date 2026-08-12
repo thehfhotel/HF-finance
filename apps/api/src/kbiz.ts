@@ -209,10 +209,42 @@ export async function intentFileExists(intentId: string): Promise<boolean> {
 }
 
 /** Every `*.json` currently in `queue/` — including other apps' work. */
+/**
+ * The bot publishes its payee-book HANDLE NAMES here (queue/payee-handles.json)
+ * so the admin screen can offer a dropdown — names only, never bank data. It
+ * sits inside queue/ because that is the one bot→api path needing no extra
+ * mount; both queue scanners skip it by name.
+ */
+const PAYEE_HANDLES_FILE = 'payee-handles.json';
+
+export interface PayeeHandlesManifest {
+  handles: string[];
+  updatedAt: string | null;
+}
+
+/** Read the bot-published handle list; null when absent/unreadable/garbled. */
+export async function readPayeeHandlesManifest(): Promise<PayeeHandlesManifest | null> {
+  if (!QUEUE_DIR) return null;
+  try {
+    const raw = JSON.parse(
+      await Bun.file(join(QUEUE_DIR, QUEUE_SUBDIR, PAYEE_HANDLES_FILE)).text(),
+    ) as { handles?: unknown; updatedAt?: unknown };
+    if (!Array.isArray(raw.handles) || !raw.handles.every((h) => typeof h === 'string')) return null;
+    return {
+      handles: raw.handles,
+      updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function listQueueFiles(): Promise<string[]> {
   try {
     const entries = await readdir(join(requireQueueDir(), QUEUE_SUBDIR));
-    return entries.filter((name) => name.endsWith('.json') && !name.startsWith('.'));
+    return entries.filter(
+      (name) => name.endsWith('.json') && !name.startsWith('.') && name !== PAYEE_HANDLES_FILE,
+    );
   } catch {
     return [];
   }
