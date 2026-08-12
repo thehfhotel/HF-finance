@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>เบิกค่าใช้จ่าย</title>
+    <!-- HF One brand colour for the browser/PWA chrome (--hf-brand-800). -->
+    <meta name="theme-color" content="#4F0E0E" />
+    <!-- Sarabun is the HF One face. Weights 400/500/600/700 are the only ones
+         the design contract uses. display=swap so a slow font never blanks the
+         app; lib/theme.ts keeps a Thai-capable system fallback behind it. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      html, body {
+        margin: 0; padding: 0; background: #151210;
+        font-family: "Sarabun", "Noto Sans Thai", system-ui, -apple-system, sans-serif;
+      }
+      body {
+        min-height: 100vh;
+        display: flex; align-items: center; justify-content: center;
+        /* Warm burgundy-black boot ground — brand-900 lifting out of the dark
+           warm neutral, so the first paint is already HF One. */
+        background: radial-gradient(ellipse at 30% 20%, #3B0A0A 0%, #151210 62%);
+        padding: 30px 20px;
+        box-sizing: border-box;
+      }
+      /* Gold selection, carried over from the ERP portal. */
+      ::selection { background: rgba(217, 164, 65, 0.35); }
+      #app { display: flex; align-items: center; justify-content: center; }
+      *::-webkit-scrollbar { width: 0; height: 0; }
+      /* HF One shell band (hf-bar.js) renders in normal flow at the top of
+         <body> via a #hf-bar-host element. This app's screens use
+         position: fixed for full-viewport chrome, which would otherwise
+         render underneath the band. :has() flips an offset var the fixed
+         screens read (falling back to 0 if the bar fails to load), per the
+         documented gotcha in HF-ONE.md. */
+      body:has(> #hf-bar-host) { --hf-band-offset: 46px; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

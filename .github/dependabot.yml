@@ -24,3 +24,47 @@ updates:
     directory: /kbiz-bot
     schedule:
       interval: weekly
+
+  # reimbursement/ (git subtree, merged 2026-08-12) had its own dependabot.yml
+  # before the merge — recovered from `git show 29d7ac4^:reimbursement/.github/dependabot.yml`
+  # and re-scoped to its subdirectory. Without these two entries the app's
+  # 396-package production tree (Prisma, React, Elysia, postgres/nginx/bun
+  # base images) gets zero automated dependency/security updates.
+  - package-ecosystem: "bun"
+    directory: "/reimbursement"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Bangkok"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps"
+    labels:
+      - "dependencies"
+    groups:
+      types:
+        patterns:
+          - "@types/*"
+      prisma:
+        patterns:
+          - "prisma"
+          - "@prisma/*"
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+          - "@vitejs/plugin-react"
+
+  - package-ecosystem: "docker"
+    directories:
+      - "/reimbursement"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Bangkok"
+    commit-message:
+      prefix: "deps"

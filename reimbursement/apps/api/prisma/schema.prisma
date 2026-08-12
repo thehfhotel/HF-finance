@@ -1,0 +1,149 @@
+// Prisma schema for the reimbursement app.
+// Migrations and the generated client live alongside this file.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  EMPLOYEE
+  APPROVER
+}
+
+enum BundleStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  /// The KBIZ automation window: an intent is queued and the bot is driving the
+  /// bank. Resolves forward to PAID, or back to APPROVED when KBIZ confirmed the
+  /// transfer never armed. PAYING + a non-null `paymentError` means "the outcome
+  /// is ambiguous, a human must resolve it" — never auto-retried.
+  PAYING
+  PAID
+  REJECTED
+}
+
+model User {
+  id                         String   @id @default(cuid())
+  name                       String
+  role                       Role     @default(EMPLOYEE)
+  initials                   String
+  /// Central HF-ID badge (the OIDC `sub`). Lets a signed card assertion from the
+  /// HF-ID service resolve to this app's internal User. Optional + unique: a badge
+  /// maps to at most one employee, and rows without a badge simply can't card-login.
+  badge                      String?  @unique
+  /// Login email for Cloudflare Access identity mapping, stored lowercased,
+  /// admin-managed. Optional + unique: maps at most one Access identity to
+  /// this row.
+  email                      String?  @unique
+  createdAt                  DateTime @default(now())
+
+  receipts        Receipt[]
+  bundlesOwned    Bundle[]  @relation("submitter")
+  bundlesApproved Bundle[]  @relation("approver")
+  auditEvents     AuditEvent[]
+
+  @@map("users")
+}
+
+model Receipt {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  merchant   String
+  category   String
+  /// Which property this expense is for. "hf-hotel" or "hf-ville".
+  property   String   @default("hf-hotel")
+  /// Optional unit count (จำนวนชิ้น) — e.g. "4 croissants" — null when not relevant.
+  quantity   Int?
+  amount     Decimal  @db.Decimal(12, 2)
+  date       String   // YYYY-MM-DD as plain string for display fidelity
+  note       String?
+  color      String   @default("#F5EBD9")
+  accent     String   @default("#7E5E3A")
+  items      Json     @default("[]") // ReceiptItem[]
+  tax        String   @default("0")
+  photoPath  String?
+  bundleId   String?
+  bundle     Bundle?  @relation(fields: [bundleId], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([bundleId])
+  @@map("receipts")
+}
+
+model Bundle {
+  id                 String       @id @default(cuid())
+  userId             String
+  user               User         @relation("submitter", fields: [userId], references: [id], onDelete: Cascade)
+  name               String
+  status             BundleStatus @default(PENDING)
+  submittedAt        DateTime     @default(now())
+  approvedAt         DateTime?
+  approvedById       String?
+  approver           User?        @relation("approver", fields: [approvedById], references: [id], onDelete: SetNull)
+  paidAt             DateTime?
+  transferRef        String?
+  transferAmount     Decimal?     @db.Decimal(12, 2)
+  transferProofPath  String?
+  note               String       @default("")
+  rejectReason       String?
+  /// Id of the KBIZ payment intent that currently owns this bundle — also the
+  /// queue filename (`queue/<paymentIntentId>.json`). Stamped by the atomic
+  /// APPROVED→PAYING flip that doubles as the double-pay guard. Unique so the
+  /// database itself refuses to let one intent own two bundles; the poller
+  /// looks a bundle up by it.
+  paymentIntentId    String?      @unique
+  /// Why the last automated attempt did not cleanly succeed. Set while PAYING =
+  /// needs human verification; set while APPROVED = a confirmed-failed attempt
+  /// that is safe to retry.
+  paymentError       String?
+  /// When the bundle entered PAYING (stamped by the same atomic claim that
+  /// writes `paymentIntentId`, cleared on every exit). A bundle whose bot never
+  /// reports back would otherwise sit here silently forever: the poller's
+  /// stranded-payment watchdog uses this to notice, flag and alert on one that
+  /// has been in flight far longer than a transfer can take.
+  payingSince        DateTime?
+  createdAt          DateTime     @default(now())
+
+  receipts     Receipt[]
+  auditEvents  AuditEvent[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("bundles")
+}
+
+/// Small key/value store for operational settings an admin edits at runtime —
+/// today the KBIZ category mapping and the payee handles (see
+/// `SETTING_KBIZ_*` in @reimbursement/shared). Values are JSON so a setting can
+/// grow a field without a migration; the keys are a closed set owned by code.
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("app_settings")
+}
+
+model AuditEvent {
+  id        String   @id @default(cuid())
+  type      String   // submit, approve, reject, pay, edit, etc.
+  bundleId  String?
+  bundle    Bundle?  @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  actorId   String
+  actor     User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([bundleId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("audit_events")
+}

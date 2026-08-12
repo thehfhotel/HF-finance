@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import { sanitizeKbizMemo } from "@reimbursement/shared";
 import { gotoAuthenticated, isUnauthenticatedUrl } from "../lib/session";
 import { captureSlip, ensureSlipsDir, SLIPS_DIR, type SlipCapture } from "../lib/capture-slip";
 import { aliasesForBank, matchFavoriteRows } from "../lib/scrape-favorites";
@@ -107,14 +108,18 @@ const maskAccount = (s: string) => {
   return d ? `…${d.slice(-4)}` : "?";
 };
 
-/** KBIZ memo rejects special characters — keep only Thai, alphanumerics, space. */
-export function sanitizeMemo(s: string): string {
-  return s
-    .replace(/[^฀-๿a-zA-Z0-9 ]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 100);
-}
+// The memo rule (KBIZ rejects everything outside Thai / ASCII alnum / space)
+// used to live here as a bot-local `sanitizeMemo`. It belongs to the contract:
+// reimbursement BUILDS the memo with the very same function (`buildKbizMemo` →
+// `sanitizeKbizMemo`), so the bot re-sanitizing an intent's memo is now
+// provably a no-op instead of "two regexes we believe agree".
+//
+// Deliberately NOT re-exported under the old name. This module imports
+// ../lib/session and ../lib/capture-slip, both of which import playwright for
+// real, and root CI runs `bun test` WITHOUT kbiz-bot/node_modules — a test that
+// reached for the memo rule here would drag the browser stack in and break it.
+// Need the rule? `import { sanitizeKbizMemo } from "@reimbursement/shared"`,
+// which pulls nothing.
 
 /** Select a SAVED payee via the picker, triple-verified. Throws on any ambiguity. */
 async function selectFavoritePayee(page: Page, payee: Payee, slug: string): Promise<void> {
@@ -281,7 +286,7 @@ export async function runTransferOtherFlow(
 ): Promise<TransferOtherResult> {
   const amountStr = input.amount.toFixed(2);
   const p = input.payee;
-  const memo = sanitizeMemo(input.memo);
+  const memo = sanitizeKbizMemo(input.memo);
 
   if (input.amount > input.maxTransfer) {
     return { success: false, error: `Amount ฿${amountStr} exceeds ceiling ฿${input.maxTransfer.toLocaleString()} — refusing.` };
