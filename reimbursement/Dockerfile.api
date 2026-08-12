@@ -49,8 +49,11 @@ COPY packages/shared ./packages/shared
 # Prisma client output lands at apps/api/src/generated/prisma per schema.prisma.
 RUN cd apps/api && bunx prisma generate --schema=prisma/schema.prisma
 
-# Typecheck the api workspace as a build-time sanity gate.
-RUN cd apps/api && bunx tsc --noEmit
+# Typecheck deliberately does NOT run here: the deploy workflow's contract job
+# runs the full reimbursement typecheck IN PARALLEL with this build (same gate,
+# zero build time), and PRs are gated by reimbursement-ci. Re-adding tsc here
+# only re-buys ~15s per build.
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 3 — runtime

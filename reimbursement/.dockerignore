@@ -18,3 +18,8 @@ docker-compose.dev.yml
 .idea
 apps/api/uploads/*
 !apps/api/uploads/.gitkeep
+# Local-only heavyweights (gitignored, but present in LOCAL build contexts):
+# the Notion export + dev uploads must never ship as docker context.
+Private & Shared 2
+apps/api/uploads
+*.tar.gz
