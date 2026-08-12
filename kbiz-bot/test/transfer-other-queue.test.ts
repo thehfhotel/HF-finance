@@ -196,6 +196,10 @@ describe("payee handles manifest", () => {
     );
     expect(m.handles).toEqual(["revew", "somchai"]);
     expect(m.updatedAt).toBe("2026-08-12T00:00:00.000Z");
+    expect(m.payees).toEqual([
+      { handle: "revew", mode: "favorite", nickname: "พี่วิว", bank: "SCB", accountName: undefined, accountMasked: "…2" },
+      { handle: "somchai", mode: "favorite", nickname: undefined, bank: "K", accountName: undefined, accountMasked: "…1" },
+    ]);
   });
 
   it("manifest filename is what both queue scanners skip", () => {

@@ -25,15 +25,45 @@ import { CONFIG_PATH, loadTransferConfig, type TransferConfig } from "./transfer
 
 export const HANDLES_FILE = "payee-handles.json";
 
+export interface PublishedPayee {
+  handle: string;
+  mode: "favorite" | "custom";
+  /** KBIZ saved-account Display Name (favorite mode). */
+  nickname?: string;
+  bank: string;
+  accountName?: string;
+  /** Last 4 digits only — the full number never leaves this container. */
+  accountMasked: string;
+}
+
 export interface HandlesManifest {
   handles: string[];
+  payees: PublishedPayee[];
   updatedAt: string;
+}
+
+/** "100-0-00739-4" → "…7394". Full numbers stay in the payee book. */
+function maskAccount(accountNo: string): string {
+  const digits = accountNo.replace(/\D+/g, "");
+  return `…${digits.slice(-4)}`;
 }
 
 /** Pure: manifest content from a loaded config. Sorted for stable diffs. */
 export function buildHandlesManifest(config: TransferConfig, now: Date = new Date()): HandlesManifest {
+  const handles = Object.keys(config.recipients).sort();
   return {
-    handles: Object.keys(config.recipients).sort(),
+    handles,
+    payees: handles.map((handle) => {
+      const r = config.recipients[handle];
+      return {
+        handle,
+        mode: r.mode ?? "favorite",
+        nickname: r.nickname,
+        bank: r.bank,
+        accountName: r.accountName,
+        accountMasked: maskAccount(r.accountNo),
+      };
+    }),
     updatedAt: now.toISOString(),
   };
 }
