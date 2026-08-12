@@ -23,7 +23,7 @@ import { sumReceiptAmounts } from '../money';
 import { renderVoucherHtml } from '../voucher';
 import {
   buildKbizMemo,
-  KBIZ_BANKS,
+  KBIZ_BANK_VALUES,
   resolveKbizCategoryId,
   type BundleStatus,
   type KbizBank,
@@ -45,7 +45,7 @@ function isSharedBundleStatus(value: string): value is BundleStatus {
 
 /** One of KBIZ's own destination-bank options, matched verbatim by the bot. */
 function isKbizBank(value: string): value is KbizBank {
-  return (KBIZ_BANKS as readonly string[]).includes(value);
+  return KBIZ_BANK_VALUES.includes(value);
 }
 
 /**

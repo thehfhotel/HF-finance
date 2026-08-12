@@ -14,7 +14,7 @@ import {
 } from '../lib/kbizDestination';
 import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../lib/theme';
 import type { BundleWithDetails, KbizDestination, KbizFavorite, Theme } from '../lib/types';
-import { KBIZ_BANKS } from '../lib/types';
+import { KBIZ_BANKS_TH } from '../lib/types';
 import { Card, GhostButton, PrimaryButton } from './primitives';
 
 type Mode = 'handle' | 'favorite' | 'custom';
@@ -293,7 +293,7 @@ export function KbizDestinationPicker({ theme, bundle, onClose, onConfirm, onGot
                       <option value="" disabled>
                         เลือกธนาคาร
                       </option>
-                      {KBIZ_BANKS.map((bank) => (
+                      {KBIZ_BANKS_TH.map((bank) => (
                         <option key={bank} value={bank}>
                           {bank}
                         </option>

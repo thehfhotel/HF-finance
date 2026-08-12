@@ -516,6 +516,44 @@ export const KBIZ_BANKS = [
 export type KbizBank = (typeof KBIZ_BANKS)[number];
 
 /**
+ * Thai display names, index-aligned with KBIZ_BANKS. The bot's KBIZ session
+ * runs in Thai (since 2026-08-12), so these are what its bank <select>
+ * renders; the web picker shows + sends these, and the bot's alias matcher
+ * (BANK_ALIASES in kbiz-bot/src/lib/favorites-core.ts — keep in parity)
+ * accepts either language.
+ */
+export const KBIZ_BANKS_TH = [
+  'ธนาคารกสิกรไทย',
+  'ธนาคารกรุงเทพ',
+  'ธนาคารกรุงไทย',
+  'ธนาคารทหารไทยธนชาต',
+  'ธนาคารไทยพาณิชย์',
+  'ซิตี้แบงก์',
+  'ธนาคารซูมิโตโม มิตซุย แบงกิ้ง',
+  'ธนาคารสแตนดาร์ดชาร์เตอร์ด',
+  'ธนาคารซีไอเอ็มบี ไทย',
+  'ธนาคารยูโอบี',
+  'ธนาคารกรุงศรีอยุธยา',
+  'ธนาคารออมสิน',
+  'ธนาคารเอชเอสบีซี',
+  'ธนาคารดอยซ์แบงก์',
+  'ธนาคารอาคารสงเคราะห์',
+  'ธนาคารเพื่อการเกษตรและสหกรณ์การเกษตร',
+  'ธนาคารมิซูโฮ',
+  'ธนาคารบีเอ็นพี พารีบาส์',
+  'ธนาคารแบงก์ออฟไชน่า',
+  'ธนาคารอิสลามแห่งประเทศไทย',
+  'ธนาคารทิสโก้',
+  'ธนาคารเกียรตินาคินภัทร',
+  'ธนาคารไอซีบีซี (ไทย)',
+  'ธนาคารไทยเครดิต',
+  'ธนาคารแลนด์ แอนด์ เฮ้าส์',
+] as const;
+
+/** Every value the custom-destination bank field accepts (either language). */
+export const KBIZ_BANK_VALUES: readonly string[] = [...KBIZ_BANKS, ...KBIZ_BANKS_TH];
+
+/**
  * One saved account from KBIZ's fundtranfer-other favorites, as synced by the
  * bot ('list-favorites' queue item → queue/kbiz-favorites.json). MASKED —
  * full account numbers never enter the shared tree; the bot re-verifies
