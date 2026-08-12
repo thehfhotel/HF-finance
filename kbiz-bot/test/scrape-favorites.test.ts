@@ -222,3 +222,23 @@ describe("matchFavoriteRows", () => {
     expect(matchFavoriteRows(ROWS, { nickname: "พี่วิว", bank: "Siam.Commercial", accountLast4: "5678" })).toEqual([]);
   });
 });
+
+// ── bank alias matching (the Thai-session transition) ───────────────────────
+import { aliasesForBank, bankPattern } from "../src/lib/favorites-core";
+
+describe("bank aliases", () => {
+  it("EN config matches a Thai-rendered row and vice versa", () => {
+    expect(bankPattern("Siam Commercial").test("พี่วิว ทดสอบ ธนาคารไทยพาณิชย์ 100-0-00739-4")).toBe(true);
+    expect(bankPattern("ไทยพาณิชย์").test("พี่วิว TESTONE Siam Commercial Bank 100-0-00739-4")).toBe(true);
+    expect(bankPattern("Kasikornbank").test("ร้าน 47 ธนาคารกสิกรไทย 100-0-00625-3")).toBe(true);
+  });
+  it("กรุงไทย and กรุงเทพ and กรุงศรี never cross-match", () => {
+    expect(bankPattern("Krung Thai Bank").test("ธนาคารกรุงเทพ")).toBe(false);
+    expect(bankPattern("Bangkok Bank").test("ธนาคารกรุงไทย")).toBe(false);
+    expect(bankPattern("Ayudhya").test("ธนาคารกรุงไทย")).toBe(false);
+    expect(bankPattern("Ayudhya").test("ธนาคารกรุงศรีอยุธยา")).toBe(true);
+  });
+  it("unknown bank falls back to itself", () => {
+    expect(aliasesForBank("Some Future Bank")).toEqual(["Some Future Bank"]);
+  });
+});
