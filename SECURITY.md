@@ -6,7 +6,7 @@ If you discover a security issue in this repository, please report it
 privately rather than filing a public issue.
 
 Open a private security advisory on GitHub:
-<https://github.com/thehfhotel/HF-finance/security/advisories/new>
+<https://github.com/thehfhotel/hf-finance/security/advisories/new>
 
 Or email the maintainers via a GitHub issue with the subject
 `SECURITY:` and we will follow up via private channel.

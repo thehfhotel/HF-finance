@@ -32,7 +32,7 @@ const CF_ACCESS_AUD = process.env.CF_ACCESS_AUD;
 /**
  * Shared-terminal identities, in HF One's format: `email=kiosk-id,email2=id2`.
  *
- * A kiosk is a PLACE, not a person (HF-erp CONTEXT.md: "A Kiosk is a place, not
+ * A kiosk is a PLACE, not a person (hf-erp CONTEXT.md: "A Kiosk is a place, not
  * a person — it must never be treated as an employee"). The office/reception PCs
  * clear Cloudflare Access as a shared Google account, so without this map their
  * verified email either resolves to some employee row — attributing every

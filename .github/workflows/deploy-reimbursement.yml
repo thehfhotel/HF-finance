@@ -239,7 +239,7 @@ jobs:
           HF_ID_ISSUER: ${{ secrets.HF_ID_ISSUER || 'https://id.thehfhotel.org/oidc' }}
           # Shared terminals, as `email=kiosk-id,…`. The addresses are not
           # secret — they are the same "Kiosk: <id>" Access policies checked
-          # into HF-erp's hostnames.json.
+          # into hf-erp's hostnames.json.
           #
           # The two reception PCs only. They were unusable before this (they
           # clear Cloudflare Access as shared Google accounts and then hit a

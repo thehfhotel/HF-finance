@@ -1,4 +1,4 @@
-# CR-2026-08-12: Finance monorepo — reimbursement joins thehfhotel/HF-finance
+# CR-2026-08-12: Finance monorepo — reimbursement joins thehfhotel/hf-finance
 
 Executes the queued consolidation (decision + rule recorded in ADR 0001's
 amendments and the session notes of 2026-08-12): the money-out domain —
@@ -8,7 +8,7 @@ are UNCHANGED; only the deploy source moved.
 
 ## What changed
 
-- `reimbursement/` subtree-merged into `thehfhotel/HF-finance` with full history
+- `reimbursement/` subtree-merged into `thehfhotel/hf-finance` with full history
   (`git subtree add`, 170-commit lineage preserved).
 - CI: root gains `deploy-reimbursement.yml` (path-scoped to
   `reimbursement/**`; images renamed to
@@ -26,7 +26,7 @@ are UNCHANGED; only the deploy source moved.
 
 ## Secrets (payroll repo)
 
-Reimbursement's pipeline needs, on `thehfhotel/HF-finance`:
+Reimbursement's pipeline needs, on `thehfhotel/hf-finance`:
 `REIMB_SSH_PRIVATE_KEY` (NEW keypair — the old one is unrecoverable from GH;
 public half appended to `/home/reimbursement-v2/.ssh/authorized_keys`),
 `REIMB_SSH_KNOWN_HOSTS`, plus copies of: `JWT_SECRET`, `CF_ACCESS_AUD`,
@@ -65,7 +65,7 @@ proves it).
    missed copy fails dark, not loud; confirm by triggering one real "request
    submitted" notification, don't just trust the deploy going green).
 6. Confirm in GHCR (org Packages view) that both `payroll-reimbursement-api`
-   and `payroll-reimbursement-web` show as linked to `thehfhotel/HF-finance`
+   and `payroll-reimbursement-web` show as linked to `thehfhotel/hf-finance`
    before trusting the deploy job's `docker compose pull` on the next run.
 7. Archive `thehfhotel/reimbursement-v2` (history + issues stay readable);
    local `~/reimbursement` clone becomes read-only reference — work happens
@@ -90,7 +90,7 @@ originally cover; folded in here rather than opening a second CR per
 - **Secrets doc**: `DEPLOYMENT.md`'s table renamed `SSH_PRIVATE_KEY` /
   `SSH_KNOWN_HOSTS` → `REIMB_SSH_PRIVATE_KEY` / `REIMB_SSH_KNOWN_HOSTS`,
   retargeted `--repo thehfhotel/reimbursement-v2` → `--repo
-  thehfhotel/HF-finance` (also in `scripts/sync-notify-token.sh` and
+  thehfhotel/hf-finance` (also in `scripts/sync-notify-token.sh` and
   `deploy/evergreen-setup.sh`), added the 5 secrets the table was missing
   (`READER_RESOLVE_SECRET`, `NOTIFY_INGRESS_TOKEN`, `KIOSK_EMAILS`,
   `HF_ERP_BASE_URL`, `SLACK_WEBHOOK_URL`) with fail-open/fail-dark noted per
@@ -116,7 +116,7 @@ originally cover; folded in here rather than opening a second CR per
   can never trigger a production deploy.
 - **Image LABEL**: both Dockerfiles' `org.opencontainers.image.source`
   pointed at a personal fork (`jwinut/reimbursement`); now
-  `thehfhotel/HF-finance`.
+  `thehfhotel/hf-finance`.
 - **Action pinning**: `deploy-reimbursement.yml` and `reimbursement-ci.yml`
   now pin every action to a commit sha (reusing `deploy.yml`'s already-vetted
   pins where the action matches), consistent with this repo's existing

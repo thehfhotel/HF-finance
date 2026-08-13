@@ -39,7 +39,7 @@ const APP_GRANT_KEY = 'reimbursement';
 
 /**
  * Public origin serving HF-ID's `/api/public/reader/elevate/<ticket>` confirm
- * page. This is a Cloudflare Access BYPASS app (HF-erp
+ * page. This is a Cloudflare Access BYPASS app (hf-erp
  * infra/cloudflare/gate-erp-root.ts creates `erp.thehfhotel.org/api/public*`),
  * which is exactly why the kiosk QR must point here and not at this app's own
  * hostname: the phone scanning it has no Access session and would otherwise be
