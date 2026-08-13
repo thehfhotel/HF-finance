@@ -167,7 +167,8 @@ jobs:
           push: true
           tags: |
             # Image names are LITERALS, deliberately decoupled from the repo
-            # name (repo renamed payroll → HF-finance 2026-08-12): GHCR
+            # name (repo renamed payroll → HF-finance 2026-08-12 →
+            # hf-finance 2026-08-13): GHCR
             # packages keep their names and evergreen's compose pulls these
             # exact strings. Renaming the packages would orphan sha history
             # and require a synchronized compose+prod change — don't.

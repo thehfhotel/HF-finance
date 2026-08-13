@@ -39,7 +39,7 @@ swap between seeded users without going through Cloudflare Access.
 - `.github/workflows/deploy-reimbursement.yml` (build → SSH-deploy) and
   `.github/workflows/reimbursement-ci.yml` (typecheck + PR image smoke) —
   both at the monorepo root (this app lives at `reimbursement/` inside
-  `thehfhotel/HF-finance` (né payroll) since 2026-08-12), not under this directory
+  `thehfhotel/hf-finance` (né payroll) since 2026-08-12), not under this directory
 - `DEPLOYMENT.md` — first-deploy walkthrough (DNS, Cloudflare Access, secrets)
 - `CLAUDE.md` — contributor guide for AI-assisted edits
 - `SECURITY.md` — auth model and disclosure policy

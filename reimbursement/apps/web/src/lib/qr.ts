@@ -2,7 +2,7 @@
 // dependencies. Written for the kiosk LINE-scan elevation QR: the portal must
 // render a ~120-char URL as a QR without pulling a QR library into the bundle.
 //
-// COPIED VERBATIM from the HF One portal (HF-erp `src/lib/qr.ts`). Kept as a
+// COPIED VERBATIM from the HF One portal (hf-erp `src/lib/qr.ts`). Kept as a
 // byte-for-byte copy rather than a re-implementation so the two kiosks render
 // identical symbols, and so a fix in either repo is a straight file copy. Its
 // correctness is locked by that repo's src/server/qr.test.ts; this repo has no

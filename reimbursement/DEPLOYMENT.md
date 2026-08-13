@@ -25,7 +25,7 @@ evergreen (Ubuntu)
         Cloudflare Tunnel (asgard) ──▶ reimbursement.thehfhotel.org
                               │
                     Cloudflare Access application (Google for managers,
-                    HF ID for employees) — managed in HF-erp's
+                    HF ID for employees) — managed in hf-erp's
                     infra/cloudflare hostnames.json
                               │
                        public internet
@@ -36,11 +36,11 @@ proxies `/api` + `/uploads` to the api container. There is no host-level
 nginx; cloudflared routes the public hostname directly to host port 5800.
 The port is bound to the loopback so it's reachable only via the tunnel.
 The public hostname itself sits behind a Cloudflare Access application
-(managed in HF-erp's `infra/cloudflare/hostnames.json`, not in this repo);
+(managed in hf-erp's `infra/cloudflare/hostnames.json`, not in this repo);
 the app JWT exchange re-verifies the Access assertion at the origin rather
 than trusting the edge.
 
-## Repo secrets (Settings → Secrets and variables → Actions, on `thehfhotel/HF-finance` — the monorepo repo, since the 2026-08-12 cutover)
+## Repo secrets (Settings → Secrets and variables → Actions, on `thehfhotel/hf-finance` — the monorepo repo, since the 2026-08-12 cutover)
 
 > All reimbursement-specific secrets that could collide with the payroll
 > stack's own names are prefixed `REIMB_`. Secrets below WITHOUT that prefix
@@ -86,7 +86,7 @@ ssh-keygen -t ed25519 -N '' -f ~/.ssh/reimbursement-v2-deploy \
   -C 'gh-actions deploy@reimbursement-v2'
 
 cat ~/.ssh/reimbursement-v2-deploy.pub   # → goes to evergreen (next step)
-cat ~/.ssh/reimbursement-v2-deploy       # → goes into REIMB_SSH_PRIVATE_KEY secret (on thehfhotel/HF-finance)
+cat ~/.ssh/reimbursement-v2-deploy       # → goes into REIMB_SSH_PRIVATE_KEY secret (on thehfhotel/hf-finance)
 ```
 
 ### 2. Provision the deploy user on evergreen
@@ -107,7 +107,7 @@ authorized key or recreate the app directory.
 
 ```bash
 ssh-keyscan -t ed25519 evergreen.thehfhotel.org > /tmp/evergreen-known-host
-cat /tmp/evergreen-known-host   # paste into the REIMB_SSH_KNOWN_HOSTS GitHub secret (on thehfhotel/HF-finance)
+cat /tmp/evergreen-known-host   # paste into the REIMB_SSH_KNOWN_HOSTS GitHub secret (on thehfhotel/hf-finance)
 ```
 
 ### 4. Cloudflare Access service token *(optional)*
@@ -126,8 +126,8 @@ If you later add an Access app for `evergreen.thehfhotel.org` of type SSH:
    with action `Service Auth`, including the new token.
 3. Set the two GitHub secrets:
    ```bash
-   printf '%s' '<client-id>'     | gh secret set CF_ACCESS_CLIENT_ID --repo thehfhotel/HF-finance
-   printf '%s' '<client-secret>' | gh secret set CF_ACCESS_CLIENT_SECRET --repo thehfhotel/HF-finance
+   printf '%s' '<client-id>'     | gh secret set CF_ACCESS_CLIENT_ID --repo thehfhotel/hf-finance
+   printf '%s' '<client-secret>' | gh secret set CF_ACCESS_CLIENT_SECRET --repo thehfhotel/hf-finance
    ```
 
 The deploy workflow auto-detects whether the secrets are set; if both are
@@ -172,7 +172,7 @@ in place of `:5800`. Cloudflare propagates the change in under 60 seconds.
 git push origin main
 ```
 
-Watch the run at <https://github.com/thehfhotel/HF-finance/actions> (workflow:
+Watch the run at <https://github.com/thehfhotel/hf-finance/actions> (workflow:
 "Reimbursement Build & Deploy", `.github/workflows/deploy-reimbursement.yml`
 at the monorepo root — the old `thehfhotel/reimbursement-v2` repo is archived
 history and no longer runs any pipeline).

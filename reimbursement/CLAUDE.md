@@ -3,7 +3,7 @@
 This file is read by Claude Code when working in this repository.
 
 > **Monorepo note (2026-08-12):** this app now lives at `reimbursement/`
-> inside the finance monorepo (`thehfhotel/HF-finance`) — subtree-merged with
+> inside the finance monorepo (`thehfhotel/hf-finance`) — subtree-merged with
 > full history. Deploys run from the ROOT `.github/workflows/
 > deploy-reimbursement.yml`; images are `ghcr.io/thehfhotel/
 > payroll-reimbursement-{api,web}`. The old `thehfhotel/reimbursement-v2`
@@ -135,7 +135,7 @@ bun run db:seed                # seed sample users + receipts + bundles
 
 ### Issue tracker
 
-Issues live in GitHub Issues (thehfhotel/HF-finance) via the `gh` CLI; external PRs are NOT a triage/request surface. See `docs/agents/issue-tracker.md`.
+Issues live in GitHub Issues (thehfhotel/hf-finance) via the `gh` CLI; external PRs are NOT a triage/request surface. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Copy HF-erp's notification ingress token into this repo's GitHub secrets, so
+# Copy hf-erp's notification ingress token into this repo's GitHub secrets, so
 # reimbursement can push "new request for approval" into the portal's bell.
 #
 # The value is piped straight from the portal container into `gh secret set`.
@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-REPO="${REPO:-thehfhotel/HF-finance}"
+REPO="${REPO:-thehfhotel/hf-finance}"
 SECRET_NAME="NOTIFY_INGRESS_TOKEN"
 REMOTE="${REMOTE:-evergreen}"
 CONTAINER="${CONTAINER:-hf-erp-portal}"
