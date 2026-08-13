@@ -109,3 +109,7 @@ Canonical defaults (`needs-triage`, `needs-info`, `ready-for-agent`,
 
 Multi-app repo: each app keeps its own docs (`reimbursement/docs/adr/`,
 `reimbursement/docs/change-requests/`). See `docs/agents/domain.md`.
+
+## Estate task board
+
+Cross-repo tasks live in ~/HF/hf-tasks (thehfhotel/hf-tasks). Read `tasks/INDEX.md` before cross-repo work; update task status as you work.
