@@ -261,6 +261,49 @@ export function slipFileBasename(absSlipPath: string): string {
 }
 
 /**
+ * Batch processing order = the order the human queued the requests, not
+ * UUID-lexicographic accident. Incident 2026-08-13: the approver requested
+ * A then B, the bot (sorting by id) ran B first — B's push arrived and was
+ * tapped, A's push starved, and the approver's mental model of "which
+ * transfer is this?" was inverted on top of it. createdAt is written by
+ * apps/api at intent creation and is required on every queue type; a record
+ * somehow missing it sorts last, ties fall back to id so the order is total
+ * and deterministic.
+ */
+export function requestOrderCompare(
+  a: { id: string; createdAt?: string },
+  b: { id: string; createdAt?: string },
+): number {
+  if (a.createdAt && b.createdAt && a.createdAt !== b.createdAt) {
+    return a.createdAt < b.createdAt ? -1 : 1;
+  }
+  if (!!a.createdAt !== !!b.createdAt) return a.createdAt ? -1 : 1;
+  return a.id.localeCompare(b.id);
+}
+
+/**
+ * The Slack heads-up posted BEFORE the bot starts a second (or later) money
+ * transfer in one batch, ahead of the deliberate pause. Phone-side truth from
+ * the 2026-08-12/13 incidents (Winut): the second push, armed seconds after
+ * the first tap, never surfaced on the phone at all — no banner, nothing to
+ * find. The pause plus this warning is the countermeasure: give the K BIZ
+ * app time to be backgrounded so the next push can raise a real notification.
+ */
+export function pauseBeforeArmMessage(args: {
+  dest: string;
+  amount: number;
+  gapSeconds: number;
+  position?: { position: number; total: number };
+}): string {
+  const seq = args.position ? ` ${args.position.position}/${args.position.total}` : "";
+  return (
+    `:double_vertical_bar: Pausing ${args.gapSeconds}s before transfer${seq} ` +
+    `(฿${args.amount.toFixed(2)} → ${args.dest}) — close or background the K BIZ app NOW ` +
+    `so the next approval push can raise a banner.`
+  );
+}
+
+/**
  * Position of each transfer-other item within one batch snapshot, as
  * `id → { position, total }` counting ONLY the money items (sync / payroll
  * items arm no phone push). This is what lets the tap-needed alert say

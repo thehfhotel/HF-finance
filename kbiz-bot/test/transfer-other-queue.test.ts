@@ -424,7 +424,12 @@ describe("payee handles manifest", () => {
 // ~30 s after tap #1, raised no phone banner, expired unseen → unconfirmed.
 // The fix is an arm-time alert that (a) fires when the push actually exists
 // and (b) says which transfer in the batch this tap is for.
-import { tapNeededMessage, transferOtherPositions } from "../src/lib/transfer-other-queue";
+import {
+  pauseBeforeArmMessage,
+  requestOrderCompare,
+  tapNeededMessage,
+  transferOtherPositions,
+} from "../src/lib/transfer-other-queue";
 
 describe("transferOtherPositions", () => {
   it("numbers a back-to-back pair 1/2 and 2/2", () => {
@@ -488,5 +493,51 @@ describe("tapNeededMessage", () => {
     expect(msg).toContain("`pi_x`");
     expect(msg).toContain("(transfer, ฿1.00");
     expect(msg).not.toContain("NO banner");
+  });
+});
+
+describe("requestOrderCompare", () => {
+  it("orders by createdAt, not id — the 2026-08-13 inversion", () => {
+    // Requested A first, but B's uuid sorts first: id order ran B before A.
+    const a = { id: "pi_zz-first-requested", createdAt: "2026-08-13T01:00:00.000Z" };
+    const b = { id: "pi_aa-second-requested", createdAt: "2026-08-13T01:05:00.000Z" };
+    expect([b, a].sort(requestOrderCompare).map((r) => r.id)).toEqual([
+      "pi_zz-first-requested",
+      "pi_aa-second-requested",
+    ]);
+  });
+
+  it("missing createdAt sorts last; ties fall back to id (total, deterministic)", () => {
+    const noStamp = { id: "pi_a" };
+    const early = { id: "pi_z", createdAt: "2026-08-13T01:00:00.000Z" };
+    const tie1 = { id: "pi_m", createdAt: "2026-08-13T02:00:00.000Z" };
+    const tie2 = { id: "pi_k", createdAt: "2026-08-13T02:00:00.000Z" };
+    expect([noStamp, tie1, early, tie2].sort(requestOrderCompare).map((r) => r.id)).toEqual([
+      "pi_z",
+      "pi_k",
+      "pi_m",
+      "pi_a",
+    ]);
+  });
+});
+
+describe("pauseBeforeArmMessage", () => {
+  it("says how long, which transfer, and to background the app", () => {
+    const msg = pauseBeforeArmMessage({
+      dest: 'favorite "พี่วิว" (Siam Commercial …7394)',
+      amount: 580,
+      gapSeconds: 90,
+      position: { position: 2, total: 2 },
+    });
+    expect(msg).toContain("Pausing 90s");
+    expect(msg).toContain("transfer 2/2");
+    expect(msg).toContain("฿580.00");
+    expect(msg).toContain('favorite "พี่วิว" (Siam Commercial …7394)');
+    expect(msg).toContain("background the K BIZ app");
+  });
+
+  it("survives a missing position", () => {
+    const msg = pauseBeforeArmMessage({ dest: 'handle "revew"', amount: 1, gapSeconds: 90 });
+    expect(msg).toContain("Pausing 90s before transfer (");
   });
 });

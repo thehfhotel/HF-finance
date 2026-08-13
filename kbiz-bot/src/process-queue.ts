@@ -14,6 +14,8 @@ import {
   describeDestination,
   mapFlowOutcomeToPatch,
   parseTransferOtherRequest,
+  pauseBeforeArmMessage,
+  requestOrderCompare,
   resolveQueuePayee,
   resolveSharedPath,
   slipFileBasename,
@@ -100,7 +102,8 @@ async function listApproved(): Promise<QueueRequest[]> {
       console.warn(`⚠ skipping malformed queue file ${f}: ${(e as Error).message}`);
     }
   }
-  out.sort((a, b) => a.id.localeCompare(b.id));
+  // Request order, not id order — see requestOrderCompare's incident note.
+  out.sort(requestOrderCompare);
   return out;
 }
 
@@ -219,6 +222,15 @@ async function processBatch(): Promise<number> {
   const positions = transferOtherPositions(approved);
 
   // Single Chromium session, sequential — KBIZ kills concurrent sessions.
+  // Money transfers after the first in a batch get a deliberate gap before
+  // their push is armed: phone-side truth from the 2026-08-12/13 incidents is
+  // that a push armed seconds after the previous tap never surfaces AT ALL
+  // (no banner, per Winut nothing to find), so the approver must be warned
+  // and given time to background the K BIZ app first. 90s is comfortably
+  // inside KBIZ's idle-session tolerance (the approval wait itself already
+  // idles the page for up to 6.5 min).
+  const INTER_TRANSFER_GAP_MS = 90_000;
+  let moneyItemsArmed = 0;
   await withSession(async (_ctx, page) => {
     for (const req of approved) {
       console.log(`\n=== ${req.id}  (${req.type}) ===`);
@@ -239,6 +251,18 @@ async function processBatch(): Promise<number> {
         // bank + last 4 for a custom destination — a full account number has
         // no business in Slack. See describeDestination.
         const dest = describeDestination(req);
+        if (moneyItemsArmed > 0) {
+          await notifySlack(
+            pauseBeforeArmMessage({
+              dest,
+              amount: req.amount,
+              gapSeconds: INTER_TRANSFER_GAP_MS / 1000,
+              position: positions.get(req.id),
+            }),
+          );
+          await new Promise((r) => setTimeout(r, INTER_TRANSFER_GAP_MS));
+        }
+        moneyItemsArmed += 1;
         // Fires at the exact moment Next is clicked (push armed) — the only
         // point a "tap your phone NOW" ping is truthful. Never throws.
         const onArmed = () =>
