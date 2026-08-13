@@ -35,7 +35,14 @@ import { aliasesForBank, matchFavoriteRows } from "../lib/scrape-favorites";
  */
 
 const URL = "https://kbiz.kasikornbank.com/menu/fundtranfer/fundtranfer/fundtranfer-other";
-const APPROVAL_TIMEOUT_MS = 5.5 * 60_000; // KBIZ allows 5:58 for the phone tap
+// KBIZ gives the phone tap 5:58 FROM THE MODAL, which renders after our click.
+// The bot must OUTLIVE that window: at 5.5 min it walked away from a still-live
+// push (incident 2026-08-13: gave up at 01:24:59Z with the on-page countdown
+// showing 00:25 remaining) — a tap landing in that gap is executed-but-
+// unconfirmed, the one outcome that invites a double-pay on retry. 6.5 min
+// strictly covers 5:58 + modal-render latency, so an unconfirmed timeout now
+// implies the push has expired at the bank.
+const APPROVAL_TIMEOUT_MS = 6.5 * 60_000;
 
 export interface Payee {
   mode: "favorite" | "custom";
@@ -77,6 +84,16 @@ export interface TransferOtherInput {
   maxTransfer: number;
   /** false = preview (stop BEFORE Next). true = click Next (arm the phone push). */
   confirm: boolean;
+  /**
+   * Fired the moment Next is clicked (the push is armed and the bank's ~6-min
+   * countdown is running). This is the approver's "tap your phone NOW" signal:
+   * in a back-to-back batch the K BIZ app shows no banner for a push that
+   * arrives seconds after the previous tap (incidents 2026-08-12 + 2026-08-13,
+   * both second-of-pair, both expired unseen), so an out-of-band ping is the
+   * only reliable cue. Fire-and-forget; a notification failure never touches
+   * the transfer.
+   */
+  onArmed?: () => void | Promise<void>;
 }
 
 export type TransferOutcome = "success" | "confirmed-failed" | "unconfirmed";
@@ -396,6 +413,7 @@ export async function runTransferOtherFlow(
   // CONFIRM: clicking Next sends the phone push.
   console.log("→ Click Next — KBIZ sends the approval push to your phone");
   await next.click();
+  if (input.onArmed) void Promise.resolve().then(input.onArmed).catch(() => {});
   await page.waitForTimeout(2_500);
   await page.screenshot({ path: `${SLIPS_DIR}/_waiting-${input.slug}.png`, fullPage: true }).catch(() => {});
   console.log(`   armed — waiting for your phone tap (up to ${Math.floor(APPROVAL_TIMEOUT_MS / 60000)} min)…`);

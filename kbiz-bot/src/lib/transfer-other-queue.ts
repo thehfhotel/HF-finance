@@ -260,6 +260,47 @@ export function slipFileBasename(absSlipPath: string): string {
   return basename(absSlipPath);
 }
 
+/**
+ * Position of each transfer-other item within one batch snapshot, as
+ * `id → { position, total }` counting ONLY the money items (sync / payroll
+ * items arm no phone push). This is what lets the tap-needed alert say
+ * "transfer 2 of 2": in a back-to-back batch the SECOND push arrives seconds
+ * after the first tap and the K BIZ app shows no banner for it (incidents
+ * 2026-08-12 and 2026-08-13 — both second-of-pair, both expired unseen), so
+ * the approver must be told there is another tap coming.
+ */
+export function transferOtherPositions(
+  batch: ReadonlyArray<{ id: string; type: string }>,
+): Map<string, { position: number; total: number }> {
+  const ids = batch.filter((item) => item.type === "transfer-other").map((item) => item.id);
+  const out = new Map<string, { position: number; total: number }>();
+  ids.forEach((id, i) => out.set(id, { position: i + 1, total: ids.length }));
+  return out;
+}
+
+/**
+ * The Slack line posted the moment a phone push is ARMED (Next clicked, the
+ * bank's ~6-minute countdown running). Deliberately distinct from the
+ * ":hourglass: Running…" claim message, which fires ~30–60 s before the push
+ * exists and says nothing about tapping. Destination arrives already masked
+ * (describeDestination) — never pass a full account number in.
+ */
+export function tapNeededMessage(args: {
+  id: string;
+  dest: string;
+  amount: number;
+  position?: { position: number; total: number };
+}): string {
+  const seq = args.position ? ` ${args.position.position}/${args.position.total}` : "";
+  return (
+    `:iphone: *TAP NEEDED NOW* — approve \`${args.id}\` in the K BIZ app ` +
+    `(transfer${seq}, ฿${args.amount.toFixed(2)} → ${args.dest}). The push expires in ~6 min` +
+    (args.position && args.position.total > 1
+      ? `; back-to-back pushes may show NO banner — open the app yourself.`
+      : `.`)
+  );
+}
+
 export type TransferOtherQueuePatch = {
   status: "done" | "failed" | "needs-review";
   result: NonNullable<TransferOtherQueueRequest["result"]>;

@@ -418,3 +418,75 @@ describe("payee handles manifest", () => {
     expect(HANDLES_FILE).toBe("payee-handles.json");
   });
 });
+
+// ── back-to-back tap alerts (2026-08-12/13 incidents) ───────────────────────
+// Both incidents: two transfer-other items approved together; push #2 armed
+// ~30 s after tap #1, raised no phone banner, expired unseen → unconfirmed.
+// The fix is an arm-time alert that (a) fires when the push actually exists
+// and (b) says which transfer in the batch this tap is for.
+import { tapNeededMessage, transferOtherPositions } from "../src/lib/transfer-other-queue";
+
+describe("transferOtherPositions", () => {
+  it("numbers a back-to-back pair 1/2 and 2/2", () => {
+    const positions = transferOtherPositions([
+      { id: "pi_first", type: "transfer-other" },
+      { id: "pi_second", type: "transfer-other" },
+    ]);
+    expect(positions.get("pi_first")).toEqual({ position: 1, total: 2 });
+    expect(positions.get("pi_second")).toEqual({ position: 2, total: 2 });
+  });
+
+  it("counts ONLY money items — sync and payroll arm no phone push", () => {
+    const positions = transferOtherPositions([
+      { id: "sync_1", type: "list-favorites" },
+      { id: "pi_a", type: "transfer-other" },
+      { id: "payroll_1", type: "transfer-payroll" },
+      { id: "pi_b", type: "transfer-other" },
+    ]);
+    expect(positions.get("pi_a")).toEqual({ position: 1, total: 2 });
+    expect(positions.get("pi_b")).toEqual({ position: 2, total: 2 });
+    expect(positions.has("sync_1")).toBe(false);
+    expect(positions.has("payroll_1")).toBe(false);
+  });
+
+  it("a lone transfer is 1/1", () => {
+    const positions = transferOtherPositions([{ id: "pi_only", type: "transfer-other" }]);
+    expect(positions.get("pi_only")).toEqual({ position: 1, total: 1 });
+  });
+});
+
+describe("tapNeededMessage", () => {
+  it("names the item, amount, masked destination and batch position", () => {
+    const msg = tapNeededMessage({
+      id: "pi_3d2eae1e",
+      dest: 'favorite "พี่วิว" (Siam Commercial …7394)',
+      amount: 580,
+      position: { position: 2, total: 2 },
+    });
+    expect(msg).toContain("TAP NEEDED NOW");
+    expect(msg).toContain("`pi_3d2eae1e`");
+    expect(msg).toContain("transfer 2/2");
+    expect(msg).toContain("฿580.00");
+    expect(msg).toContain('favorite "พี่วิว" (Siam Commercial …7394)');
+    // The back-to-back warning: the second push shows no banner on the phone.
+    expect(msg).toContain("NO banner");
+  });
+
+  it("a lone transfer gets no back-to-back warning", () => {
+    const msg = tapNeededMessage({
+      id: "pi_solo",
+      dest: 'handle "revew"',
+      amount: 1190,
+      position: { position: 1, total: 1 },
+    });
+    expect(msg).toContain("฿1190.00");
+    expect(msg).not.toContain("NO banner");
+  });
+
+  it("survives a missing position (manual runs)", () => {
+    const msg = tapNeededMessage({ id: "pi_x", dest: 'handle "revew"', amount: 1 });
+    expect(msg).toContain("`pi_x`");
+    expect(msg).toContain("(transfer, ฿1.00");
+    expect(msg).not.toContain("NO banner");
+  });
+});

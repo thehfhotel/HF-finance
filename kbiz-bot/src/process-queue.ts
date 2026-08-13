@@ -17,6 +17,8 @@ import {
   resolveQueuePayee,
   resolveSharedPath,
   slipFileBasename,
+  tapNeededMessage,
+  transferOtherPositions,
   type TransferOtherQueuePatch,
   type TransferOtherQueueRequest,
 } from "./lib/transfer-other-queue";
@@ -136,7 +138,11 @@ async function runListFavorites(page: Page): Promise<number> {
  * no-outcome branch). Only the flow itself, once Next is clicked, can produce
  * a genuine `unconfirmed`.
  */
-async function runTransferOtherQueueItem(page: Page, req: TransferOtherQueueRequest): Promise<TransferOtherQueuePatch> {
+async function runTransferOtherQueueItem(
+  page: Page,
+  req: TransferOtherQueueRequest,
+  onArmed?: () => void | Promise<void>,
+): Promise<TransferOtherQueuePatch> {
   let config;
   try {
     config = loadTransferConfig();
@@ -182,6 +188,7 @@ async function runTransferOtherQueueItem(page: Page, req: TransferOtherQueueRequ
     slug: req.id,
     maxTransfer: config.maxTransfer,
     confirm: true,
+    onArmed,
   });
 
   if (flow.success) {
@@ -205,6 +212,12 @@ async function processBatch(): Promise<number> {
   if (approved.length === 0) return 0;
   console.log(`\n[${new Date().toISOString()}] Processing ${approved.length} approved request(s) …`);
 
+  // Money items' 1-based position in THIS batch snapshot ("transfer 2/2").
+  // The tap-needed alert carries it because a second push armed seconds after
+  // the first tap raises no banner on the phone — the approver has to be told
+  // to go look (2026-08-12 + 2026-08-13 incidents, both second-of-pair).
+  const positions = transferOtherPositions(approved);
+
   // Single Chromium session, sequential — KBIZ kills concurrent sessions.
   await withSession(async (_ctx, page) => {
     for (const req of approved) {
@@ -226,8 +239,12 @@ async function processBatch(): Promise<number> {
         // bank + last 4 for a custom destination — a full account number has
         // no business in Slack. See describeDestination.
         const dest = describeDestination(req);
+        // Fires at the exact moment Next is clicked (push armed) — the only
+        // point a "tap your phone NOW" ping is truthful. Never throws.
+        const onArmed = () =>
+          notifySlack(tapNeededMessage({ id: req.id, dest, amount: req.amount, position: positions.get(req.id) }));
         try {
-          const patch = await runTransferOtherQueueItem(page, req);
+          const patch = await runTransferOtherQueueItem(page, req, onArmed);
           await patchRequest(req.id, { status: patch.status, result: patch.result, completedAt: new Date().toISOString() });
           const icon = patch.status === "done" ? "✅" : patch.status === "needs-review" ? "⚠️" : "❌";
           const slackIcon = patch.status === "done" ? ":white_check_mark:" : patch.status === "needs-review" ? ":warning:" : ":x:";
