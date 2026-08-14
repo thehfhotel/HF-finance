@@ -328,10 +328,13 @@ export const authCardRoutes = new Elysia().group('/auth', (group) =>
             'Content-Type': 'application/json',
             // Every /api/private/reader/* call authenticates with this header
             // (see /claim above and both elevate calls below). This one shipped
-            // without it and went unnoticed while HF ID left the private
-            // routers ungated; once they were gated (2026-08-14) the card tap
-            // 401'd HERE — before the assertion was ever fetched — which no
-            // issuer fix could cure.
+            // without it — and HF ID's /wait has required the secret since the
+            // commit that created it (fingerprint-time-logger ea129062: dark
+            // 404 when unset, 401 on mismatch) — so the card tap NEVER
+            // completed through this call. Edge gating is irrelevant here:
+            // these calls go LAN-direct to HF ID. The tap always died at this
+            // fetch, before the assertion was fetched, which is why no issuer
+            // fix could cure it.
             'X-Reader-Secret': config.readerSecret,
           },
           body: JSON.stringify({ claim_token: claimToken }),
