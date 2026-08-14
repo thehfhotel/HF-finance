@@ -118,21 +118,34 @@ details from.
 
 ## One live push at a time (arm lock)
 
-`process-queue.ts` and `transfer-other.ts --confirm` share a durable lock at
-`<KBIZ_STATE_DIR>/kbiz-arm-lock.json` (default `../data`, i.e. `/app/data` in
-the container) that guarantees at most one KBIZ approval push is outstanding
-in the estate at any moment — across `transfer-other` and `transfer-payroll`
-alike, not just "one per queue run". The lock is written conservatively
-*before* the arming click (a crash mid-fill still counts as live) and is only
-released once the flow proves the push is no longer live; a crash never
-releases it.
+`process-queue.ts`, `transfer-other.ts --confirm` and `transfer-payroll.ts`
+share a durable lock at `<KBIZ_STATE_DIR>/kbiz-arm-lock.json` (default
+`../data`, i.e. `/app/data` in the container) that guarantees at most one KBIZ
+approval push is outstanding in the estate at any moment — across
+`transfer-other`, `transfer-payroll` and `add-payroll` alike, not just "one per
+queue run". Those are **every** path that arms a push: `transfer-other` arms on
+Next, `transfer-payroll` on Confirm, and `add-payroll` on Next too (KBIZ
+answers it with the "A notification has been sent to the K BIZ application"
+review screen, and the flow then waits up to 5 min for the tap). Only
+`list-favorites` and `list-registered` are push-free and take no lock.
+
+Every one of those paths both READS the lock (refusing to arm under someone
+else's) and WRITES it — a script that only read it would leave the container's
+30 s watch loop seeing "no lock" while its own push was still tappable. The
+lock is written conservatively *before* the arming click (a crash mid-fill
+still counts as live) and is only released once the outcome proves the push is
+no longer live; a crash never releases it, and a flow that cannot prove it —
+`add-payroll` seeing neither a rejection popup nor the notification screen
+after Next — says so and keeps the hold.
 
 A batch item that would arm a second push is **deferred**, not skipped or
 forced through: its queue-file `result.error` starts with `HELD: ` (the
 reimbursement UI shows this verbatim next to the Retry button) and a
 masked-destination line goes to Slack — the item is retried on a later poll
-once the lock clears. Running `transfer-other -- --confirm` by hand under a
-live lock refuses outright and prints the lock's expiry instead of arming.
+once the lock clears. Running `transfer-other -- --confirm` or
+`transfer-payroll` by hand under a live lock refuses outright and prints the
+lock's expiry instead of arming; `transfer-other` in PREVIEW mode is
+untouched, since it never clicks Next.
 
 See `src/lib/arm-gate.ts` for the full decision table and
 `../reimbursement/docs/adr/0001-kbiz-transfer-automation.md` (Amendment 6)

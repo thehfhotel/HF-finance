@@ -312,15 +312,20 @@ export function pauseBeforeArmMessage(args: {
  * second-of-pair, both expired unseen), so the approver must be told there is
  * another tap coming.
  *
- * CORRECTION (this comment previously claimed "sync / payroll items arm no
- * phone push"): a `transfer-payroll` item DOES arm one — its Confirm click
- * sends the mobile notification and the flow then sits in
- * waitForMobileConfirmation (transfer-payroll-flow.ts). Only `list-favorites`
- * / `list-registered` / `add-payroll` are genuinely push-free. Positions still
- * count transfer-other only, because "transfer 2/2" is about the money items
- * the approver is being asked to tap for in the reimbursement flow — but the
- * ARM GATE in process-queue.ts covers transfer-payroll too, and must: a mixed
- * batch could otherwise hold two live pushes at once. See lib/arm-gate.ts.
+ * CORRECTION (this comment once claimed "sync / payroll items arm no phone
+ * push", and then, wrongly again, that `add-payroll` was push-free): BOTH
+ * payroll types arm a phone push. `transfer-payroll`'s Confirm click sends the
+ * mobile notification (transfer-payroll-flow.ts), and `add-payroll`'s Next
+ * click does the same — KBIZ answers it with the review screen that reads "A
+ * notification has been sent to the K BIZ application", and the flow then
+ * waits in waitForMobileConfirmation for up to 5 min (add-payroll-flow.ts).
+ * Only `list-favorites` and `list-registered` are genuinely push-free.
+ *
+ * Positions still count transfer-other only, because "transfer 2/2" is about
+ * the money items the approver is being asked to tap for in the reimbursement
+ * flow — but the ARM GATE in process-queue.ts covers all three arming types,
+ * and must: a mixed batch could otherwise hold two live pushes at once, and a
+ * push armed seconds after a tap raises no banner. See lib/arm-gate.ts.
  */
 export function transferOtherPositions(
   batch: ReadonlyArray<{ id: string; type: string }>,

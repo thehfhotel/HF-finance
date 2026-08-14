@@ -1,10 +1,10 @@
 import { existsSync, statSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import { withSession } from "./lib/session";
-import { runTransferOtherFlow } from "./flows/transfer-other-flow";
+import { runTransferOtherFlow, type TransferOtherResult } from "./flows/transfer-other-flow";
 import { loadTransferConfig, resolveRecipient, toPayee } from "./lib/transfer-config";
-import { parseArmLock } from "./lib/arm-gate";
-import { readArmLockRaw } from "./lib/arm-lock";
+import { armedLock, conservativeLock, parseArmLock, releasedLock, type ArmLock } from "./lib/arm-gate";
+import { readArmLockRaw, writeArmLock } from "./lib/arm-lock";
 
 /**
  * Run a single ad-hoc transfer to another person's account.
@@ -111,6 +111,15 @@ console.log("══════════════════════�
 // armed while the first is still tappable is the double-pay path (incidents
 // 2026-08-12 + 2026-08-13) — and a manual run is exactly how an impatient
 // human reaches for it. Preview is unaffected; it never clicks Next.
+//
+// READING the lock is only half of it: this CLI also has to WRITE one, or the
+// container's watch loop (30 s poll) sees `{live:false, source:"none"}` while
+// this run's push is still tappable and arms straight on top of it. Same
+// acquire/release discipline as process-queue.ts — conservative lock BEFORE
+// the flow (it covers the form-fill window a crash could land in), fail closed
+// if it cannot be written, and release only on a provably dead outcome, never
+// from a throw.
+let acquired: ArmLock | undefined;
 if (confirm) {
   const now = Date.now();
   const { text, mtimeMs } = readArmLockRaw();
@@ -124,6 +133,29 @@ if (confirm) {
         `refusing to arm a second one. Tap or let the first one expire, then re-run. ` +
         `(lock: ${lock.source})`,
     );
+  }
+  const candidate = conservativeLock(`cli-transfer-other-${key}`, Date.now());
+  try {
+    writeArmLock(candidate);
+  } catch (e) {
+    die(`Could not record the arm lock (${(e as Error).message}) — refusing to arm.`);
+  }
+  acquired = candidate;
+}
+
+/** Release the estate hold — ONLY when this outcome proves the push is dead. */
+function releaseIfProvablyDead(result: TransferOtherResult) {
+  if (!acquired || result.pushMayBeLive === true) return;
+  // Base the released record on the REAL arm time when we have one, so the
+  // audit trail says when the push actually existed.
+  const base = result.armedAt !== undefined ? armedLock(acquired.intentId, result.armedAt) : acquired;
+  const resolution = result.success ? "success" : (result.outcome ?? "never-armed");
+  try {
+    writeArmLock(releasedLock(base, resolution, Date.now()));
+  } catch (e) {
+    // Never turn a finished transfer into a crash over the release — the stale
+    // lock expires on its own (≤10.5 min), which is the safe direction.
+    console.warn(`⚠ could not release the arm lock: ${(e as Error).message}`);
   }
 }
 
@@ -139,6 +171,11 @@ await withSession(async (_ctx, page) => {
     maxTransfer: config.maxTransfer,
     confirm,
   });
+
+  // Before any exit path below — a `process.exit(1)` must not strand the hold.
+  // A THROW out of the flow deliberately skips this: it cannot prove the push
+  // is dead, so the conservative lock stands until it expires.
+  releaseIfProvablyDead(result);
 
   if (!result.success) {
     console.error(`\n❌ ${result.error}\n`);

@@ -8,7 +8,18 @@ const URL = "https://kbiz.kasikornbank.com/menu/setting/account-list/account-pay
 
 export type FlowResult =
   | { success: true; finalUrl: string }
-  | { success: false; error: string };
+  | {
+      success: false;
+      error: string;
+      /**
+       * True only when this failure CANNOT prove the phone push is dead, so
+       * the caller must keep the estate-wide arm lock standing (process-queue
+       * / the CLIs release only when this is not true). Same meaning as
+       * TransferOtherResult.pushMayBeLive. Absent ⇒ nothing was armed, or the
+       * push was provably consumed/refused ⇒ safe to release.
+       */
+      pushMayBeLive?: boolean;
+    };
 
 export async function runAddPayrollFlow(page: Page, xlsxAbs: string): Promise<FlowResult> {
   await gotoAuthenticated(page, URL);
@@ -75,7 +86,17 @@ export async function runAddPayrollFlow(page: Page, xlsxAbs: string): Promise<Fl
       reviewScreen.first().waitFor({ state: "visible", timeout: 30_000 }).then(() => "review"),
     ]);
   } catch (e) {
-    return { success: false, error: `No expected popup after Next: ${(e as Error).message}` };
+    // AMBIGUOUS, and the only ambiguous exit this flow has. On THIS page the
+    // push is armed by Next itself (the review screen KBIZ renders next is the
+    // one that says "A notification has been sent to the K BIZ application") —
+    // so 30 s with neither a rejection popup nor that screen cannot prove no
+    // notification went out. Hold the arm lock. Every branch below saw KBIZ
+    // answer, so each of those IS provable.
+    return {
+      success: false,
+      error: `No expected popup after Next: ${(e as Error).message}`,
+      pushMayBeLive: true,
+    };
   }
   console.log(`   post-Next outcome: ${outcome}`);
 

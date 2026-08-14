@@ -572,11 +572,31 @@ describe("process-queue.ts wiring", () => {
 
   it("reads the durable lock in the gate and takes a conservative one before arming", () => {
     expect(src).toContain("readArmLockRaw()");
-    // Both arming paths (transfer-other and transfer-payroll) take the
-    // conservative lock BEFORE their flow runs, and both fail closed on it.
+    // The two acquire sites — runTransferOtherQueueItem, and the shared
+    // transfer-payroll / add-payroll branch — take the conservative lock
+    // BEFORE their flow runs, and both fail closed on it.
     expect(src.match(/conservativeLock\(req\.id, Date\.now\(\)\)/g)).toHaveLength(2);
     expect(src.match(/refusing to arm\./g)).toHaveLength(2);
     expect(src).toContain("writeArmLock(armedLock(req.id, Date.now()))");
+  });
+
+  it("gates and locks EVERY push-arming type, add-payroll included", () => {
+    // add-payroll arms a real push: its Next click makes KBIZ render the
+    // "A notification has been sent to the K BIZ application" review screen
+    // and the flow then sits in waitForMobileConfirmation for 5 min. It was
+    // excluded from both the gate and the lock, which is a second live push
+    // on the one phone. Only list-favorites / list-registered are push-free.
+    const gateLine = src
+      .split("\n")
+      .find((l) => l.includes('req.type === "transfer-other"') && l.includes('req.type === "transfer-payroll"'));
+    expect(gateLine).toBeDefined();
+    expect(gateLine).toContain('req.type === "add-payroll"');
+
+    // …and the acquire branch covers the same two payroll types.
+    expect(src).toContain('if (req.type === "transfer-payroll" || req.type === "add-payroll")');
+    // Release only on a provably dead outcome, exactly as the transfer-other
+    // path does — a flow that cannot prove it says so with pushMayBeLive.
+    expect(src).toContain("if (pushLock && !pushMayBeLive)");
   });
 
   it("NEVER releases the lock in the crash handler", () => {
@@ -586,5 +606,47 @@ describe("process-queue.ts wiring", () => {
     const crashBlock = src.slice(start, src.indexOf("continue;", start));
     expect(crashBlock).not.toContain("writeArmLock");
     expect(crashBlock).toContain("NOT RELEASED");
+  });
+});
+
+describe("the manual CLIs hold the same estate-wide lock", () => {
+  // "One live push in the estate" is only true if the hand-run scripts write
+  // the lock too — reading it is not enough. A CLI that arms without writing
+  // leaves the container's 30 s watch loop seeing `{live:false}` and arming a
+  // money push on top of a push that is still tappable on the same phone.
+  const cases: Array<{ file: string; src: string }> = [
+    { file: "transfer-other.ts", src: readFileSync(at("../src/transfer-other.ts"), "utf8") },
+    { file: "transfer-payroll.ts", src: readFileSync(at("../src/transfer-payroll.ts"), "utf8") },
+  ];
+
+  for (const { file, src } of cases) {
+    it(`${file} refuses under a live lock`, () => {
+      expect(src).toContain("readArmLockRaw()");
+      expect(src).toContain("parseArmLock(text, mtimeMs, now)");
+      expect(src).toContain("refusing to arm a second one");
+    });
+
+    it(`${file} ACQUIRES the conservative lock before the session, failing closed`, () => {
+      const acquire = src.indexOf("conservativeLock(");
+      const session = src.indexOf("withSession(");
+      expect(acquire).toBeGreaterThan(-1);
+      expect(session).toBeGreaterThan(-1);
+      expect(acquire).toBeLessThan(session);
+      expect(src).toContain("refusing to arm.");
+    });
+
+    it(`${file} releases only on a provably dead outcome`, () => {
+      expect(src).toContain("releasedLock(");
+      expect(src).toContain("pushMayBeLive");
+    });
+  }
+
+  it("transfer-other.ts leaves PREVIEW mode unlocked — it never clicks Next", () => {
+    const src = cases[0].src;
+    // Both the refusal and the acquire sit inside the same `if (confirm)`.
+    const guard = src.indexOf("if (confirm) {");
+    expect(guard).toBeGreaterThan(-1);
+    expect(src.indexOf("conservativeLock(")).toBeGreaterThan(guard);
+    expect(src.indexOf("conservativeLock(")).toBeLessThan(src.indexOf("// ── run ──"));
   });
 });
