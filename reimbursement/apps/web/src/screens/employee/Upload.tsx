@@ -10,6 +10,7 @@ import { IconBtn, PrimaryButton } from '../../components/primitives';
 import { Icon } from '../../components/icons';
 import { FormRow } from '../../components/FormRow';
 import { ReceiptPhoto } from '../../components/Receipts';
+import { MerchantAutocomplete } from './_shared';
 
 interface UploadProps {
   theme: Theme;
@@ -291,7 +292,9 @@ export function Upload({ theme, nav, state, setState, editId }: UploadProps) {
 
       {/* Form */}
       <div style={{ padding: '24px 20px 0' }}>
-        <FormRow theme={theme} label="ร้านค้า" value={merchant} onChange={setMerchant} placeholder="เช่น โฮมโปร, แม็คโคร" />
+        <MerchantAutocomplete theme={theme} value={merchant} onPick={setMerchant}>
+          <FormRow theme={theme} label="ร้านค้า" value={merchant} onChange={setMerchant} placeholder="เช่น โฮมโปร, แม็คโคร" />
+        </MerchantAutocomplete>
         <FormRow
           theme={theme}
           label="ที่พัก"

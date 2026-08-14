@@ -5,6 +5,7 @@ import { prisma } from '../db';
 import { saveUploadedFile } from '../uploads';
 import { serializeReceipt } from '../serializers';
 import { getReceiptCategories } from '../settings';
+import { resolveVendorId } from '../vendors';
 
 /**
  * Multipart fields shared by POST/PATCH receipt endpoints.
@@ -179,10 +180,15 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
         return status(400, { message });
       }
 
+      // The vendor is resolved from the typed merchant on the way in, so there
+      // is exactly one path to a vendorId and the client never posts one.
+      const vendorId = await resolveVendorId(parsed.merchant);
+
       const created = await prisma.receipt.create({
         data: {
           userId: user.id,
           merchant: parsed.merchant,
+          vendorId,
           category: parsed.category,
           property: parsed.property ?? 'hf-hotel',
           quantity: parsed.quantity ?? null,
@@ -242,9 +248,17 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
         return status(400, { message });
       }
 
+      // A PATCH that omits `merchant` leaves `vendorId` untouched; one that
+      // blanks it clears the link back to null.
+      const vendorPatch =
+        parsed.merchant === undefined
+          ? {}
+          : { vendorId: await resolveVendorId(parsed.merchant) };
+
       const updated = await prisma.receipt.update({
         where: { id: params.id },
         data: {
+          ...vendorPatch,
           ...(parsed.merchant !== undefined ? { merchant: parsed.merchant } : {}),
           ...(parsed.category !== undefined ? { category: parsed.category } : {}),
           ...(parsed.property !== undefined ? { property: parsed.property } : {}),

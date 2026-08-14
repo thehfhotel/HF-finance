@@ -55,6 +55,10 @@ export const HF_GOLD = {
 } as const;
 
 export function getTheme(dark: boolean, accent: string): Theme {
+  // One definition, two consumers: a bar's track IS a hairline, so a future
+  // tweak to the rules must not silently leave every chart ground behind.
+  const hairline = dark ? 'rgba(255,255,255,0.09)' : '#E8E4DF';
+
   return {
     accent,
 
@@ -71,7 +75,7 @@ export function getTheme(dark: boolean, accent: string): Theme {
     inkSofter: dark ? 'rgba(246,242,237,0.40)' : 'rgba(122,114,104,0.72)',
 
     // border / border-strong.
-    hairline: dark ? 'rgba(255,255,255,0.09)' : '#E8E4DF',
+    hairline,
     hairlineStrong: dark ? 'rgba(255,255,255,0.16)' : '#CFC9C1',
 
     // Semantic set, verbatim from hf.css. brand-500 is too dark to read as text
@@ -90,6 +94,25 @@ export function getTheme(dark: boolean, accent: string): Theme {
     // Gold-ramp amber, one step deeper than statusPending so a "กำลังโอน" chip
     // never reads as the same wait as "รออนุมัติ" sitting next to it.
     statusPaying: dark ? HF_GOLD[600] : HF_GOLD[700],
+
+    // Data ink. brand-500 measures 1.71:1 against the dark surface, which is
+    // why a chart mark is never painted with `accent`: dark mode steps the
+    // same hue up to brand-300 instead.
+    chartInk: dark ? HF_BRAND[300] : HF_BRAND[500],
+    chartInk2: dark ? HF_BRAND[200] : HF_BRAND[400],
+    onChartInk: '#fff',
+    // brand-200 is a pale rose; white on it measures 2.05:1, so the label flips
+    // to the warm near-black instead of following `ink`, which is near-white
+    // in dark mode precisely when this fill is at its lightest.
+    onChartInk2: dark ? '#26221E' : '#fff',
+    // Ordered bands walk the brand ramp rather than fading one fill: at 0.35
+    // opacity brand-300 measures 1.59:1 on the dark surface, so the two
+    // shortest-wait segments would read as empty tile edge. Dark inverts the
+    // direction so the ramp climbs AWAY from the ground in both modes.
+    chartSeq: dark
+      ? [HF_BRAND[400], HF_BRAND[300], HF_BRAND[200], HF_BRAND[100]]
+      : [HF_BRAND[200], HF_BRAND[300], HF_BRAND[400], HF_BRAND[500]],
+    chartTrack: hairline,
   };
 }
 

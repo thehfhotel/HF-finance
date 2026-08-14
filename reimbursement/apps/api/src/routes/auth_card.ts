@@ -134,7 +134,17 @@ async function sessionFromAssertion(
   let payload: JWTPayload;
   try {
     payload = await verifyCardAssertion(assertion, issuer);
-  } catch {
+  } catch (error) {
+    // The caller only ever sees the generic 401, so this line is the sole
+    // record of WHICH check failed — jose's `code` distinguishes an issuer/
+    // audience mismatch (ERR_JWT_CLAIM_VALIDATION_FAILED + `claim`) from an
+    // expired token or an unreachable JWKS. HF ID once minted `iss: ""`
+    // fleet-wide and this being silent turned a one-minute log read into
+    // cross-repo archaeology (2026-08-14).
+    const e = error as { code?: string; claim?: string; message?: string };
+    console.error(
+      `[auth-card] assertion rejected: ${e.code ?? 'unknown'}${e.claim ? ` claim=${e.claim}` : ''} — ${e.message ?? error}`,
+    );
     return { ok: false, status: 401, message: 'Invalid card assertion' };
   }
 
