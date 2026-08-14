@@ -77,6 +77,7 @@ export function serializeReceipt(receipt: PrismaReceipt): SharedReceipt {
     tax: receipt.tax,
     photoPath: receipt.photoPath,
     bundleId: receipt.bundleId,
+    vendorId: receipt.vendorId,
     createdAt: receipt.createdAt.toISOString(),
   };
 }

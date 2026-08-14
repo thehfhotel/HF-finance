@@ -24,6 +24,22 @@ export interface Theme {
   /** The KBIZ-automation-in-flight window (`paying`) — amber, distinct from
    *  `statusPending`'s warmer amber so the two never read as the same wait. */
   statusPaying: string;
+  /** Fill for every data mark (bars, columns, segments). `accent` measures
+   *  1.71:1 on the dark surface, so a chart never uses it directly. */
+  chartInk: string;
+  /** Second step of the same hue — the one place a mark needs to sit beside
+   *  `chartInk` and still be told apart (the ปฏิเสธ segment). */
+  chartInk2: string;
+  /** Label colour ON `chartInk` / ON `chartInk2`. Paired with the fill so a
+   *  theme change can never leave a label unreadable on its own segment. */
+  onChartInk: string;
+  onChartInk2: string;
+  /** Four-step sequential ramp for ordered bands (age bands, cycle buckets),
+   *  index 0 = shortest wait. Dark mode INVERTS the ramp rather than fading it:
+   *  a low-opacity burgundy on the dark surface reads as empty tile edge. */
+  chartSeq: readonly [string, string, string, string];
+  /** The unfilled remainder of a bar — the track it sits in. */
+  chartTrack: string;
 }
 
 // Bundles in app state include their joined receipts and submitter, since the

@@ -1,9 +1,145 @@
+import { useRef, useState } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
 import type { BundleWithDetails, Receipt, Theme } from '../../lib/types';
 import { formatThaiDate } from '../../lib/format';
-import { FONT_UI } from '../../lib/theme';
+import { FONT_MONO, FONT_UI } from '../../lib/theme';
 import { Card, Money, StatusPill } from '../../components/primitives';
 import { ReceiptThumb } from '../../components/Receipts';
 import { Icon } from '../../components/icons';
+import { useVendorSuggestions } from '../../lib/useVendorSuggestions';
+
+interface MerchantAutocompleteProps {
+  theme: Theme;
+  /** The field's current text — the query, and what a pick replaces. */
+  value: string;
+  onPick: (name: string) => void;
+  children: ReactNode;
+}
+
+/**
+ * Merchant suggestions under whichever ร้านค้า field it wraps.
+ *
+ * It wraps the field rather than replacing it: the input stays exactly what it
+ * was, free text included. Picking a suggestion only fills in the spelling the
+ * team already uses — no vendor id is posted, because the server resolves the
+ * vendor from the saved string and that is the only path to one. Typing a shop
+ * nobody has used yet is expected, and creates the vendor on save.
+ */
+export function MerchantAutocomplete({ theme, value, onPick, children }: MerchantAutocompleteProps) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  /** The query Escape dismissed. Scoped to that text so the next keystroke
+   *  brings the list back — a dismissal is about this query, not the field. */
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const suggestions = useVendorSuggestions(value, open);
+  const visible = open && dismissed !== value && suggestions.length > 0;
+
+  const pick = (name: string) => {
+    onPick(name);
+    setOpen(false);
+    setActive(-1);
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      setDismissed(value);
+      setOpen(false);
+      return;
+    }
+    if (!visible) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActive((i) => (i + 1) % suggestions.length);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActive((i) => (i <= 0 ? suggestions.length - 1 : i - 1));
+    } else if (event.key === 'Enter' && active >= 0) {
+      event.preventDefault();
+      pick(suggestions[active].name);
+    }
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ position: 'relative' }}
+      onFocus={() => setOpen(true)}
+      // Typing reopens as well as focus does. Picking a suggestion and Escape
+      // both close the list while the caret stays in the field, and clicking an
+      // already-focused input fires no focus event — so without this the list
+      // could only ever open once per visit to the field.
+      onInput={() => setOpen(true)}
+      onBlur={(event) => {
+        // A click on a suggestion blurs the input first; only a focus move out
+        // of the whole field closes the list.
+        if (!containerRef.current?.contains(event.relatedTarget as Node | null)) setOpen(false);
+      }}
+      onKeyDown={onKeyDown}
+    >
+      {children}
+      {visible && (
+        <div
+          role="listbox"
+          aria-label="ร้านค้าที่เคยบันทึกไว้"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            left: 0,
+            right: 0,
+            zIndex: 30,
+            background: theme.surface,
+            border: `0.5px solid ${theme.hairlineStrong}`,
+            borderRadius: 12,
+            overflow: 'hidden',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          }}
+        >
+          {suggestions.map((vendor, index) => (
+            <button
+              key={vendor.id}
+              role="option"
+              aria-selected={index === active}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => pick(vendor.name)}
+              onMouseEnter={() => setActive(index)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                width: '100%',
+                minHeight: 44,
+                padding: '11px 14px',
+                background: index === active ? theme.surface2 : 'transparent',
+                border: 'none',
+                borderTop: index === 0 ? 'none' : `0.5px solid ${theme.hairline}`,
+                textAlign: 'left',
+                cursor: 'pointer',
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: FONT_UI,
+                  fontSize: 13.5,
+                  color: theme.ink,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {vendor.name}
+              </span>
+              <span style={{ fontFamily: FONT_MONO, fontSize: 11, color: theme.inkSofter, whiteSpace: 'nowrap' }}>
+                {vendor.receiptCount} ใบเสร็จ
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface BundleRowProps {
   bundle: BundleWithDetails;

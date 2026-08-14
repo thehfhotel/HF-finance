@@ -118,6 +118,16 @@ bun run db:seed                # seed sample users + receipts + bundles
   `KBIZ_POLL_MS`, `KBIZ_STALE_MS`, `SLACK_WEBHOOK_URL`. The bank-driving half
   lives in the payroll repo (`kbiz-bot/`); the contract is `KbizPaymentIntent`
   in `packages/shared`.
+- **ภาพรวม (approver overview) analytics**: `apps/api/src/stats/` — window
+  boundary CTEs + prev-window clamping (`windows.ts`), Thai caption/delta
+  formatting (`thai-dates.ts`), and the ~10-query assembly
+  (`overview.ts::buildOverviewStats`) behind `GET /api/bundles/stats
+  ?window=`. Frontend lives at `apps/web/src/screens/approver/overview/`. See
+  `docs/change-requests/CR-2026-08-14-overview-analytics-vendors.md`.
+- **Vendor matching**: `apps/api/src/vendors.ts` (lazy upsert on receipt
+  save) + `apps/api/src/routes/vendors.ts` (`GET /api/vendors` autocomplete).
+  Matching is owned entirely by the `vendor_normalize()` Postgres function —
+  no TypeScript code re-implements or mirrors that normalization.
 
 ## Things to avoid
 

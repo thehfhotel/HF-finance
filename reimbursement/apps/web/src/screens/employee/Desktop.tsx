@@ -14,6 +14,7 @@ import { Icon } from '../../components/icons';
 import { ReceiptPhoto, ReceiptThumb } from '../../components/Receipts';
 import { EmptyState } from '../../components/EmptyState';
 import { Toast, useToast } from '../../components/Toast';
+import { MerchantAutocomplete } from './_shared';
 
 // ── Constants for new (uploaded) receipts ────────────────────────────
 const NEW_RECEIPT_COLOR = '#F5EBD9';
@@ -1938,12 +1939,14 @@ function CreateReceiptModal({ theme, initial, saving, onClose, onSave }: CreateR
             {/* Merchant */}
             <div style={{ marginBottom: 16 }}>
               <div style={sectionLabelStyle}>ร้านค้า</div>
-              <input
-                value={merchant}
-                onChange={(e) => setMerchant(e.target.value)}
-                placeholder="เช่น โฮมโปร, แม็คโคร"
-                style={inputStyle}
-              />
+              <MerchantAutocomplete theme={theme} value={merchant} onPick={setMerchant}>
+                <input
+                  value={merchant}
+                  onChange={(e) => setMerchant(e.target.value)}
+                  placeholder="เช่น โฮมโปร, แม็คโคร"
+                  style={inputStyle}
+                />
+              </MerchantAutocomplete>
             </div>
 
             {/* Property chips */}

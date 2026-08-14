@@ -21,6 +21,7 @@ import {
 import { getKbizCategoryMapping, getKbizPayees } from '../settings';
 import { sumReceiptAmounts } from '../money';
 import { renderVoucherHtml } from '../voucher';
+import { buildOverviewStats } from '../stats/overview';
 import {
   buildKbizMemo,
   KBIZ_BANK_VALUES,
@@ -28,7 +29,20 @@ import {
   type BundleStatus,
   type KbizBank,
   type KbizDestination,
+  type OverviewPropertyKey,
+  type OverviewWindowKey,
 } from '@reimbursement/shared';
+
+const OVERVIEW_WINDOWS: readonly OverviewWindowKey[] = ['day', 'week', 'month'];
+const OVERVIEW_PROPERTIES: readonly OverviewPropertyKey[] = ['all', 'hf-hotel', 'hf-ville'];
+
+function isOverviewWindow(value: string): value is OverviewWindowKey {
+  return (OVERVIEW_WINDOWS as readonly string[]).includes(value);
+}
+
+function isOverviewProperty(value: string): value is OverviewPropertyKey {
+  return (OVERVIEW_PROPERTIES as readonly string[]).includes(value);
+}
 
 const SHARED_BUNDLE_STATUSES: readonly BundleStatus[] = [
   'draft',
@@ -164,15 +178,35 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
    * client downloaded all ~1,500 of them (twice) before it could render "1".
    * Postgres does this in one round trip over indexed columns; the response is
    * a couple of KB regardless of how big the archive grows.
+   *
+   * `?window=` is what turns this into the ภาพรวม feed. Without it the response
+   * is exactly the two cheap queries the boot path has always issued — the two
+   * `stats()` calls App.tsx fires never send one — and the analytics block
+   * costs nothing. The handler stays thin on purpose: parse, gate, delegate.
    */
   .get(
     '/stats',
-    async ({ user, query }) => {
-      const mine = query.mine === '1' || query.mine === 'true';
+    async ({ user, query, status }) => {
+      // `mine` is ignored when `window=` is sent: the ภาพรวม block is always
+      // org-wide, and a caller-scoped byStatus next to an org-wide
+      // queue.pending would put two different denominators in one payload.
+      const mine = (query.mine === '1' || query.mine === 'true') && query.window === undefined;
       const scope = mine ? { userId: user.id } : {};
 
-      const [byStatus, sums, drafts, catRows, submitterRows, propRows, monthRows] =
-        await Promise.all([
+      if (query.window !== undefined && !isOverviewWindow(query.window)) {
+        return status(400, { message: `Unknown window: ${query.window}` });
+      }
+      if (query.property !== undefined && !isOverviewProperty(query.property)) {
+        return status(400, { message: `Unknown property: ${query.property}` });
+      }
+      // The overview is approver-only: `queue.orphanReceipts.byUser` is other
+      // people's receipts, which GET /receipts already refuses to show a
+      // non-approver. Bundles themselves stay org-visible as they are today.
+      if (query.window !== undefined && user.role !== 'APPROVER') {
+        return status(403, { message: 'Forbidden' });
+      }
+
+      const [byStatus, sums, drafts, overview] = await Promise.all([
         prisma.bundle.groupBy({ by: ['status'], where: scope, _count: { _all: true } }),
         // Bundles carry no total of their own — transferAmount is only written
         // at pay time — so the money has to come from the receipts joined to
@@ -184,35 +218,15 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
           GROUP BY b."status"
         `,
         prisma.receipt.count({ where: { userId: user.id, bundleId: null } }),
-
-        // ── ภาพรวม aggregates ────────────────────────────────────────────
-        // These are the charts. Computing them in the browser is what forced
-        // the whole archive down the wire in the first place.
-        prisma.$queryRaw<Array<{ category: string; total: string }>>`
-          SELECT r."category" AS category, SUM(r."amount")::text AS total
-          FROM receipts r
-          GROUP BY r."category" ORDER BY SUM(r."amount") DESC LIMIT 6
-        `,
-        prisma.$queryRaw<Array<{ name: string; total: string }>>`
-          SELECT u."name" AS name, SUM(r."amount")::text AS total
-          FROM receipts r
-          JOIN bundles b ON r."bundleId" = b.id
-          JOIN users u ON b."userId" = u.id
-          GROUP BY u."name" ORDER BY SUM(r."amount") DESC LIMIT 5
-        `,
-        prisma.$queryRaw<Array<{ property: string; total: string }>>`
-          SELECT r."property" AS property, SUM(r."amount")::text AS total
-          FROM receipts r GROUP BY r."property"
-        `,
-        // Paid baht per calendar month for the trailing year, bucketed on
-        // paidAt — when the money actually left.
-        prisma.$queryRaw<Array<{ month: string; total: string }>>`
-          SELECT to_char(date_trunc('month', b."paidAt"), 'YYYY-MM') AS month,
-                 SUM(r."amount")::text AS total
-          FROM bundles b JOIN receipts r ON r."bundleId" = b.id
-          WHERE b."status" = 'PAID' AND b."paidAt" >= (now() - interval '12 months')
-          GROUP BY 1 ORDER BY 1
-        `,
+        query.window !== undefined && isOverviewWindow(query.window)
+          ? buildOverviewStats({
+              window: query.window,
+              property:
+                query.property !== undefined && isOverviewProperty(query.property)
+                  ? query.property
+                  : 'all',
+            })
+          : Promise.resolve(undefined),
       ]);
 
       const counts: Record<string, number> = {};
@@ -232,16 +246,16 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
         rejected: pick('rejected'),
         /** Loose receipts — always the caller's own, whatever the scope. */
         drafts,
-        byCategory: catRows.map((r) => ({ label: r.category, amount: Number(r.total) })),
-        bySubmitter: submitterRows.map((r) => ({ label: r.name, amount: Number(r.total) })),
-        byProperty: {
-          'hf-hotel': Number(propRows.find((r) => r.property === 'hf-hotel')?.total ?? 0),
-          'hf-ville': Number(propRows.find((r) => r.property === 'hf-ville')?.total ?? 0),
-        },
-        paidByMonth: monthRows.map((r) => ({ month: r.month, amount: Number(r.total) })),
+        ...(overview ? { overview } : {}),
       };
     },
-    { query: t.Object({ mine: t.Optional(t.String()) }) },
+    {
+      query: t.Object({
+        mine: t.Optional(t.String()),
+        window: t.Optional(t.String()),
+        property: t.Optional(t.String()),
+      }),
+    },
   )
 
   .post(
@@ -428,6 +442,14 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
     }
 
     await prisma.$transaction(async (tx) => {
+      // Read the total BEFORE detaching: the receipts are the only record of
+      // what this request was worth, and once they are loose nothing can
+      // reconstruct it. ความเคลื่อนไหวล่าสุด reads the figure from here.
+      const sum = await tx.receipt.aggregate({
+        where: { bundleId: params.id },
+        _sum: { amount: true },
+      });
+
       await tx.receipt.updateMany({
         where: { bundleId: params.id },
         data: { bundleId: null },
@@ -440,7 +462,11 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
         data: {
           type: 'withdraw',
           actorId: user.id,
-          metadata: { bundleId: params.id, name: bundle.name },
+          metadata: {
+            bundleId: params.id,
+            name: bundle.name,
+            amount: Number(sum._sum.amount ?? 0),
+          },
         },
       });
 

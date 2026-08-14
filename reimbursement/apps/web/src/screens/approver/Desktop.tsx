@@ -10,8 +10,10 @@ import { dataUrlToFile } from '../../lib/photoUpload';
 import { DesktopShell } from '../../components/DesktopShell';
 import { AppSidebar } from '../../components/AppSidebar';
 import type { SidebarCounts } from '../../components/AppSidebar';
-import type { BundleStats } from '../../lib/api';
+import type { BundleStats, OverviewPropertyKey } from '../../lib/api';
 import { ApproverOverview } from './Overview';
+import { useWindowPreference } from './overview/useWindowPreference';
+import type { DrillSelection } from './overview/types';
 import { Card, GhostButton, Money, PrimaryButton, StatusPill } from '../../components/primitives';
 import { Icon } from '../../components/icons';
 import { ReceiptPhoto, ReceiptThumb } from '../../components/Receipts';
@@ -53,6 +55,12 @@ interface DesktopApproverProps {
 export function DesktopApprover({ theme, state, setState, initialFilter, onNavigate, currentUser, onLogout, sidebarCounts, stats }: DesktopApproverProps): JSX.Element {
   const [filter, setFilter] = useState<FilterKey>(initialFilter ?? 'pending');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The ภาพรวม pane's view state lives here, above the pane itself, so opening
+  // a request from a drill and coming back restores the same period, the same
+  // branch and the same open panel instead of resetting the page.
+  const [overviewWindow, setOverviewWindow] = useWindowPreference();
+  const [overviewProperty, setOverviewProperty] = useState<OverviewPropertyKey>('all');
+  const [overviewDrill, setOverviewDrill] = useState<DrillSelection | null>(null);
   const [photoIdx, setPhotoIdx] = useState<number | null>(null);
   const [payOpen, setPayOpen] = useState(false);
   const [transferRefInput, setTransferRefInput] = useState('');
@@ -300,6 +308,12 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
             theme={theme}
             bundles={allBundles}
             stats={stats}
+            window={overviewWindow}
+            property={overviewProperty}
+            onWindowChange={setOverviewWindow}
+            onPropertyChange={setOverviewProperty}
+            drill={overviewDrill}
+            onDrillChange={setOverviewDrill}
             onOpenBundle={(id) => {
               // Jump into the status list the bundle actually lives in, with it
               // selected. 'paying' has no pane of its own — it lives on 'approved'.

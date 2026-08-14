@@ -52,6 +52,12 @@ export interface Receipt {
   /** URL path to the uploaded photo (e.g. "/uploads/abc.jpg"), null if no photo. */
   photoPath: string | null;
   bundleId: string | null;
+  /**
+   * Resolved Vendor, matched on the normalized `merchant` string at save time.
+   * OPTIONAL on the interface so `packages/shared` stays additive for kbiz-bot,
+   * which compiles against this file; the API always populates it.
+   */
+  vendorId?: string | null;
   createdAt: string;
 }
 
@@ -599,3 +605,482 @@ export type KbizDestination =
   | { kind: 'handle'; handle: string }
   | { kind: 'favorite'; nickname: string; bank: string; accountLast4: string; accountName?: string }
   | { kind: 'custom'; bank: string; accountNo: string; accountName?: string };
+
+// ─── Vendor ──────────────────────────────────────────────────────
+//
+// A merchant the team has actually spent money at. Matching is owned entirely
+// by the `vendor_normalize()` Postgres function (see the migration): nothing in
+// TypeScript normalizes a merchant string, because a hand-mirrored JS regex and
+// a SQL one drift (JS `\s` includes U+FEFF, Postgres `[[:space:]]` does not)
+// and a drifted key silently creates a second vendor row for one shop.
+
+export interface VendorSuggestion {
+  id: string;
+  /** Display casing, as first entered. */
+  name: string;
+  /** How many receipts already point here — the ranking signal and the
+   *  "is this the one I mean?" cue in the dropdown. */
+  receiptCount: number;
+}
+
+export interface VendorSearchResponse {
+  vendors: VendorSuggestion[];
+}
+
+// ─── ภาพรวม (approver overview) ──────────────────────────────────
+//
+// ONE request feeds every number, every chart and every drill on the page.
+// Groups carry ids only; every id referenced anywhere in this payload resolves
+// in `bundles`.
+//
+// Basis, stated once: CASH-OUT. A bundle counts in a window iff status=PAID and
+// paidAt falls inside the window, in Asia/Bangkok. There is no second
+// denominator on this screen.
+//
+// Units, once, for the whole payload:
+//   money      baht as a JS number (never satang, never a string)
+//   instants   ISO-8601 UTC strings
+//   durations  integer seconds
+//   day keys   'YYYY-MM-DD', the BANGKOK calendar day, never UTC
+//   shares     0..1 floats, not percents
+//   Thai text  server-composed, already formatted
+
+export type OverviewWindowKey = 'day' | 'week' | 'month';
+
+/** `'all'` plus the two real properties. Queue + alerts ignore this axis. */
+export type OverviewPropertyKey = 'all' | Property;
+
+/** Every id-bearing group is capped; `overflow` is how many ids were dropped. */
+export interface OverviewIdSet {
+  /** Bundle ids, ≤ `meta.idCap`, in the group's own sort order. */
+  ids: string[];
+  /** Ids beyond the cap. 0 when the group fits. Drives the
+   *  `แสดง 25 จาก 40 · เปิดในกล่องอนุมัติ →` footer. */
+  overflow: number;
+}
+
+export interface OverviewSlice extends OverviewIdSet {
+  /** Bundles in the group. Always the true count, never `ids.length`. */
+  count: number;
+  /** Baht. Always the SERVER aggregate — the panel never re-sums visible rows. */
+  total: number;
+}
+
+export interface OverviewWindowRange {
+  key: OverviewWindowKey;
+  /** ISO instant, inclusive. Bangkok midnight (or Monday/1st) expressed in UTC. */
+  start: string;
+  /** ISO instant, inclusive. `meta.now` for the current window; the clamped
+   *  like-for-like end for `prev`. */
+  end: string;
+  /** `วันนี้` | `สัปดาห์นี้` | `เดือนนี้` — the ladder tile label. */
+  label: string;
+  /** The literal range under the ladder: `ศ 14 ส.ค.` / `จ 10 – ศ 14 ส.ค.` /
+   *  `1 – 14 ส.ค.`. Computed in Asia/Bangkok, NEVER from the browser clock. */
+  caption: string;
+}
+
+export interface OverviewMeta {
+  /** Server clock at query time, ISO. The client uses this — not Date.now() —
+   *  for every "ค้าง n นาที" / "รอ n วัน" it renders. */
+  now: string;
+  tz: 'Asia/Bangkok';
+  weekStartsOn: 'monday';
+  window: OverviewWindowRange;
+  /** Like-for-like ELAPSED prior window. `1 – 14 ส.ค.` compares to `1 – 14 ก.ค.` */
+  prev: OverviewWindowRange & {
+    /** Elapsed seconds the comparison covers — identical for both ranges. */
+    elapsedSec: number;
+  };
+  /** Earliest audit_events.createdAt in the DB, ISO, or null when empty. A
+   *  window starting before this cannot honestly report a rejection rate:
+   *  ผลการตัดสิน renders `—` + `ไม่มีข้อมูลก่อน …`. */
+  auditCoverageFrom: string | null;
+  /** Below this n, a median or a rate is suppressed. 5. */
+  lowSampleThreshold: number;
+  /** Max ids shipped per group. 25. */
+  idCap: number;
+  /** True when `bundles` hit its 300-row ceiling and low-ranked groups had ids
+   *  trimmed to preserve the dictionary invariant. */
+  truncated: boolean;
+  generatedAt: string;
+}
+
+export type OverviewDeltaMode =
+  | 'pct'            // ordinary ±%; `pct` is set
+  | 'multiple-up'    // cur/prev ≥ 5
+  | 'multiple-down'  // prev/cur ≥ 5
+  | 'no-prev'        // prev window paid nothing
+  | 'no-current';    // this window has paid nothing yet
+
+export interface OverviewDelta {
+  mode: OverviewDeltaMode;
+  /** Rounded absolute percent change, or null for every non-`pct` mode. */
+  pct: number | null;
+  direction: 'up' | 'down' | 'flat';
+  /** Desktop chip, server-composed: `เทียบ 1 – 14 ก.ค. ▼ 12%` */
+  text: string;
+  /** Phone chip: `เทียบเดือนก่อน ▼ 12%` */
+  shortText: string;
+}
+
+export interface OverviewLadderEntry extends OverviewSlice {
+  key: OverviewWindowKey;
+  label: string;
+  caption: string;
+  /** The prior like-for-like window. Its own drill target. */
+  prev: OverviewSlice & { label: string; caption: string };
+  delta: OverviewDelta;
+}
+
+/** ALL THREE returned on every request regardless of `?window=`, so switching
+ *  the ladder repaints instantly and only the breakdowns below refetch. */
+export interface OverviewLadder {
+  day: OverviewLadderEntry;
+  week: OverviewLadderEntry;
+  month: OverviewLadderEntry;
+}
+
+export interface OverviewAgeBand extends OverviewSlice {
+  key: 'b1' | 'b2' | 'b3' | 'b4';
+  /** `≤1 วัน` | `2–3 วัน` | `4–6 วัน` | `7 วันขึ้นไป` */
+  label: string;
+}
+
+export interface OverviewOrphanGroup {
+  userId: string;
+  name: string;
+  initials: string;
+  count: number;
+  total: number;
+  oldestDays: number;
+  /** Receipt ids this group can actually draw. These are NOT bundles and
+   *  resolve in nothing — the panel renders them from `receipts` below,
+   *  un-navigable. Every id here HAS a row in `receipts`, so a group can never
+   *  promise a receipt the payload cannot show. */
+  receiptIds: string[];
+  /** `count − receiptIds.length` — receipts this group holds but did not ship,
+   *  so the drill can print `แสดง n จาก m` instead of expanding short. */
+  overflow: number;
+}
+
+export interface OverviewOrphanReceipt {
+  id: string;
+  userId: string;
+  merchant: string;
+  category: string;
+  amount: number;
+  /** `YYYY-MM-DD`, the receipt's own date string, verbatim. */
+  date: string;
+}
+
+export interface OverviewQueue {
+  pending: OverviewSlice & {
+    oldestDays: number;
+    ageBands: OverviewAgeBand[]; // always 4, in b1..b4 order, zeros included
+  };
+  approved: OverviewSlice;
+  paying: OverviewSlice & {
+    /** payingSince ≤ now − 10 min, paymentError IS NULL. */
+    stuck: OverviewSlice & { oldestMinutes: number };
+    /** The complement — in flight but still inside the watchdog. */
+    fast: OverviewSlice;
+  };
+  /** ใบเสร็จลอย — receipts with bundleId IS NULL, ORG-WIDE. */
+  orphanReceipts: {
+    count: number;
+    total: number;
+    oldestDays: number;
+    byUser: OverviewOrphanGroup[];
+    /** Flat, deduped, ≤ 120 rows — the drill's expandable receipt rows. */
+    receipts: OverviewOrphanReceipt[];
+  };
+}
+
+export type OverviewAlertKind =
+  | 'payment-stuck'         // PAYING, paymentError null, ≥10 min
+  | 'payment-failed'        // APPROVED with paymentError — retryable
+  | 'payment-manual-check'  // PAYING with paymentError — never auto-retried
+  | 'pending-overdue';      // the b4 age band, aggregate
+
+export interface OverviewAlert {
+  kind: OverviewAlertKind;
+  severity: 'danger' | 'warn';
+  /** `โอนค้างที่ธนาคาร` | `โอนไม่สำเร็จ ต้องลองใหม่` | `ต้องตรวจสอบด้วยตัวเอง` | `รอนาน 7 วันขึ้นไป` */
+  label: string;
+  /** Single-bundle alerts go STRAIGHT to the bundle; length 1 for the three
+   *  payment kinds, n for `pending-overdue` (which opens the b4 drill). */
+  bundleIds: string[];
+  count: number;
+  total: number;
+  /** Minutes in flight, `payment-stuck` only. */
+  minutes: number | null;
+  /** `paymentError` verbatim, for the two error kinds. */
+  note: string | null;
+}
+
+export interface OverviewPaid extends OverviewSlice {
+  receiptCount: number;
+  /** total / count, or 0. Baht. */
+  avgPerBundle: number;
+}
+
+export interface OverviewSeriesPoint extends OverviewIdSet {
+  /** `YYYY-MM-DD` (day) | `w1`..`w29` (week) | bundle id (payment). */
+  key: string;
+  /** Axis label: `12` (month) | `พฤ` (week) | bundle name (payment). */
+  label: string;
+  /** Drill-header label: `พฤ 13 ส.ค.` | `8–14 ส.ค.` | submitter name. */
+  fullLabel: string;
+  total: number;
+  count: number;
+  isToday: boolean;
+  /** Later than `meta.now` — renders as a dotted baseline tick, no column,
+   *  no hit target. */
+  isFuture: boolean;
+}
+
+export interface OverviewSeries {
+  /** `day` for week/month · `payment` for วันนี้ (one point per bundle,
+   *  sorted amount desc) · `week` for the phone's month view. */
+  granularity: 'day' | 'week' | 'payment';
+  points: OverviewSeriesPoint[];
+}
+
+export interface OverviewGroup extends OverviewIdSet {
+  /** Stable identity. Category name · `v:<vendorId>` or `m:<normalized>` ·
+   *  userId · property key. */
+  key: string;
+  /** Display label, Thai free text as entered. */
+  label: string;
+  /** Baht attributable to THIS group inside the window (slice, not bundle). */
+  amount: number;
+  /** amount / coverage.windowTotal, 0..1. */
+  share: number;
+  /** Distinct bundles touching this group. NOT ids.length. */
+  count: number;
+  /** Receipt lines behind `amount`. */
+  receiptCount: number;
+  /** Baht attributable to this group per shipped bundle id. Powers
+   *  `จาก ฿8,920 ทั้งคำขอ`. Keys ⊆ `ids`. NON-OPTIONAL. */
+  sliceById: Record<string, number>;
+  /** Avatar initials — bySubmitter only, null elsewhere. */
+  initials: string | null;
+  /** byProperty only: that property's top 5 categories, for the mini ranked
+   *  list inside its drill. Null elsewhere. */
+  topCategories: OverviewPropertyCategory[] | null;
+}
+
+/**
+ * One property+category pair — a row of the mini list inside a ตามสาขา drill,
+ * and a drill target of its own.
+ *
+ * It carries its own ids and slices rather than leaving the client to intersect
+ * `byCategory` with `byProperty`: that intersection would attribute a mixed
+ * bundle's WHOLE category spend to one branch, which is the slice dishonesty
+ * `sliceById` exists to prevent.
+ */
+export interface OverviewPropertyCategory extends OverviewIdSet {
+  key: string;
+  label: string;
+  amount: number;
+  /** Distinct bundles touching this pair. NOT `ids.length`. */
+  count: number;
+  /** Baht attributable to this pair per shipped bundle id. Keys ⊆ `ids`. */
+  sliceById: Record<string, number>;
+}
+
+export interface OverviewBreakdown {
+  /** Top 6, amount desc. The phone shows 5 and folds row[5] into its own tail. */
+  rows: OverviewGroup[];
+  /** Everything past row 6, or null when nothing is left over. */
+  tail:
+    | (OverviewIdSet & {
+        /** `อื่น ๆ อีก 4 หมวด` — noun already inflected server-side. */
+        label: string;
+        amount: number;
+        /** Number of GROUPS folded in, not bundles. */
+        count: number;
+        sliceById: Record<string, number>;
+      })
+    | null;
+  /** `ครอบคลุม ฿58,900 จาก ฿63,340 ในงวด`. `windowTotal` MUST equal
+   *  `paid.total` — this is the one-window-one-denominator proof.
+   *
+   *  `covered` is the sum of EVERY group in this dimension, tail included, and
+   *  therefore always equals `windowTotal`: each dimension partitions the same
+   *  receipt rows. It is the assertion, not a subset — a client that draws
+   *  fewer rows than the server ranked computes its own visible figure. */
+  coverage: { covered: number; windowTotal: number };
+}
+
+/**
+ * Four INDEPENDENT event counts, not a funnel.
+ *
+ * A bundle counts on its event, not on whether it still owns receipts:
+ * rejecting and withdrawing both detach them, so the first three arms report
+ * `count` honestly and let `total` fall to ฿0 when the money left with them.
+ */
+export interface OverviewFlow {
+  /** submittedAt in window. */
+  submitted: OverviewSlice;
+  /** approvedAt in window. */
+  approved: OverviewSlice;
+  /** status=PAID and paidAt in window. */
+  paid: OverviewSlice;
+  /** audit_events(type='reject').createdAt in window — NEVER approvedAt.
+   *  ORG-WIDE even under a property chip: a rejected bundle has no receipts
+   *  left to carry a property. `total` is structurally ฿0 for the same reason. */
+  rejected: OverviewSlice;
+}
+
+export interface OverviewSpeedBucket extends OverviewIdSet {
+  key: 'q1' | 'q2' | 'q3' | 'q4';
+  /** `ใน 4 ชม.` | `ใน 1 วัน` | `1–3 วัน` | `เกิน 3 วัน` */
+  label: string;
+  count: number;
+}
+
+export interface OverviewSpeedMetric extends OverviewIdSet {
+  /** Seconds. Null when `lowSample`. */
+  medianSec: number | null;
+  /** Seconds. Null when `lowSample`. */
+  p90Sec: number | null;
+  /** Qualifying bundles. NULL timestamps are EXCLUDED, never zeroed. */
+  n: number;
+  /** n < meta.lowSampleThreshold — the tile prints `ข้อมูลน้อยเกินไป`.
+   *  Server-decided; the client NEVER re-derives this. */
+  lowSample: boolean;
+  buckets: OverviewSpeedBucket[]; // always 4, q1..q4
+  /** Seconds per shipped bundle id — the drill's right-hand column. */
+  durationById: Record<string, number>;
+}
+
+export interface OverviewSpeed {
+  /** approvedAt − submittedAt, for bundles APPROVED in the window. */
+  approval: OverviewSpeedMetric;
+  /** paidAt − approvedAt, for bundles PAID in the window with approvedAt. */
+  payout: OverviewSpeedMetric;
+  /** paidAt − payingSince. KBIZ only — payingSince IS NOT NULL. */
+  bank: OverviewSpeedMetric;
+}
+
+export interface OverviewDecisions {
+  approved: OverviewSlice;
+  rejected: OverviewSlice;
+  /** approved.count + rejected.count. */
+  n: number;
+  lowSample: boolean;
+  /**
+   * rejected.count / n, 0..1. 0 when n = 0.
+   *
+   * NULL under a property chip. Rejecting detaches a bundle's receipts, and
+   * property lives on the receipt — so a rejection cannot be sliced by branch
+   * and `rejected` stays org-wide while `approved` is property-scoped. A ratio
+   * over two different populations is worse than no ratio, so the card prints
+   * `—` instead.
+   */
+  rate: number | null;
+  /** False when window.start predates meta.auditCoverageFrom → render `—`. */
+  auditCovered: boolean;
+  /** rejectReason VERBATIM, count desc, ≤ 5. Never bucketed, never charted. */
+  reasons: Array<OverviewIdSet & { text: string; count: number }>;
+}
+
+/** Window-immune, property-RESPONSIVE. */
+export interface OverviewOwed extends OverviewIdSet {
+  userId: string;
+  name: string;
+  initials: string;
+  /** Baht owed: their APPROVED bundles only. PAYING money belongs to the
+   *  กำลังโอน tile and is never counted twice. */
+  total: number;
+  /** Whole days since the OLDEST approvedAt in this person's set. */
+  oldestDays: number;
+}
+
+export type OverviewActivityEvent =
+  | 'submit'
+  | 'approve'
+  | 'reject'
+  | 'pay'
+  | 'pay-via-kbiz'
+  | 'withdraw'
+  | 'payment-failed';
+
+export interface OverviewActivityRow {
+  /** Null for `withdraw`: the bundle row is deleted and only the AuditEvent
+   *  survives. The row renders un-navigable, name in inkSofter, no chevron. */
+  bundleId: string | null;
+  event: OverviewActivityEvent;
+  at: string;
+  /** `จ่ายแล้ว · 14 ส.ค. 11:05` — server-composed so the two platforms and
+   *  the drill can never word the same event differently. */
+  label: string;
+  actorName: string;
+  actorInitials: string;
+  /** Baht. For a withdraw this comes from the AuditEvent metadata. */
+  amount: number;
+  /** Withdraw rows carry the deleted bundle's name here. */
+  name: string;
+}
+
+/**
+ * INVARIANT: every bundle id appearing ANYWHERE in this payload — ladder,
+ * queue, alerts, series, breakdowns, flow, speed, decisions, owed, activity —
+ * has an entry here. Groups hold ids only, never nested objects.
+ */
+export interface OverviewBundleRef {
+  id: string;
+  name: string;
+  submitterName: string;
+  submitterInitials: string;
+  /** Baht — the WHOLE bundle, unfiltered by property. A group's slice lives in
+   *  that group's `sliceById`; the difference is what
+   *  `จาก ฿8,920 ทั้งคำขอ` prints. */
+  amount: number;
+  status: BundleStatus;
+  /** `'mixed'` when its receipts span both properties. */
+  property: Property | 'mixed';
+  receiptCount: number;
+  submittedAt: string;
+  approvedAt: string | null;
+  /** Nullable, not optional — a strict shape beats an absent key. */
+  paidAt: string | null;
+  payingSince: string | null;
+  /** audit_events(type='reject').createdAt. */
+  rejectedAt: string | null;
+  transferRef: string | null;
+  rejectReason: string | null;
+  paymentError: string | null;
+  /** Whole days since submittedAt, floored, ≥ 0 — the age chip. */
+  ageDays: number;
+}
+
+export interface OverviewStats {
+  meta: OverviewMeta;
+  ladder: OverviewLadder;
+  queue: OverviewQueue;
+  alerts: OverviewAlert[];
+  paid: OverviewPaid;
+  series: OverviewSeries;
+  /** Present ONLY when window=month: the phone's 5 weekly buckets
+   *  (`1–7 / 8–14 / 15–21 / 22–28 / 29–31`). The server cannot know the
+   *  platform, so it ships both and the client picks. */
+  seriesWeekly?: OverviewSeries;
+  byCategory: OverviewBreakdown;
+  /** ตามร้านค้า — grouped by Vendor; unlinked receipts fall back to their raw
+   *  merchant string. */
+  byVendor: OverviewBreakdown;
+  bySubmitter: OverviewBreakdown;
+  /** Exactly two rows, always both, zeros included. */
+  byProperty: OverviewBreakdown;
+  flow: OverviewFlow;
+  speed: OverviewSpeed;
+  decisions: OverviewDecisions;
+  /** oldestDays desc — the ranking encodes the obligation, not the size. */
+  owed: OverviewOwed[];
+  /** Newest first, ≤ 24. */
+  activity: OverviewActivityRow[];
+  bundles: Record<string, OverviewBundleRef>;
+}

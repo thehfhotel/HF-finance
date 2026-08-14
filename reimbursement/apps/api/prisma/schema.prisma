@@ -71,11 +71,46 @@ model Receipt {
   photoPath  String?
   bundleId   String?
   bundle     Bundle?  @relation(fields: [bundleId], references: [id], onDelete: SetNull)
+  /// Resolved from `merchant` on every save. Nullable: receipts whose merchant
+  /// is blank keep merchant-only grouping, and the ตามร้านค้า card falls back to
+  /// the raw string for them. `merchant` is never dropped — it stays the
+  /// receipt's own record of what was typed; this is a derived pointer.
+  vendorId   String?
+  vendor     Vendor?  @relation(fields: [vendorId], references: [id], onDelete: SetNull)
   createdAt  DateTime @default(now())
 
   @@index([userId])
   @@index([bundleId])
+  @@index([vendorId])
+  @@index([bundleId, vendorId])
+  @@index([bundleId, category])
+  @@index([bundleId, property])
+  @@index([bundleId, userId])
   @@map("receipts")
+}
+
+/// A merchant the team has actually spent money at.
+///
+/// Matched on `normalizedName` (case-, space- and whitespace-folded) so
+/// "แม็คโคร กระบี่", "แม็คโคร  กระบี่ " and "แม็คโคร กระบี่" are one vendor,
+/// while `name` keeps whatever casing the first receipt was typed with — the
+/// display string is the employee's, the match key is the machine's.
+///
+/// Created lazily on receipt save; there is no vendor admin/merge UI in v1.
+/// `id` is DB-generated rather than Prisma's cuid so the lazy upsert can be a
+/// single INSERT … ON CONFLICT statement that never has to normalize a name in
+/// TypeScript.
+model Vendor {
+  id             String   @id @default(dbgenerated("gen_random_uuid()::text"))
+  name           String
+  /// Output of vendor_normalize() — the ONLY matching key. Unique, so the
+  /// database itself refuses to hold two rows for the same merchant.
+  normalizedName String   @unique
+  createdAt      DateTime @default(now())
+
+  receipts Receipt[]
+
+  @@map("vendors")
 }
 
 model Bundle {
@@ -116,7 +151,17 @@ model Bundle {
   auditEvents  AuditEvent[]
 
   @@index([userId])
+  /// Redundant as a prefix of [status, paidAt], but kept: dropping an index is
+  /// an unrelated risk with no measurable win at this table size.
   @@index([status])
+  @@index([status, paidAt])
+  @@index([status, submittedAt])
+  /// The flow query's intake arm is a bare `submittedAt BETWEEN` with no status
+  /// beside it, so [status, submittedAt] cannot serve it — its leading column
+  /// is absent from the predicate. Without this the planner falls back to a seq
+  /// scan of bundles on every overview request.
+  @@index([submittedAt])
+  @@index([approvedAt])
   @@map("bundles")
 }
 
@@ -145,5 +190,6 @@ model AuditEvent {
   @@index([bundleId])
   @@index([actorId])
   @@index([createdAt])
+  @@index([type, createdAt])
   @@map("audit_events")
 }

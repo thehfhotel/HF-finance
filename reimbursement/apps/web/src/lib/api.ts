@@ -9,10 +9,54 @@ import type {
   KbizDestination,
   KbizFavorite,
   KbizPayeeHandles,
+  OverviewPropertyKey,
+  OverviewStats,
+  OverviewWindowKey,
   Receipt,
   ReceiptItem,
   UpdateUserRequest,
   User,
+  VendorSearchResponse,
+} from '@reimbursement/shared';
+
+/**
+ * The ภาพรวม payload shapes, re-exported so every screen under
+ * `screens/approver/overview/` has one import site for them and none of them
+ * reaches into `@reimbursement/shared` directly.
+ */
+export type {
+  OverviewActivityEvent,
+  OverviewActivityRow,
+  OverviewAgeBand,
+  OverviewAlert,
+  OverviewAlertKind,
+  OverviewBreakdown,
+  OverviewBundleRef,
+  OverviewDecisions,
+  OverviewDelta,
+  OverviewFlow,
+  OverviewGroup,
+  OverviewIdSet,
+  OverviewLadder,
+  OverviewLadderEntry,
+  OverviewMeta,
+  OverviewOrphanGroup,
+  OverviewOrphanReceipt,
+  OverviewOwed,
+  OverviewPaid,
+  OverviewPropertyKey,
+  OverviewQueue,
+  OverviewSeries,
+  OverviewSeriesPoint,
+  OverviewSlice,
+  OverviewSpeed,
+  OverviewSpeedBucket,
+  OverviewSpeedMetric,
+  OverviewStats,
+  OverviewWindowKey,
+  OverviewWindowRange,
+  VendorSearchResponse,
+  VendorSuggestion,
 } from '@reimbursement/shared';
 
 // ─── Auth token storage ──────────────────────────────────────────
@@ -312,10 +356,12 @@ export interface BundleStats {
   paid: StatSlice;
   rejected: StatSlice;
   drafts: number;
-  byCategory: NamedAmount[];
-  bySubmitter: NamedAmount[];
-  byProperty: Record<'hf-hotel' | 'hf-ville', number>;
-  paidByMonth: Array<{ month: string; amount: number }>;
+  /**
+   * The ภาพรวม payload. Present ONLY when the request carried `?window=` AND
+   * the caller is an APPROVER. Absent on the two boot calls App.tsx makes, so
+   * those stay the cheap two-query response they are today.
+   */
+  overview?: OverviewStats;
 }
 
 /**
@@ -410,9 +456,25 @@ export const api = {
         method: 'POST',
       }),
     /** Counts, totals and the ภาพรวม aggregates — computed in Postgres so the
-     *  client never downloads the archive just to render a number or a chart. */
-    stats: (opts?: { mine?: boolean }): Promise<BundleStats> =>
-      request<BundleStats>(`/api/bundles/stats${opts?.mine ? '?mine=1' : ''}`),
+     *  client never downloads the archive just to render a number or a chart.
+     *  `window` is what asks for the `overview` block; without it this stays
+     *  the two-query response the app boots on. `mine` is ignored by the
+     *  server whenever `window` is sent. */
+    stats: (opts?: {
+      mine?: boolean;
+      window?: OverviewWindowKey;
+      property?: OverviewPropertyKey;
+    }): Promise<BundleStats> => {
+      const params = new URLSearchParams();
+      if (opts?.window) {
+        params.set('window', opts.window);
+        if (opts.property) params.set('property', opts.property);
+      } else if (opts?.mine) {
+        params.set('mine', '1');
+      }
+      const qs = params.toString();
+      return request<BundleStats>(qs ? `/api/bundles/stats?${qs}` : '/api/bundles/stats');
+    },
     /** Pull a still-pending request back for more edits. The receipts return to
      *  the draft pool and the bundle is removed, so there is nothing to return
      *  but an ack — the caller drops it from local state. */
@@ -457,6 +519,19 @@ export const api = {
         body: JSON.stringify({ force: opts.force === true }),
         headers: { 'Content-Type': 'application/json' },
       }),
+  },
+
+  vendors: {
+    /** Merchant suggestions for the receipt form. Auth-required but not
+     *  role-gated: the whole team types merchant names. An empty `q` returns
+     *  the most-used vendors, which is the cold-start list. */
+    search: (q: string, limit?: number): Promise<VendorSearchResponse> => {
+      const params = new URLSearchParams();
+      if (q) params.set('q', q);
+      if (limit !== undefined) params.set('limit', String(limit));
+      const qs = params.toString();
+      return request<VendorSearchResponse>(qs ? `/api/vendors?${qs}` : '/api/vendors');
+    },
   },
 
   admin: {
