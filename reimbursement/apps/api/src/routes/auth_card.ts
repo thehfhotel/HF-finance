@@ -324,7 +324,16 @@ export const authCardRoutes = new Elysia().group('/auth', (group) =>
       try {
         waitRes = await fetch(`${config.baseUrl}/api/private/reader/wait`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            // Every /api/private/reader/* call authenticates with this header
+            // (see /claim above and both elevate calls below). This one shipped
+            // without it and went unnoticed while HF ID left the private
+            // routers ungated; once they were gated (2026-08-14) the card tap
+            // 401'd HERE — before the assertion was ever fetched — which no
+            // issuer fix could cure.
+            'X-Reader-Secret': config.readerSecret,
+          },
           body: JSON.stringify({ claim_token: claimToken }),
         });
       } catch {
