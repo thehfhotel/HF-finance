@@ -337,3 +337,33 @@ it.
 
 Implementation of the reimbursement side:
 [CR-2026-08-12](../change-requests/CR-2026-08-12-kbiz-payment-automation.md).
+
+**6 — One live approval push in the estate, ever.** Two incidents
+(2026-08-12, 2026-08-13) showed the phone-tap gate (Amendment 2) is not
+enough by itself: KBIZ's approval push lives SERVER-SIDE at the bank, not in
+the bot's browser session, so any early exit of the post-Next wait loop —
+session death, KBIZ's generic error page, an outright crash — leaves that
+push tappable for minutes while a naive batch loop happily arms the next one
+on top of it. Live-verified consequence: two outstanding pushes, one phone,
+no banner distinguishing them (a push armed seconds after the previous tap
+never surfaces at all), and an operator-visible "Retry" button pointed
+straight at the same money.
+
+`kbiz-bot/src/lib/arm-gate.ts` (pure decision) and `arm-lock.ts` (durable fs
+state) close this. A conservative lock is written to
+`<KBIZ_STATE_DIR>/kbiz-arm-lock.json` (default `../data`, `/app/data` in the
+container) **before** the arming click — covering the form-fill window a
+crash could land in — and is refined once the click actually fires. It is
+released only when the flow can prove the push is no longer live; a crash is
+never treated as proof, so a crashed run holds the lock until its
+conservative window (~10.5 min) elapses. The invariant covers `transfer-other`
+AND `transfer-payroll` alike: `process-queue.ts` **defers** (never skips or
+forces through) any batch item that would arm a second push — its queue-file
+`result.error` is prefixed `HELD: ` and a masked-destination line goes to
+Slack, and the item is retried on a later poll once the lock clears — and a
+human running `transfer-other -- --confirm` under a live lock is refused
+outright with the lock's expiry printed. A batch also stops arming
+back-to-back on an unconfirmed or bank-confirmed-failed predecessor even once
+the lock itself is clear: only a confirmed *success* keeps the gap-then-arm
+path open, because the inter-transfer gap only means anything once the
+previous push actually resolved.
