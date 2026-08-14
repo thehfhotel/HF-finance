@@ -305,12 +305,22 @@ export function pauseBeforeArmMessage(args: {
 
 /**
  * Position of each transfer-other item within one batch snapshot, as
- * `id → { position, total }` counting ONLY the money items (sync / payroll
- * items arm no phone push). This is what lets the tap-needed alert say
- * "transfer 2 of 2": in a back-to-back batch the SECOND push arrives seconds
- * after the first tap and the K BIZ app shows no banner for it (incidents
- * 2026-08-12 and 2026-08-13 — both second-of-pair, both expired unseen), so
- * the approver must be told there is another tap coming.
+ * `id → { position, total }` counting ONLY the `transfer-other` items. This is
+ * what lets the tap-needed alert say "transfer 2 of 2": in a back-to-back
+ * batch the SECOND push arrives seconds after the first tap and the K BIZ app
+ * shows no banner for it (incidents 2026-08-12 and 2026-08-13 — both
+ * second-of-pair, both expired unseen), so the approver must be told there is
+ * another tap coming.
+ *
+ * CORRECTION (this comment previously claimed "sync / payroll items arm no
+ * phone push"): a `transfer-payroll` item DOES arm one — its Confirm click
+ * sends the mobile notification and the flow then sits in
+ * waitForMobileConfirmation (transfer-payroll-flow.ts). Only `list-favorites`
+ * / `list-registered` / `add-payroll` are genuinely push-free. Positions still
+ * count transfer-other only, because "transfer 2/2" is about the money items
+ * the approver is being asked to tap for in the reimbursement flow — but the
+ * ARM GATE in process-queue.ts covers transfer-payroll too, and must: a mixed
+ * batch could otherwise hold two live pushes at once. See lib/arm-gate.ts.
  */
 export function transferOtherPositions(
   batch: ReadonlyArray<{ id: string; type: string }>,

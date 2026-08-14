@@ -3,6 +3,8 @@ import { extname, resolve } from "node:path";
 import { withSession } from "./lib/session";
 import { runTransferOtherFlow } from "./flows/transfer-other-flow";
 import { loadTransferConfig, resolveRecipient, toPayee } from "./lib/transfer-config";
+import { parseArmLock } from "./lib/arm-gate";
+import { readArmLockRaw } from "./lib/arm-lock";
 
 /**
  * Run a single ad-hoc transfer to another person's account.
@@ -102,6 +104,28 @@ console.log(`  memo      : ${memo || "—"}`);
 console.log(`  attach    : ${attachmentPath ?? "—"}`);
 console.log(`  mode      : ${confirm ? "⚠ CONFIRM — Next arms the phone push" : "PREVIEW — stops before Next"}`);
 console.log("════════════════════════════════════\n");
+
+// ── arm lock ──────────────────────────────────────────────────────────────
+// One live approval push in the ESTATE, not one per process: the queue bot and
+// this CLI share the same phone and the same bank-side push. A second push
+// armed while the first is still tappable is the double-pay path (incidents
+// 2026-08-12 + 2026-08-13) — and a manual run is exactly how an impatient
+// human reaches for it. Preview is unaffected; it never clicks Next.
+if (confirm) {
+  const now = Date.now();
+  const { text, mtimeMs } = readArmLockRaw();
+  const lock = parseArmLock(text, mtimeMs, now);
+  if (lock.live) {
+    const armed = lock.armedAt !== undefined ? new Date(lock.armedAt).toISOString() : "an unknown time";
+    const until = new Date(lock.until).toISOString();
+    const left = Math.ceil((lock.until - now) / 1000);
+    die(
+      `An approval push armed at ${armed} may still be live until ${until} (~${left}s) — ` +
+        `refusing to arm a second one. Tap or let the first one expire, then re-run. ` +
+        `(lock: ${lock.source})`,
+    );
+  }
+}
 
 // ── run ───────────────────────────────────────────────────────────────────
 await withSession(async (_ctx, page) => {

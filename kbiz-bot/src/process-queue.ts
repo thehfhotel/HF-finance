@@ -10,6 +10,20 @@ import { FAVORITES_FILE, scrapeFavorites } from "./lib/scrape-favorites";
 import { loadTransferConfig } from "./lib/transfer-config";
 import { HANDLES_FILE, publishPayeeHandles } from "./lib/payee-handles";
 import { htmlToPdf } from "./lib/html-to-pdf";
+import { PUSH_LIFETIME_MS, type TransferOutcome } from "./lib/approval-wait";
+import {
+  armedLock,
+  conservativeLock,
+  decideArm,
+  deferredErrorText,
+  deferredMessage,
+  livePushWarning,
+  parseArmLock,
+  releasedLock,
+  type ArmLock,
+  type PrevMoneyItem,
+} from "./lib/arm-gate";
+import { readArmLockRaw, writeArmLock } from "./lib/arm-lock";
 import {
   describeDestination,
   mapFlowOutcomeToPatch,
@@ -141,11 +155,20 @@ async function runListFavorites(page: Page): Promise<number> {
  * no-outcome branch). Only the flow itself, once Next is clicked, can produce
  * a genuine `unconfirmed`.
  */
+/**
+ * The queue patch PLUS the two facts only the flow knows and the patch cannot
+ * express: whether a push was ever armed (DEFECT C — a mis-typed handle and a
+ * bank-confirmed rejection file identically), and whether it might still be
+ * live. The batch gate and the operator warning both read these; neither is
+ * part of the cross-repo queue-file contract, so neither is written to disk.
+ */
+type QueueItemOutcome = TransferOtherQueuePatch & { armedAt?: number; pushMayBeLive?: boolean };
+
 async function runTransferOtherQueueItem(
   page: Page,
   req: TransferOtherQueueRequest,
   onArmed?: () => void | Promise<void>,
-): Promise<TransferOtherQueuePatch> {
+): Promise<QueueItemOutcome> {
   let config;
   try {
     config = loadTransferConfig();
@@ -182,6 +205,23 @@ async function runTransferOtherQueueItem(
     }
   }
 
+  // ARM LOCK, acquired immediately before the flow — the last point at which
+  // "nothing has been submitted" is still provable. Everything above this line
+  // fails closed on its own; from here on a crash cannot prove the push was
+  // never armed, so the estate-wide hold has to already be on disk.
+  //
+  // FAIL CLOSED: if the lock cannot be written, we do not arm. A disk that
+  // can't record the hold can't be trusted to prevent a double pay.
+  const acquired = conservativeLock(req.id, Date.now());
+  try {
+    writeArmLock(acquired);
+  } catch (e) {
+    return mapFlowOutcomeToPatch({
+      success: false,
+      error: `Could not record the arm lock (${(e as Error).message}) — refusing to arm.`,
+    });
+  }
+
   const flow = await runTransferOtherFlow(page, {
     payee,
     amount: req.amount,
@@ -194,20 +234,52 @@ async function runTransferOtherQueueItem(
     onArmed,
   });
 
-  if (flow.success) {
-    return mapFlowOutcomeToPatch({
-      success: true,
-      reference: flow.reference,
-      finalUrl: flow.finalUrl,
-      slipFile: flow.slip ? slipFileBasename(flow.slip.screenshotPath) : undefined,
-    });
+  // RELEASE, only when the push is PROVABLY dead: consumed (success /
+  // confirmed-failed) or the bank's window provably elapsed (timeout), or
+  // never armed at all. `pushMayBeLive` is true for exactly the two early
+  // exits — session death and KBIZ's generic error page — that leave a push
+  // tappable, and absent when Next was never clicked.
+  //
+  // Note this is the flow's NORMAL return. A throw skips it deliberately (see
+  // the catch in processBatch): the conservative lock stands until it expires.
+  if (flow.pushMayBeLive !== true) {
+    const resolution = flow.success ? "success" : (flow.outcome ?? "never-armed");
+    // Base the released record on the REAL arm time when we have one, so the
+    // audit trail says when the push actually existed rather than when we
+    // guessed it might.
+    const base = flow.armedAt !== undefined ? armedLock(req.id, flow.armedAt) : acquired;
+    try {
+      writeArmLock(releasedLock(base, resolution, Date.now()));
+    } catch (e) {
+      // Never let a release failure turn a finished transfer into a crash —
+      // the stale lock simply expires on its own (≤10.5 min), which is the
+      // safe direction.
+      console.warn(`⚠ could not release the arm lock for ${req.id}: ${(e as Error).message}`);
+    }
   }
-  return mapFlowOutcomeToPatch({
-    success: false,
-    outcome: flow.outcome === "unconfirmed" ? "unconfirmed" : "confirmed-failed",
-    error: flow.error,
-    slipFile: flow.shot ? slipFileBasename(flow.shot) : undefined,
-  });
+
+  if (flow.success) {
+    return {
+      ...mapFlowOutcomeToPatch({
+        success: true,
+        reference: flow.reference,
+        finalUrl: flow.finalUrl,
+        slipFile: flow.slip ? slipFileBasename(flow.slip.screenshotPath) : undefined,
+      }),
+      armedAt: flow.armedAt,
+      pushMayBeLive: flow.pushMayBeLive,
+    };
+  }
+  return {
+    ...mapFlowOutcomeToPatch({
+      success: false,
+      outcome: flow.outcome === "unconfirmed" ? "unconfirmed" : "confirmed-failed",
+      error: flow.error,
+      slipFile: flow.shot ? slipFileBasename(flow.shot) : undefined,
+    }),
+    armedAt: flow.armedAt,
+    pushMayBeLive: flow.pushMayBeLive,
+  };
 }
 
 async function processBatch(): Promise<number> {
@@ -230,10 +302,58 @@ async function processBatch(): Promise<number> {
   // inside KBIZ's idle-session tolerance (the approval wait itself already
   // idles the page for up to 6.5 min).
   const INTER_TRANSFER_GAP_MS = 90_000;
-  let moneyItemsArmed = 0;
+  // The previous MONEY item of this batch, as the gate sees it. Reset per
+  // batch on purpose: cross-batch protection is the DURABLE arm lock's job
+  // (an operator's Retry lands in a fresh batch 30 s later, with `prev` back
+  // to "none" — only the on-disk lock can hold that one).
+  let prev: PrevMoneyItem = { kind: "none" };
   await withSession(async (_ctx, page) => {
     for (const req of approved) {
       console.log(`\n=== ${req.id}  (${req.type}) ===`);
+
+      // ── THE GATE ────────────────────────────────────────────────────────
+      // Evaluated BEFORE the `running` claim below, so a held item is never
+      // touched: no ":hourglass: Running", no page, no form, no Next. Both
+      // money-arming types go through it — transfer-payroll DOES arm a phone
+      // push (its Confirm click → waitForMobileConfirmation), the long-
+      // standing "payroll items arm no phone push" comment was simply wrong.
+      let gapMs = 0;
+      if (req.type === "transfer-other" || req.type === "transfer-payroll") {
+        const now = Date.now();
+        const { text, mtimeMs } = readArmLockRaw();
+        const lock = parseArmLock(text, mtimeMs, now);
+        if (lock.live === false && lock.source === "corrupt-unknown") {
+          // Bounded by nothing (no content, no mtime) so we do NOT hold — but
+          // this is the one lock state a human should look at.
+          await notifySlack(
+            `:rotating_light: The KBIZ arm lock is unreadable AND has no mtime — proceeding WITHOUT the one-push-at-a-time guard for \`${req.id}\`. Check /app/data/kbiz-arm-lock.json.`,
+          );
+        }
+        const decision = decideArm({ prev, lock, now, gapMs: INTER_TRANSFER_GAP_MS });
+        if (decision.kind === "defer") {
+          // Terminal status on purpose: a bare `break`/skip would leave the
+          // item `approved` and the 30 s watch loop would re-pick it forever.
+          // `failed` is exactly "nothing moved, retryable by a human" —
+          // reimbursement returns the bundle to APPROVED with paymentError set
+          // and never auto-re-queues it (kbiz-poller.ts).
+          const dest = req.type === "transfer-other" ? describeDestination(req) : req.type;
+          const amount = req.type === "transfer-other" ? req.amount : undefined;
+          const patch = mapFlowOutcomeToPatch({ success: false, error: deferredErrorText(decision, Date.now()) });
+          try {
+            await patchRequest(req.id, { status: patch.status, result: patch.result, completedAt: new Date().toISOString() });
+          } catch (e) {
+            console.log(`↷ ${req.id} deferred but its queue file is gone: ${(e as Error).message}`);
+          }
+          await notifySlack(
+            deferredMessage({ id: req.id, dest, amount, position: positions.get(req.id), decision, now: Date.now() }),
+          );
+          console.log(`⛔ ${req.id} HELD (${decision.code}) — nothing submitted`);
+          // `prev` is deliberately NOT updated: a deferred item armed nothing.
+          continue;
+        }
+        gapMs = decision.gapMs; // 0, or INTER_TRANSFER_GAP_MS after a confirmed success
+      }
+
       // The claim. listApproved() snapshots the queue up front and each
       // preceding transfer can wait minutes for a phone tap, so by the time we
       // get here the file may have been WITHDRAWN (reimbursement's stale-sweep
@@ -251,37 +371,71 @@ async function processBatch(): Promise<number> {
         // bank + last 4 for a custom destination — a full account number has
         // no business in Slack. See describeDestination.
         const dest = describeDestination(req);
-        if (moneyItemsArmed > 0) {
+        // The gap is now spent only after an ACTUALLY ARMED previous push
+        // (decideArm returns 0 otherwise) — a payee-handle typo on item 1 no
+        // longer costs item 2 a pointless 90 s.
+        if (gapMs > 0) {
           await notifySlack(
             pauseBeforeArmMessage({
               dest,
               amount: req.amount,
-              gapSeconds: INTER_TRANSFER_GAP_MS / 1000,
+              gapSeconds: gapMs / 1000,
               position: positions.get(req.id),
             }),
           );
-          await new Promise((r) => setTimeout(r, INTER_TRANSFER_GAP_MS));
+          await new Promise((r) => setTimeout(r, gapMs));
         }
-        moneyItemsArmed += 1;
         // Fires at the exact moment Next is clicked (push armed) — the only
         // point a "tap your phone NOW" ping is truthful. Never throws.
-        const onArmed = () =>
-          notifySlack(tapNeededMessage({ id: req.id, dest, amount: req.amount, position: positions.get(req.id) }));
+        //
+        // The lock refinement is issued SYNCHRONOUSLY right after the Slack
+        // fetch is kicked off, deliberately NOT behind `await notifySlack(…)`:
+        // a hung webhook would otherwise delay this write past the flow's own
+        // release and re-arm an already-dead lock.
+        const onArmed = () => {
+          const posted = notifySlack(
+            tapNeededMessage({ id: req.id, dest, amount: req.amount, position: positions.get(req.id) }),
+          );
+          try {
+            writeArmLock(armedLock(req.id, Date.now()));
+          } catch {
+            // Best-effort: the conservative lock written before the flow is
+            // the safety net, and it is already on disk.
+          }
+          return posted;
+        };
         try {
           const patch = await runTransferOtherQueueItem(page, req, onArmed);
           await patchRequest(req.id, { status: patch.status, result: patch.result, completedAt: new Date().toISOString() });
           const icon = patch.status === "done" ? "✅" : patch.status === "needs-review" ? "⚠️" : "❌";
           const slackIcon = patch.status === "done" ? ":white_check_mark:" : patch.status === "needs-review" ? ":warning:" : ":x:";
           const detail = patch.result.error ? ` — ${patch.result.error}` : patch.result.reference ? ` → ${patch.result.reference}` : "";
+          // An unconfirmed exit that left the push TAPPABLE is the one case
+          // where "Retry" is the wrong button — say so on the same line.
+          const liveWarning =
+            patch.result.outcome === "unconfirmed" && patch.pushMayBeLive === true && patch.armedAt !== undefined
+              ? livePushWarning(patch.armedAt + PUSH_LIFETIME_MS)
+              : "";
           await notifySlack(
-            `${slackIcon} ${patch.status} \`${req.id}\` (transfer-other → ${dest}, bundle ${req.bundleId})${detail}`,
+            `${slackIcon} ${patch.status} \`${req.id}\` (transfer-other → ${dest}, bundle ${req.bundleId})${detail}${liveWarning}`,
           );
           console.log(`${icon} ${req.id} ${patch.status}`);
+          // What the NEXT money item's gate sees. `armedAt` is the only signal
+          // that separates "never armed" (a pre-flight failure — must not hold
+          // the batch) from "the bank said no" (must).
+          prev = patch.armedAt !== undefined
+            ? { kind: "armed", id: req.id, outcome: patch.result.outcome as TransferOutcome }
+            : { kind: "not-armed", id: req.id };
         } catch (e) {
           // Unknown crash: we cannot prove the phone push was never armed, so
           // this is filed as needs-review (never auto-retried), not failed —
           // the same "ambiguity is never auto-resolved" rule the flow itself
           // uses for a timeout. See money-safety invariant 2 in the ADR.
+          //
+          // THE ARM LOCK IS DELIBERATELY NOT RELEASED HERE. A crash after the
+          // Next click cannot prove the push is dead, so the conservative lock
+          // written before the flow stands until it expires (≤10.5 min) and
+          // every later item — this batch or the next poll — is held.
           const error = (e as Error).message;
           const patch = mapFlowOutcomeToPatch({ success: false, outcome: "unconfirmed", error: `Crashed: ${error}` });
           await patchRequest(req.id, { status: patch.status, result: patch.result, completedAt: new Date().toISOString() });
@@ -289,6 +443,9 @@ async function processBatch(): Promise<number> {
             `:warning: Crashed \`${req.id}\` (transfer-other → ${dest}, bundle ${req.bundleId}) → needs-review — ${error}`,
           );
           console.log(`⚠️ ${req.id} crashed → needs-review: ${error}`);
+          // Treated as ARMED + unconfirmed: a crash cannot prove otherwise,
+          // so the rest of the batch is held (belt to the lock's braces).
+          prev = { kind: "armed", id: req.id, outcome: "unconfirmed" };
         }
         continue;
       }
@@ -327,6 +484,28 @@ async function processBatch(): Promise<number> {
       // list-registered has no workbook (xlsxPath is "")
       const xlsxAbs = req.xlsxPath.startsWith("data/") ? resolve("..", req.xlsxPath) : resolve(req.xlsxPath);
 
+      // transfer-payroll ARMS A PHONE PUSH (its Confirm click →
+      // waitForMobileConfirmation), so it takes the same estate-wide lock as a
+      // transfer-other. Fail closed exactly the same way: no lock, no push.
+      let payrollLock: ArmLock | undefined;
+      if (req.type === "transfer-payroll") {
+        const candidate = conservativeLock(req.id, Date.now());
+        try {
+          writeArmLock(candidate);
+          payrollLock = candidate;
+        } catch (e) {
+          const error = `Could not record the arm lock (${(e as Error).message}) — refusing to arm.`;
+          await patchRequest(req.id, {
+            status: "failed",
+            completedAt: new Date().toISOString(),
+            result: { success: false, error },
+          }).catch(() => console.log(`↷ ${req.id} failed and its queue file is gone`));
+          await notifySlack(`:x: Failed \`${req.id}\` (${req.type}) — ${error}`);
+          console.log(`❌ ${req.id} failed: ${error}`);
+          continue;
+        }
+      }
+
       try {
         const result =
           req.type === "list-registered"
@@ -334,6 +513,19 @@ async function processBatch(): Promise<number> {
             : req.type === "transfer-payroll"
               ? await runTransferPayrollFlow(page, xlsxAbs)
               : await runAddPayrollFlow(page, xlsxAbs);
+
+        // A NORMAL return from runTransferPayrollFlow means either the URL
+        // changed after Confirm (the tap landed — push consumed) or KBIZ
+        // refused before Confirm was ever clicked (never armed). Both prove no
+        // push is outstanding, so release. The `catch` below deliberately does
+        // NOT: a throw cannot prove the push is dead.
+        if (payrollLock) {
+          try {
+            writeArmLock(releasedLock(payrollLock, result.success ? "success" : "confirmed-failed", Date.now()));
+          } catch (e) {
+            console.warn(`⚠ could not release the arm lock for ${req.id}: ${(e as Error).message}`);
+          }
+        }
 
         if (result.success) {
           await patchRequest(req.id, {
@@ -353,6 +545,8 @@ async function processBatch(): Promise<number> {
           console.log(`❌ ${req.id} failed: ${result.error}`);
         }
       } catch (e) {
+        // A transfer-payroll crash leaves its arm lock STANDING on purpose —
+        // see the release above.
         const error = (e as Error).message;
         await patchRequest(req.id, {
           status: "failed",
