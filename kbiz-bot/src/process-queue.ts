@@ -313,12 +313,19 @@ async function processBatch(): Promise<number> {
 
       // ── THE GATE ────────────────────────────────────────────────────────
       // Evaluated BEFORE the `running` claim below, so a held item is never
-      // touched: no ":hourglass: Running", no page, no form, no Next. Both
-      // money-arming types go through it — transfer-payroll DOES arm a phone
-      // push (its Confirm click → waitForMobileConfirmation), the long-
-      // standing "payroll items arm no phone push" comment was simply wrong.
+      // touched: no ":hourglass: Running", no page, no form, no Next.
+      //
+      // ALL THREE push-arming types go through it. transfer-other arms on
+      // Next; transfer-payroll arms on Confirm; add-payroll arms on Next too
+      // — KBIZ answers it with the review screen that literally says "A
+      // notification has been sent to the K BIZ application", and the flow
+      // then sits in waitForMobileConfirmation for 5 min exactly like the
+      // other two. It moves no money, but it spends the SAME phone and the
+      // same bank-side push, and a money push armed seconds after its tap
+      // raises no banner at all (2026-08-12/13). Only list-favorites and
+      // list-registered are genuinely push-free.
       let gapMs = 0;
-      if (req.type === "transfer-other" || req.type === "transfer-payroll") {
+      if (req.type === "transfer-other" || req.type === "transfer-payroll" || req.type === "add-payroll") {
         const now = Date.now();
         const { text, mtimeMs } = readArmLockRaw();
         const lock = parseArmLock(text, mtimeMs, now);
@@ -484,15 +491,18 @@ async function processBatch(): Promise<number> {
       // list-registered has no workbook (xlsxPath is "")
       const xlsxAbs = req.xlsxPath.startsWith("data/") ? resolve("..", req.xlsxPath) : resolve(req.xlsxPath);
 
-      // transfer-payroll ARMS A PHONE PUSH (its Confirm click →
-      // waitForMobileConfirmation), so it takes the same estate-wide lock as a
-      // transfer-other. Fail closed exactly the same way: no lock, no push.
-      let payrollLock: ArmLock | undefined;
-      if (req.type === "transfer-payroll") {
+      // transfer-payroll AND add-payroll both ARM A PHONE PUSH (Confirm →
+      // waitForMobileConfirmation, and Next → the "notification has been sent"
+      // review screen → waitForMobileConfirmation, respectively), so both take
+      // the same estate-wide lock as a transfer-other. Fail closed exactly the
+      // same way: no lock, no push. list-registered arms nothing and takes no
+      // lock.
+      let pushLock: ArmLock | undefined;
+      if (req.type === "transfer-payroll" || req.type === "add-payroll") {
         const candidate = conservativeLock(req.id, Date.now());
         try {
           writeArmLock(candidate);
-          payrollLock = candidate;
+          pushLock = candidate;
         } catch (e) {
           const error = `Could not record the arm lock (${(e as Error).message}) — refusing to arm.`;
           await patchRequest(req.id, {
@@ -514,14 +524,22 @@ async function processBatch(): Promise<number> {
               ? await runTransferPayrollFlow(page, xlsxAbs)
               : await runAddPayrollFlow(page, xlsxAbs);
 
-        // A NORMAL return from runTransferPayrollFlow means either the URL
+        // RELEASE, only on a PROVABLY DEAD outcome — the same rule
+        // runTransferOtherQueueItem uses, expressed through the same
+        // `pushMayBeLive` flag.
+        //
+        // A normal return from runTransferPayrollFlow means either the URL
         // changed after Confirm (the tap landed — push consumed) or KBIZ
-        // refused before Confirm was ever clicked (never armed). Both prove no
-        // push is outstanding, so release. The `catch` below deliberately does
-        // NOT: a throw cannot prove the push is dead.
-        if (payrollLock) {
+        // refused before Confirm was ever clicked (never armed); it never sets
+        // the flag. runAddPayrollFlow does set it, for its one exit that saw
+        // neither a rejection popup nor the notification screen after Next.
+        // The `catch` below deliberately releases nothing: a throw (including
+        // a 5-minute waitForMobileConfirmation timeout) cannot prove the push
+        // is dead, so the conservative lock stands until it expires.
+        const pushMayBeLive = "pushMayBeLive" in result && result.pushMayBeLive === true;
+        if (pushLock && !pushMayBeLive) {
           try {
-            writeArmLock(releasedLock(payrollLock, result.success ? "success" : "confirmed-failed", Date.now()));
+            writeArmLock(releasedLock(pushLock, result.success ? "success" : "confirmed-failed", Date.now()));
           } catch (e) {
             console.warn(`⚠ could not release the arm lock for ${req.id}: ${(e as Error).message}`);
           }
@@ -545,8 +563,8 @@ async function processBatch(): Promise<number> {
           console.log(`❌ ${req.id} failed: ${result.error}`);
         }
       } catch (e) {
-        // A transfer-payroll crash leaves its arm lock STANDING on purpose —
-        // see the release above.
+        // A transfer-payroll / add-payroll crash leaves its arm lock STANDING
+        // on purpose — see the release above.
         const error = (e as Error).message;
         await patchRequest(req.id, {
           status: "failed",

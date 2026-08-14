@@ -2,6 +2,7 @@ import type { Page } from "playwright";
 import { sanitizeKbizMemo } from "@reimbursement/shared";
 import { gotoAuthenticated, isUnauthenticatedUrl } from "../lib/session";
 import { captureSlip, ensureSlipsDir, SLIPS_DIR, type SlipCapture } from "../lib/capture-slip";
+import { finalizeTransfer } from "../lib/finalize-transfer";
 import { aliasesForBank, matchFavoriteRows } from "../lib/scrape-favorites";
 import { APPROVAL_TIMEOUT_MS, waitForApproval, type ApprovalView, type TransferOutcome } from "../lib/approval-wait";
 
@@ -444,45 +445,18 @@ export async function runTransferOtherFlow(
   const { outcome, pushMayBeLive } = waitResult;
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 
-  // A success the bank already confirmed must never be downgraded to a
-  // failure/needs-review just because slip capture failed (disk full,
-  // read-only mount, ENOSPC). Guard the whole call; degrade to no slip.
-  let slip: SlipCapture | undefined;
-  try {
-    slip = await captureSlip(page, input.slug);
-  } catch (e) {
-    console.warn(`⚠ slip capture failed, outcome unchanged: ${(e as Error).message}`);
-  }
-
-  if (outcome === "success" && slip?.reference) {
-    console.log(`✅ Transfer successful. ref=${slip.reference}`);
-    return { success: true, finalUrl: page.url(), previewOnly: false, slip, reference: slip.reference, armedAt, pushMayBeLive };
-  }
-  if (outcome === "success") {
-    // Success page detected but no reference parsed (or slip capture
-    // failed outright) — still a success.
-    console.log(`✅ Transfer successful${slip ? " (reference not parsed — slip screenshot saved)" : " (no slip captured)"}.`);
-    return { success: true, finalUrl: page.url(), previewOnly: false, slip, armedAt, pushMayBeLive };
-  }
-  if (outcome === "confirmed-failed") {
-    return {
-      success: false,
-      outcome,
-      error: `KBIZ reported the transfer did not complete. Slip: ${slip?.screenshotPath ?? "(no slip captured)"}.`,
-      shot: slip?.screenshotPath,
-      armedAt,
-      pushMayBeLive,
-    };
-  }
-  return {
-    success: false,
-    outcome: "unconfirmed",
-    error: `No success/failure seen within the window — the transfer may or may not have gone through. ` +
-      `Check your K BIZ app + KBIZ history; attach the phone e-slip to close it. Screenshot: ${slip?.screenshotPath ?? "(no slip captured)"}.`,
-    shot: slip?.screenshotPath,
-    armedAt,
+  // Slip capture + result assembly live in lib/finalize-transfer.ts, which is
+  // playwright-free ON PURPOSE: "a bank-confirmed success is never downgraded
+  // because slip capture failed" is a money rule, and root `bun test` (which
+  // runs before kbiz-bot's node_modules exist) has to be able to prove it.
+  // The page reaches it only through these two thunks.
+  return finalizeTransfer({
+    outcome,
     pushMayBeLive,
-  };
+    armedAt,
+    captureSlip: () => captureSlip(page, input.slug),
+    finalUrl: () => page.url(),
+  });
 }
 
 function playwrightApprovalView(page: Page): ApprovalView {
