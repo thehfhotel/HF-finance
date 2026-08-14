@@ -116,6 +116,28 @@ container. Without that second mount, every `transfer-other` queue item
 fails immediately: the container has no config to resolve the payee's bank
 details from.
 
+## One live push at a time (arm lock)
+
+`process-queue.ts` and `transfer-other.ts --confirm` share a durable lock at
+`<KBIZ_STATE_DIR>/kbiz-arm-lock.json` (default `../data`, i.e. `/app/data` in
+the container) that guarantees at most one KBIZ approval push is outstanding
+in the estate at any moment — across `transfer-other` and `transfer-payroll`
+alike, not just "one per queue run". The lock is written conservatively
+*before* the arming click (a crash mid-fill still counts as live) and is only
+released once the flow proves the push is no longer live; a crash never
+releases it.
+
+A batch item that would arm a second push is **deferred**, not skipped or
+forced through: its queue-file `result.error` starts with `HELD: ` (the
+reimbursement UI shows this verbatim next to the Retry button) and a
+masked-destination line goes to Slack — the item is retried on a later poll
+once the lock clears. Running `transfer-other -- --confirm` by hand under a
+live lock refuses outright and prints the lock's expiry instead of arming.
+
+See `src/lib/arm-gate.ts` for the full decision table and
+`../reimbursement/docs/adr/0001-kbiz-transfer-automation.md` (Amendment 6)
+for the two incidents this closes.
+
 ## Session model
 
 All scripts go through `src/lib/session.ts`:

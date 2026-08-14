@@ -21,6 +21,28 @@ driver for KBIZ (KBank Business Online), running on evergreen as a
   (`transfer-other.config.json`, gitignored, mounted read-only from
   `/home/deploy/kbiz-bot/` in prod) holds them; everything published to the
   shared queue (manifests, errors, Slack) is masked to last-4.
+- **One live approval push in the estate, ever.** KBIZ's approval push lives
+  SERVER-SIDE at the bank, not in our browser session — a crash or session
+  death after the Next click leaves it tappable for minutes, and a naive
+  batch loop would happily arm the next one on top of it (two incidents,
+  2026-08-12 + 2026-08-13; see the ADR's Amendment 6). `arm-gate.ts` (pure
+  decision) + `arm-lock.ts` (durable state) enforce the invariant across
+  `transfer-other` AND `transfer-payroll` alike — `process-queue.ts` defers
+  (never skips or forces) a batch item that would arm a second push, and
+  `transfer-other.ts --confirm` refuses outright under a live lock. **The
+  state file** is `<KBIZ_STATE_DIR>/kbiz-arm-lock.json` (default `../data`,
+  i.e. `/app/data` in the container) — written conservatively BEFORE the
+  arming click (covering the form-fill window a crash could land in), never
+  deleted (`state: "released"` is how a lock ends, so there is no ENOENT
+  race), and released only when the flow proves the push is no longer live —
+  never from a crash handler, since a crash cannot prove that. **The harness
+  split** that makes this provable without a browser: `approval-wait.ts` and
+  `arm-gate.ts` are pure — zero playwright/fs imports, a plain number for
+  `now` — so `bun test` at the repo root, BEFORE kbiz-bot's node_modules even
+  exist, proves the invariant; `arm-lock.ts` is fs-only; only
+  `transfer-other-flow.ts` / `process-queue.ts` touch playwright. Never blur
+  that split — a runtime playwright import in a pure or test file passes
+  locally and breaks root CI.
 
 ## The contract
 
