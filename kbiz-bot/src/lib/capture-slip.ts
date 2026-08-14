@@ -123,7 +123,17 @@ export async function captureSlip(page: Page, slug: string): Promise<SlipCapture
   });
 
   const text = await page.evaluate(() => document.body.innerText).catch(() => "");
-  writeFileSync(textPath, text, "utf8");
+  // Guarded like the screenshot above: a transfer the bank already confirmed
+  // must never turn into a crash (and therefore needs-review) just because
+  // the text sidecar couldn't be written (disk full, read-only mount,
+  // ENOSPC on the slips bind). The caller (transfer-other-flow.ts) also
+  // wraps this whole function, so this is belt-and-braces, not the only
+  // guard — but it keeps captureSlip forgiving on its own terms too.
+  try {
+    writeFileSync(textPath, text, "utf8");
+  } catch (e) {
+    console.error(`   ⚠ slip text save failed: ${(e as Error).message}`);
+  }
 
   const reference = extractLabelled(text, REFERENCE_LABELS);
   const resolvedRecipient = extractLabelled(text, [

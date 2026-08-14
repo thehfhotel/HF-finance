@@ -3,6 +3,14 @@ import { sanitizeKbizMemo } from "@reimbursement/shared";
 import { gotoAuthenticated, isUnauthenticatedUrl } from "../lib/session";
 import { captureSlip, ensureSlipsDir, SLIPS_DIR, type SlipCapture } from "../lib/capture-slip";
 import { aliasesForBank, matchFavoriteRows } from "../lib/scrape-favorites";
+import { APPROVAL_TIMEOUT_MS, waitForApproval, type ApprovalView, type TransferOutcome } from "../lib/approval-wait";
+
+// isUnauthenticatedUrl is re-exported unchanged from session.ts (which now
+// itself re-exports it from approval-wait.ts, per A3) — this import is kept
+// per kbiz-interfaces.md A3 ("transfer-other-flow.ts:3 is unchanged") even
+// though classifyFrame now owns the session-dead check internally; keeping
+// it costs nothing (no noUnusedLocals in tsconfig) and avoids touching a
+// line the contract didn't ask this edit to touch.
 
 /**
  * Ad-hoc single transfer on KBIZ's "โอนเงินไปบัญชีบุคคลอื่น" page
@@ -35,14 +43,6 @@ import { aliasesForBank, matchFavoriteRows } from "../lib/scrape-favorites";
  */
 
 const URL = "https://kbiz.kasikornbank.com/menu/fundtranfer/fundtranfer/fundtranfer-other";
-// KBIZ gives the phone tap 5:58 FROM THE MODAL, which renders after our click.
-// The bot must OUTLIVE that window: at 5.5 min it walked away from a still-live
-// push (incident 2026-08-13: gave up at 01:24:59Z with the on-page countdown
-// showing 00:25 remaining) — a tap landing in that gap is executed-but-
-// unconfirmed, the one outcome that invites a double-pay on retry. 6.5 min
-// strictly covers 5:58 + modal-render latency, so an unconfirmed timeout now
-// implies the push has expired at the bank.
-const APPROVAL_TIMEOUT_MS = 6.5 * 60_000;
 
 export interface Payee {
   mode: "favorite" | "custom";
@@ -96,7 +96,10 @@ export interface TransferOtherInput {
   onArmed?: () => void | Promise<void>;
 }
 
-export type TransferOutcome = "success" | "confirmed-failed" | "unconfirmed";
+// Single source of truth is approval-wait.ts; re-exported here so B (and
+// anything importing the flow's public surface) keeps importing the type
+// from this file.
+export type { TransferOutcome };
 
 export type TransferOtherResult =
   | {
@@ -106,8 +109,21 @@ export type TransferOtherResult =
       formShot?: string;
       slip?: SlipCapture;
       reference?: string;
+      /** Epoch ms of the Next click. Absent ⇒ no push was ever armed. */
+      armedAt?: number;
+      /** From ApprovalWaitResult. Absent ⇒ no push was armed ⇒ treat as false. */
+      pushMayBeLive?: boolean;
     }
-  | { success: false; outcome?: TransferOutcome; error: string; shot?: string };
+  | {
+      success: false;
+      outcome?: TransferOutcome;
+      error: string;
+      shot?: string;
+      /** Epoch ms of the Next click. Absent ⇒ no push was ever armed. */
+      armedAt?: number;
+      /** From ApprovalWaitResult. Absent ⇒ no push was armed ⇒ treat as false. */
+      pushMayBeLive?: boolean;
+    };
 
 const digitsOnly = (s: string) => s.replace(/\D+/g, "");
 
@@ -413,73 +429,67 @@ export async function runTransferOtherFlow(
   // CONFIRM: clicking Next sends the phone push.
   console.log("→ Click Next — KBIZ sends the approval push to your phone");
   await next.click();
+  const armedAt = Date.now();
   if (input.onArmed) void Promise.resolve().then(input.onArmed).catch(() => {});
   await page.waitForTimeout(2_500);
   await page.screenshot({ path: `${SLIPS_DIR}/_waiting-${input.slug}.png`, fullPage: true }).catch(() => {});
   console.log(`   armed — waiting for your phone tap (up to ${Math.floor(APPROVAL_TIMEOUT_MS / 60000)} min)…`);
 
-  // Success is ONLY the final slip page. The waiting screen also contains
-  // "successfully", so we key on tokens unique to the success page.
-  const SUCCESS_RE = /Transfer successfully|โอนเงินสำเร็จ|ทำรายการสำเร็จ|Transaction ID|TRBS[0-9]{6}/i;
-  // KBIZ's own transaction-level rejection text ONLY — the bank explicitly
-  // saying the transfer did not go through. This is the sole condition safe
-  // to file as "confirmed-failed" (nothing moved, safe to retry).
-  //
-  // "เกิดข้อผิดพลาด" is deliberately NOT here: it is KBIZ's generic "an error
-  // occurred" (system/500/maintenance pages say it too), and a generic error
-  // rendered after the push was armed proves nothing about the transaction —
-  // it may still be approvable on the phone. It classifies as unconfirmed via
-  // AMBIGUOUS_RE below, so nothing ever auto-retries against it.
-  const FAILED_RE = /ไม่สำเร็จ|unsuccessful/i;
-  // Generic error page mid-wait: break out early as unconfirmed (fresh
-  // screenshot, human verifies in K BIZ) instead of looping to the timeout.
-  const AMBIGUOUS_RE = /เกิดข้อผิดพลาด/i;
-  // Session-level signals — OUR desktop session died mid-wait (bounced to
-  // /login|/authen, or hit the exact "session expired" text session.ts's
-  // gotoAuthenticated already probes for to mean "re-login", not "transfer
-  // failed"). This proves NOTHING about the pending transaction: the phone
-  // push lives server-side at KBIZ, not in the killed browser session, so it
-  // may already be approved. Must resolve to "unconfirmed" (needs-review,
-  // human checks K BIZ before anyone re-pays), never "confirmed-failed"
-  // (auto-retried by process-queue) — see decision 3 in
-  // docs/adr/0001-kbiz-transfer-automation.md.
-  const SESSION_DEAD_RE = /หมดเวลา|expired|session has expired|signed in on another|session expired or you are signed in/i;
-  const started = Date.now();
-  let outcome: TransferOutcome = "unconfirmed";
-  while (Date.now() - started < APPROVAL_TIMEOUT_MS) {
-    await page.waitForTimeout(4_000);
-    const txt = (await page.evaluate(() => (document.body as any).innerText).catch(() => "")) as string;
-    if (isUnauthenticatedUrl(page.url()) || SESSION_DEAD_RE.test(txt)) { outcome = "unconfirmed"; break; }
-    // FAILED before SUCCESS: a rejection page may well render a "Transaction
-    // ID" for the failed attempt (which SUCCESS_RE would match), while the
-    // live-verified success page carries none of the failure tokens — the two
-    // ฿1 test transfers classified correctly under exactly this order.
-    if (FAILED_RE.test(txt)) { outcome = "confirmed-failed"; break; }
-    if (SUCCESS_RE.test(txt)) { outcome = "success"; break; }
-    if (AMBIGUOUS_RE.test(txt)) { outcome = "unconfirmed"; break; }
-    const s = Math.floor((Date.now() - started) / 1000);
-    if (s % 20 < 4) console.log(`   …waiting ${s}s`);
-  }
+  const waitResult = await waitForApproval(playwrightApprovalView(page), {
+    onTick: (elapsedMs) => {
+      const s = Math.floor(elapsedMs / 1000);
+      if (s % 20 < 4) console.log(`   …waiting ${s}s`);
+    },
+  });
+  const { outcome, pushMayBeLive } = waitResult;
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 
-  const slip = await captureSlip(page, input.slug);
-  if (outcome === "success" && slip.reference) {
+  // A success the bank already confirmed must never be downgraded to a
+  // failure/needs-review just because slip capture failed (disk full,
+  // read-only mount, ENOSPC). Guard the whole call; degrade to no slip.
+  let slip: SlipCapture | undefined;
+  try {
+    slip = await captureSlip(page, input.slug);
+  } catch (e) {
+    console.warn(`⚠ slip capture failed, outcome unchanged: ${(e as Error).message}`);
+  }
+
+  if (outcome === "success" && slip?.reference) {
     console.log(`✅ Transfer successful. ref=${slip.reference}`);
-    return { success: true, finalUrl: page.url(), previewOnly: false, slip, reference: slip.reference };
+    return { success: true, finalUrl: page.url(), previewOnly: false, slip, reference: slip.reference, armedAt, pushMayBeLive };
   }
   if (outcome === "success") {
-    // Success page detected but no reference parsed — still a success; slip shot saved.
-    console.log("✅ Transfer successful (reference not parsed — slip screenshot saved).");
-    return { success: true, finalUrl: page.url(), previewOnly: false, slip };
+    // Success page detected but no reference parsed (or slip capture
+    // failed outright) — still a success.
+    console.log(`✅ Transfer successful${slip ? " (reference not parsed — slip screenshot saved)" : " (no slip captured)"}.`);
+    return { success: true, finalUrl: page.url(), previewOnly: false, slip, armedAt, pushMayBeLive };
   }
   if (outcome === "confirmed-failed") {
-    return { success: false, outcome, error: `KBIZ reported the transfer did not complete. Slip: ${slip.screenshotPath}.`, shot: slip.screenshotPath };
+    return {
+      success: false,
+      outcome,
+      error: `KBIZ reported the transfer did not complete. Slip: ${slip?.screenshotPath ?? "(no slip captured)"}.`,
+      shot: slip?.screenshotPath,
+      armedAt,
+      pushMayBeLive,
+    };
   }
   return {
     success: false,
     outcome: "unconfirmed",
     error: `No success/failure seen within the window — the transfer may or may not have gone through. ` +
-      `Check your K BIZ app + KBIZ history; attach the phone e-slip to close it. Screenshot: ${slip.screenshotPath}.`,
-    shot: slip.screenshotPath,
+      `Check your K BIZ app + KBIZ history; attach the phone e-slip to close it. Screenshot: ${slip?.screenshotPath ?? "(no slip captured)"}.`,
+    shot: slip?.screenshotPath,
+    armedAt,
+    pushMayBeLive,
+  };
+}
+
+function playwrightApprovalView(page: Page): ApprovalView {
+  return {
+    url: () => page.url(),
+    bodyText: () => page.evaluate(() => (document.body as any).innerText).catch(() => "") as Promise<string>,
+    sleep: (ms) => page.waitForTimeout(ms),
+    now: () => Date.now(),
   };
 }
