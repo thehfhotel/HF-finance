@@ -1,5 +1,6 @@
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { resolve } from "node:path";
+import { isUnauthenticatedUrl } from "./approval-wait";
 
 const USER_DATA_DIR = resolve("browser-data");
 // lang=th since 2026-08-12: the picker's Account Name column renders the
@@ -9,11 +10,12 @@ const USER_DATA_DIR = resolve("browser-data");
 const LOGIN_URL = "https://kbiz.kasikornbank.com/authen/login.jsp?lang=th";
 const DASHBOARD_URL = "https://kbiz.kasikornbank.com/menu/account/account-summary";
 
-// Exported: transfer-other-flow.ts's phone-approval poll loop needs this
-// exact check to recognize "our desktop session died", the same signal
-// gotoAuthenticated recovers from below — see the loop's comment for why
-// that must never be conflated with a KBIZ-confirmed transaction failure.
-export const isUnauthenticatedUrl = (url: string) => /\/error\b|\/login(\?|$)|\/authen\//.test(url);
+// Moved to approval-wait.ts (a pure, playwright-free module) so the
+// post-"Next" approval wait loop can import it without dragging playwright
+// into `bun test`. Re-exported here so every existing importer of
+// session.ts (this file's own use below, transfer-other-flow.ts:3) keeps
+// working unchanged.
+export { isUnauthenticatedUrl };
 
 export async function withSession<T>(fn: (ctx: BrowserContext, page: Page) => Promise<T>): Promise<T> {
   const headless = process.env.KBIZ_HEADLESS === "1";
