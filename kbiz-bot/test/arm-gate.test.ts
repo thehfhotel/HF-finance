@@ -1,0 +1,590 @@
+// The one-push-at-a-time decision logic, plus the two historical incidents
+// replayed as regression scenarios.
+//
+// Everything here is pure + virtual-clock: a 6.5-minute bank window and a
+// 10.5-minute conservative hold both replay in microseconds, and nothing
+// touches a browser, the disk or the queue. `bun test` from the repo root runs
+// this file BEFORE kbiz-bot/node_modules exists — no playwright, not even
+// transitively (arm-gate.ts's only flows import is `import type`, erased).
+
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "bun:test";
+import {
+  armedLock,
+  conservativeLock,
+  CONSERVATIVE_TOTAL_MS,
+  decideArm,
+  deferredErrorText,
+  deferredMessage,
+  livePushWarning,
+  parseArmLock,
+  releasedLock,
+  type ArmLock,
+  type DeferCode,
+  type LockView,
+  type PrevMoneyItem,
+} from "../src/lib/arm-gate";
+import { PUSH_LIFETIME_MS } from "../src/lib/approval-wait";
+
+const at = (rel: string) => fileURLToPath(new URL(rel, import.meta.url));
+
+/** Mirrors process-queue.ts's own constant — pinned by a structural test below. */
+const INTER_TRANSFER_GAP_MS = 90_000;
+
+const T0 = Date.parse("2026-08-14T01:20:00.000Z");
+const NO_LOCK: LockView = { live: false, source: "none" };
+
+// ───────────────────────────────────────────────────────────────────────────
+// D2 truth table
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("decideArm — the D2 truth table", () => {
+  const decide = (prev: PrevMoneyItem, lock: LockView = NO_LOCK) =>
+    decideArm({ prev, lock, now: T0, gapMs: INTER_TRANSFER_GAP_MS });
+
+  it("first money item of a batch, no lock → arms with no gap", () => {
+    expect(decide({ kind: "none" })).toEqual({ kind: "arm", gapMs: 0 });
+  });
+
+  it("previous item failed BEFORE arming → arms with no gap (a payee typo must not hold the batch)", () => {
+    // The 90 s pause exists to let the K BIZ app background itself between two
+    // real pushes. If nothing was armed there is nothing to background, and
+    // charging the next item 90 s protects nothing.
+    expect(decide({ kind: "not-armed", id: "pi_a" })).toEqual({ kind: "arm", gapMs: 0 });
+  });
+
+  it("previous item armed and SUCCEEDED → arms after the inter-transfer gap", () => {
+    expect(decide({ kind: "armed", id: "pi_a", outcome: "success" })).toEqual({
+      kind: "arm",
+      gapMs: INTER_TRANSFER_GAP_MS,
+    });
+  });
+
+  it("previous item armed and the bank REJECTED it → defers (prev-confirmed-failed)", () => {
+    expect(decide({ kind: "armed", id: "pi_a", outcome: "confirmed-failed" })).toEqual({
+      kind: "defer",
+      code: "prev-confirmed-failed",
+      prevId: "pi_a",
+    });
+  });
+
+  it("previous item armed and never confirmed → defers (prev-unconfirmed)", () => {
+    // Bank confirmation IS the operator ack. Anything short of it hands the
+    // batch back to the human instead of arming into the dark.
+    expect(decide({ kind: "armed", id: "pi_a", outcome: "unconfirmed" })).toEqual({
+      kind: "defer",
+      code: "prev-unconfirmed",
+      prevId: "pi_a",
+    });
+  });
+
+  it("a LIVE lock defers regardless of the previous item — including the first item of a batch", () => {
+    const live: LockView = { live: true, until: T0 + 200_000, source: "parsed", armedAt: T0 - 190_000 };
+    for (const prev of [
+      { kind: "none" } as PrevMoneyItem,
+      { kind: "not-armed", id: "pi_a" } as PrevMoneyItem,
+      { kind: "armed", id: "pi_a", outcome: "success" } as PrevMoneyItem,
+    ]) {
+      const d = decideArm({ prev, lock: live, now: T0, gapMs: INTER_TRANSFER_GAP_MS });
+      expect(d).toMatchObject({ kind: "defer", code: "push-may-be-live", until: T0 + 200_000 });
+    }
+  });
+
+  it("checks the lock FIRST — a live lock outranks the previous item's outcome", () => {
+    const live: LockView = { live: true, until: T0 + 60_000, source: "parsed" };
+    expect(
+      decideArm({ prev: { kind: "armed", id: "pi_a", outcome: "unconfirmed" }, lock: live, now: T0, gapMs: 0 }),
+    ).toMatchObject({ code: "push-may-be-live" });
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// parseArmLock
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("parseArmLock", () => {
+  it("no file → not live", () => {
+    expect(parseArmLock(null, null, T0)).toEqual({ live: false, source: "none" });
+  });
+
+  it("an armed lock is live strictly BEFORE pushExpiresAt, and dead AT it", () => {
+    // Boundary pinned deliberately: at exactly pushExpiresAt the bank's window
+    // has elapsed, so the push is dead and the next item may arm. An inclusive
+    // comparison here would add an unbounded off-by-one to every hold.
+    const text = JSON.stringify(armedLock("pi_a", T0));
+    const expiry = T0 + PUSH_LIFETIME_MS;
+    expect(parseArmLock(text, T0, expiry - 1)).toEqual({ live: true, until: expiry, source: "parsed", armedAt: T0 });
+    expect(parseArmLock(text, T0, expiry)).toEqual({ live: false, source: "expired" });
+    expect(parseArmLock(text, T0, expiry + 1)).toEqual({ live: false, source: "expired" });
+  });
+
+  it("a released lock is not live even inside the window", () => {
+    const text = JSON.stringify(releasedLock(armedLock("pi_a", T0), "success", T0 + 8_000));
+    expect(parseArmLock(text, T0, T0 + 9_000)).toEqual({ live: false, source: "released" });
+  });
+
+  it("a lock for a DIFFERENT intent still blocks — the lock is estate-global, not per-item", () => {
+    // One phone, one bank-side push. Whose transfer armed it is irrelevant.
+    const text = JSON.stringify(armedLock("pi_someone_else", T0));
+    expect(parseArmLock(text, T0, T0 + 1_000).live).toBe(true);
+  });
+
+  it("corrupt text WITH an mtime → live until mtime + 10.5 min, then expired", () => {
+    // A half-written or hand-edited lock must never read as a licence to arm.
+    const mtime = T0;
+    expect(parseArmLock('{"intentId":"pi_a","arme', mtime, T0 + 1_000)).toEqual({
+      live: true,
+      until: mtime + CONSERVATIVE_TOTAL_MS,
+      source: "corrupt-mtime",
+    });
+    expect(parseArmLock("not json at all", mtime, mtime + CONSERVATIVE_TOTAL_MS)).toEqual({
+      live: false,
+      source: "expired",
+    });
+  });
+
+  it("well-formed JSON of the WRONG shape is corrupt, not 'no lock'", () => {
+    expect(parseArmLock('{"hello":"world"}', T0, T0 + 1_000)).toMatchObject({ live: true, source: "corrupt-mtime" });
+    expect(parseArmLock('{"state":"armed"}', T0, T0 + 1_000)).toMatchObject({ live: true, source: "corrupt-mtime" });
+  });
+
+  it("an unparseable pushExpiresAt falls back to the mtime bound", () => {
+    const text = JSON.stringify({ ...armedLock("pi_a", T0), pushExpiresAt: "whenever" });
+    expect(parseArmLock(text, T0, T0 + 1_000)).toMatchObject({ live: true, source: "corrupt-mtime" });
+  });
+
+  it("corrupt text with NO mtime → not live, flagged corrupt-unknown for a loud warning", () => {
+    // Nothing left to bound a hold with. Bounded either way: a corrupt file can
+    // never wedge the bot permanently — but this is the state a human looks at.
+    expect(parseArmLock("garbage", null, T0)).toEqual({ live: false, source: "corrupt-unknown" });
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Lock records
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("lock records", () => {
+  it("the conservative lock covers pre-arm form-filling plus the whole push lifetime", () => {
+    const lock = conservativeLock("pi_a", T0);
+    expect(lock.state).toBe("armed");
+    expect(Date.parse(lock.pushExpiresAt) - T0).toBe(CONSERVATIVE_TOTAL_MS);
+    expect(CONSERVATIVE_TOTAL_MS).toBe(4 * 60_000 + PUSH_LIFETIME_MS);
+  });
+
+  it("the armed refinement narrows the window to the real 6.5 min from the click", () => {
+    const lock = armedLock("pi_a", T0);
+    expect(Date.parse(lock.pushExpiresAt) - T0).toBe(PUSH_LIFETIME_MS);
+    // Strictly shorter than the conservative guess — refining can only ever
+    // shorten a hold, never extend it.
+    expect(Date.parse(lock.pushExpiresAt)).toBeLessThan(Date.parse(conservativeLock("pi_a", T0).pushExpiresAt));
+  });
+
+  it("releasing keeps the record and stamps how it ended", () => {
+    const armed = armedLock("pi_a", T0);
+    const rel = releasedLock(armed, "unconfirmed", T0 + 390_000);
+    expect(rel).toMatchObject({ intentId: "pi_a", state: "released", resolution: "unconfirmed", armedAt: armed.armedAt });
+    expect(rel.updatedAt).toBe(new Date(T0 + 390_000).toISOString());
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Operator-facing text
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("deferred messages", () => {
+  const DEST = 'favorite "พี่วิว" (SCB …7394)'; // already masked by describeDestination
+  const FULL_ACCOUNT = "1234567394";
+
+  const held = (code: DeferCode, extra: Record<string, unknown> = {}) =>
+    ({ kind: "defer" as const, code, ...extra }) as Extract<ReturnType<typeof decideArm>, { kind: "defer" }>;
+
+  it("every queue-file error text starts with HELD:", () => {
+    // reimbursement stores this verbatim as bundle.paymentError and shows it to
+    // the approver next to a Retry button. "HELD" is the word that has to
+    // survive being skim-read.
+    for (const code of ["push-may-be-live", "prev-unconfirmed", "prev-confirmed-failed"] as DeferCode[]) {
+      expect(deferredErrorText(held(code, { until: T0 + 252_000, prevId: "pi_a" }), T0)).toStartWith("HELD: ");
+    }
+  });
+
+  it("the push-may-be-live text carries the arm time, the expiry and how long is left", () => {
+    const armedAt = Date.parse("2026-08-14T01:24:31.000Z");
+    const until = armedAt + 390_000; // 01:31:01Z
+    const text = deferredErrorText(held("push-may-be-live", { until, armedAt }), until - 252_000);
+    expect(text).toContain("01:24:31Z");
+    expect(text).toContain("01:31:01Z");
+    expect(text).toContain("≈4m12s");
+    expect(text).toContain("nothing was submitted");
+  });
+
+  it("names the item, the batch position, the amount and the MASKED destination — never a full account number", () => {
+    const msg = deferredMessage({
+      id: "pi_b",
+      dest: DEST,
+      amount: 580,
+      position: { position: 2, total: 2 },
+      decision: held("prev-unconfirmed", { prevId: "pi_a" }),
+      now: T0,
+    });
+    expect(msg).toContain("HELD");
+    expect(msg).toContain("`pi_b`");
+    expect(msg).toContain("transfer 2/2");
+    expect(msg).toContain("฿580.00");
+    expect(msg).toContain(DEST);
+    expect(msg).toContain("`pi_a`");
+    expect(msg).toContain("NOT started, nothing submitted");
+    expect(msg).not.toContain(FULL_ACCOUNT);
+  });
+
+  it("works for a payroll item, which has no single amount to name", () => {
+    const msg = deferredMessage({
+      id: "payroll_1",
+      dest: "transfer-payroll",
+      decision: held("push-may-be-live", { until: T0 + 60_000, armedAt: T0 - 330_000 }),
+      now: T0,
+    });
+    expect(msg).toContain("`payroll_1`");
+    expect(msg).toContain("transfer-payroll");
+    expect(msg).not.toContain("฿");
+    expect(msg).toContain("Do NOT");
+  });
+
+  it("the prev-confirmed-failed line says the bank rejected it, not that we timed out", () => {
+    const msg = deferredMessage({
+      id: "pi_b",
+      dest: DEST,
+      amount: 12.5,
+      decision: held("prev-confirmed-failed", { prevId: "pi_a" }),
+      now: T0,
+    });
+    expect(msg).toContain("KBIZ rejected the previous transfer");
+    expect(msg).toContain("back to approved");
+  });
+
+  it("livePushWarning tells the operator to close it out, NOT to retry", () => {
+    // A live push tapped now is a real, resolvable payment — the danger is
+    // paying AGAIN on top of it.
+    const w = livePushWarning(Date.parse("2026-08-14T01:31:01.000Z"));
+    expect(w).toContain("01:31:01Z");
+    expect(w).toContain("MAY STILL BE LIVE");
+    expect(w).toContain("Do NOT hit Retry");
+    expect(w).toContain("โอนแล้ว");
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Batch simulator — mirrors process-queue.ts's loop for the parts arm-gate owns
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * What the flow did. `pre-arm-failure` never clicked Next (bad payee handle,
+ * ceiling, a picker throw); `armed` clicked it and came back; `crash-after-arm`
+ * clicked it and threw.
+ */
+type SimRun =
+  | { kind: "pre-arm-failure" }
+  | { kind: "armed"; outcome: "success" | "confirmed-failed" | "unconfirmed"; pushMayBeLive: boolean; durationMs: number }
+  | { kind: "crash-after-arm"; durationMs: number };
+
+type SimItem = { id: string; type: "transfer-other" | "transfer-payroll"; run: SimRun };
+
+type SimStep =
+  | { id: string; action: "arm"; gapMs: number; at: number }
+  | { id: string; action: "defer"; code: DeferCode; until?: number; at: number };
+
+type LockWrite = { at: number; intentId: string; state: ArmLock["state"] };
+
+function lockWorld(startMs: number) {
+  let now = startMs;
+  let text: string | null = null;
+  let mtimeMs: number | null = null;
+  const writes: LockWrite[] = [];
+  return {
+    get now() {
+      return now;
+    },
+    advance(ms: number) {
+      now += ms;
+    },
+    read() {
+      return { text, mtimeMs };
+    },
+    write(lock: ArmLock) {
+      text = JSON.stringify(lock);
+      mtimeMs = now;
+      writes.push({ at: now, intentId: lock.intentId, state: lock.state });
+    },
+    writes,
+  };
+}
+
+/**
+ * The batch loop of process-queue.ts, restated over the pure gate: read the
+ * lock → decideArm → (defer, `prev` untouched) or (arm: spend the gap, take
+ * the conservative lock, run, refine on the click, release ONLY when the push
+ * is provably dead, update `prev`).
+ *
+ * `runs` counts how many times the flow was actually entered — the "spy on the
+ * injected runner" assertion in the design's R2: a deferred item must never
+ * reach a page, a form or a Next click.
+ */
+function simulateBatch(items: SimItem[], world: ReturnType<typeof lockWorld>) {
+  let prev: PrevMoneyItem = { kind: "none" };
+  const steps: SimStep[] = [];
+  let runs = 0;
+
+  for (const item of items) {
+    const now = world.now;
+    const { text, mtimeMs } = world.read();
+    const decision = decideArm({ prev, lock: parseArmLock(text, mtimeMs, now), now, gapMs: INTER_TRANSFER_GAP_MS });
+
+    if (decision.kind === "defer") {
+      steps.push({ id: item.id, action: "defer", code: decision.code, until: decision.until, at: now });
+      continue; // prev is NOT updated — a deferred item armed nothing
+    }
+
+    steps.push({ id: item.id, action: "arm", gapMs: decision.gapMs, at: now });
+    world.advance(decision.gapMs);
+
+    const acquired = conservativeLock(item.id, world.now);
+    world.write(acquired);
+    runs += 1;
+
+    if (item.run.kind === "pre-arm-failure") {
+      world.write(releasedLock(acquired, "never-armed", world.now));
+      prev = { kind: "not-armed", id: item.id };
+      continue;
+    }
+
+    const armedAt = world.now;
+    world.write(armedLock(item.id, armedAt)); // the onArmed refinement
+    world.advance(item.run.durationMs);
+
+    if (item.run.kind === "crash-after-arm") {
+      // Deliberately NOT released: a crash cannot prove the push is dead.
+      prev = { kind: "armed", id: item.id, outcome: "unconfirmed" };
+      continue;
+    }
+
+    if (!item.run.pushMayBeLive) {
+      world.write(releasedLock(armedLock(item.id, armedAt), item.run.outcome, world.now));
+    }
+    prev = { kind: "armed", id: item.id, outcome: item.run.outcome };
+  }
+
+  return { steps, runs, prev };
+}
+
+const money = (id: string, run: SimRun): SimItem => ({ id, type: "transfer-other", run });
+
+/**
+ * What `main` did before this change, kept as an executable statement of the
+ * defect rather than a paragraph of prose: `moneyItemsArmed > 0 ? gap : 0`,
+ * and then arm — no lock, no look at how the previous item ended. The R2/R3
+ * tests below assert this legacy rule WOULD have armed the very item the new
+ * gate holds, which is what "red on main" means for a module main never had.
+ */
+function legacyDecide(moneyItemsArmed: number): { kind: "arm"; gapMs: number } {
+  return { kind: "arm", gapMs: moneyItemsArmed > 0 ? INTER_TRANSFER_GAP_MS : 0 };
+}
+
+describe("regression: the 2026-08-12 / 2026-08-13 incidents", () => {
+  it("R1 — the pair as it happened: #1 succeeds, #2 arms after the gap and never confirms, #3 is held", () => {
+    // Honest limit, stated in the design: confirmation-gating does not by
+    // itself prevent the ORIGINAL incident (#2's push simply expired unseen).
+    // What it does prevent is the batch marching on afterwards, and what this
+    // pins is that the lock timeline never overlaps.
+    const world = lockWorld(T0);
+    const { steps, runs } = simulateBatch(
+      [
+        money("pi_1", { kind: "armed", outcome: "success", pushMayBeLive: false, durationMs: 8_000 }),
+        money("pi_2", { kind: "armed", outcome: "unconfirmed", pushMayBeLive: false, durationMs: 390_000 }),
+        money("pi_3", { kind: "armed", outcome: "success", pushMayBeLive: false, durationMs: 8_000 }),
+      ],
+      world,
+    );
+
+    expect(steps[0]).toMatchObject({ id: "pi_1", action: "arm", gapMs: 0 });
+    expect(steps[1]).toMatchObject({ id: "pi_2", action: "arm", gapMs: INTER_TRANSFER_GAP_MS });
+    // #2 timed out unconfirmed → #3 is HELD, not armed into the dark.
+    expect(steps[2]).toMatchObject({ id: "pi_3", action: "defer", code: "prev-unconfirmed" });
+    expect(runs).toBe(2);
+
+    // The lock timeline never overlaps: pi_1 is released before pi_2 acquires.
+    const pi1Release = world.writes.findIndex((w) => w.intentId === "pi_1" && w.state === "released");
+    const pi2Acquire = world.writes.findIndex((w) => w.intentId === "pi_2");
+    expect(pi1Release).toBeGreaterThanOrEqual(0);
+    expect(pi1Release).toBeLessThan(pi2Acquire);
+    expect(world.writes.some((w) => w.intentId === "pi_3")).toBe(false);
+  });
+
+  it("R2 — the unrecoverable variant: #1 dies with the push LIVE, so #2 is never even started", () => {
+    // Today's code (before this change) arms #2 ninety seconds later: two live
+    // pushes at the bank, one phone, no banner for the second.
+    const world = lockWorld(T0);
+    const { steps, runs } = simulateBatch(
+      [
+        money("pi_1", { kind: "armed", outcome: "unconfirmed", pushMayBeLive: true, durationMs: 12_000 }),
+        money("pi_2", { kind: "armed", outcome: "success", pushMayBeLive: false, durationMs: 8_000 }),
+      ],
+      world,
+    );
+
+    expect(steps[0]).toMatchObject({ id: "pi_1", action: "arm" });
+    expect(steps[1]).toMatchObject({ id: "pi_2", action: "defer", code: "push-may-be-live" });
+    // The runner was entered exactly once — pi_2 never saw a page, a form or a
+    // Next click.
+    expect(runs).toBe(1);
+
+    // Held TWICE over, independently: the lock is live AND the previous item
+    // never confirmed. Remove either guard and the other still holds it.
+    const armedAt = T0; // no gap before the first item
+    expect(parseArmLock(world.read().text, world.read().mtimeMs, T0 + 12_000).live).toBe(true);
+    expect(
+      decideArm({
+        prev: { kind: "armed", id: "pi_1", outcome: "unconfirmed" },
+        lock: { live: false, source: "released" },
+        now: T0 + 12_000,
+        gapMs: INTER_TRANSFER_GAP_MS,
+      }),
+    ).toMatchObject({ kind: "defer", code: "prev-unconfirmed" });
+
+    // The lock was never released, and it expires 6.5 min after the click.
+    expect(world.writes.filter((w) => w.state === "released")).toHaveLength(0);
+    expect(parseArmLock(world.read().text, world.read().mtimeMs, armedAt + PUSH_LIFETIME_MS).live).toBe(false);
+
+    // RED ON MAIN: the old rule armed pi_2 ninety seconds later regardless.
+    expect(legacyDecide(1)).toEqual({ kind: "arm", gapMs: INTER_TRANSFER_GAP_MS });
+  });
+
+  it("R3 — the retry race: a fresh intent 30 s later is HELD by the DURABLE lock, then arms once it expires", () => {
+    // This is the double-pay path. `prev` is per-batch and resets on the next
+    // poll, so only the on-disk lock can hold the operator's Retry.
+    const world = lockWorld(T0);
+    simulateBatch([money("pi_1", { kind: "armed", outcome: "unconfirmed", pushMayBeLive: true, durationMs: 12_000 })], world);
+    const armedAt = T0;
+
+    // Next poll, 30 s later — a brand-new batch, `prev` back to "none".
+    world.advance(30_000);
+    const retry = simulateBatch([money("pi_1r", { kind: "armed", outcome: "success", pushMayBeLive: false, durationMs: 8_000 })], world);
+    expect(retry.steps[0]).toMatchObject({ id: "pi_1r", action: "defer", code: "push-may-be-live" });
+    expect(retry.runs).toBe(0);
+
+    const until = (retry.steps[0] as Extract<SimStep, { action: "defer" }>).until;
+    expect(until).toBe(armedAt + PUSH_LIFETIME_MS);
+    // The operator is told exactly when it is safe again.
+    expect(
+      deferredMessage({
+        id: "pi_1r",
+        dest: 'favorite "พี่วิว" (SCB …7394)',
+        amount: 580,
+        decision: { kind: "defer", code: "push-may-be-live", until, armedAt },
+        now: world.now,
+      }),
+    ).toContain(`${new Date(until as number).toISOString().slice(11, 19)}Z`);
+
+    // Past the expiry, the same intent arms normally — the hold is bounded,
+    // never a deadlock.
+    world.advance(PUSH_LIFETIME_MS);
+    const after = simulateBatch([money("pi_1r", { kind: "armed", outcome: "success", pushMayBeLive: false, durationMs: 8_000 })], world);
+    expect(after.steps[0]).toMatchObject({ id: "pi_1r", action: "arm", gapMs: 0 });
+    expect(after.runs).toBe(1);
+
+    // RED ON MAIN: the retry is the FIRST money item of its own batch, so the
+    // old rule armed it with no gap and no lock — straight onto a live push.
+    expect(legacyDecide(0)).toEqual({ kind: "arm", gapMs: 0 });
+  });
+
+  it("R4 — a pre-arm failure must NOT hold the batch: #2 arms immediately, no 90 s tax", () => {
+    const world = lockWorld(T0);
+    const { steps, runs } = simulateBatch(
+      [
+        money("pi_1", { kind: "pre-arm-failure" }),
+        money("pi_2", { kind: "armed", outcome: "success", pushMayBeLive: false, durationMs: 8_000 }),
+      ],
+      world,
+    );
+    expect(steps[1]).toMatchObject({ id: "pi_2", action: "arm", gapMs: 0 });
+    expect(runs).toBe(2);
+    // No time was spent waiting between them beyond the flow itself.
+    expect((steps[1] as Extract<SimStep, { action: "arm" }>).at).toBe(T0);
+  });
+
+  it("R6 — mixed batch: a transfer-payroll item is held behind a live transfer-other push", () => {
+    // The comment this change corrects claimed payroll items arm no phone
+    // push. They do (Confirm → waitForMobileConfirmation), so a mixed batch
+    // could hold two live pushes at once.
+    const world = lockWorld(T0);
+    const { steps, runs } = simulateBatch(
+      [
+        money("pi_1", { kind: "armed", outcome: "unconfirmed", pushMayBeLive: true, durationMs: 12_000 }),
+        { id: "payroll_1", type: "transfer-payroll", run: { kind: "armed", outcome: "success", pushMayBeLive: false, durationMs: 5_000 } },
+      ],
+      world,
+    );
+    expect(steps[1]).toMatchObject({ id: "payroll_1", action: "defer", code: "push-may-be-live" });
+    expect(runs).toBe(1);
+  });
+
+  it("a crash after the click holds everything after it for the full conservative window", () => {
+    const world = lockWorld(T0);
+    const { steps, runs } = simulateBatch(
+      [
+        money("pi_1", { kind: "crash-after-arm", durationMs: 3_000 }),
+        money("pi_2", { kind: "armed", outcome: "success", pushMayBeLive: false, durationMs: 8_000 }),
+      ],
+      world,
+    );
+    expect(steps[1]).toMatchObject({ id: "pi_2", action: "defer", code: "push-may-be-live" });
+    expect(runs).toBe(1);
+    expect(world.writes.filter((w) => w.state === "released")).toHaveLength(0);
+    // Bounded: the refined lock expires 6.5 min after the click.
+    world.advance(PUSH_LIFETIME_MS);
+    expect(simulateBatch([money("pi_3", { kind: "armed", outcome: "success", pushMayBeLive: false, durationMs: 1 })], world).runs).toBe(1);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Structural guards — the simulator above is only honest if process-queue.ts
+// really is wired this way, and none of it is importable here (process-queue
+// pulls playwright for real). Read it as TEXT, like shared-resolution.test.ts.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("process-queue.ts wiring", () => {
+  const src = readFileSync(at("../src/process-queue.ts"), "utf8");
+
+  it("still uses the same 90 s inter-transfer gap this file simulates", () => {
+    expect(src).toContain("const INTER_TRANSFER_GAP_MS = 90_000;");
+  });
+
+  it("evaluates the gate BEFORE claiming the item as running", () => {
+    // A deferred item must never post ':hourglass: Running' or be marked
+    // `running` — `running` is never auto-re-run, so a held item stamped
+    // running would be stranded forever.
+    const gate = src.indexOf("decideArm({");
+    const claim = src.indexOf('status: "running"');
+    expect(gate).toBeGreaterThan(-1);
+    expect(claim).toBeGreaterThan(-1);
+    expect(gate).toBeLessThan(claim);
+  });
+
+  it("reads the durable lock in the gate and takes a conservative one before arming", () => {
+    expect(src).toContain("readArmLockRaw()");
+    // Both arming paths (transfer-other and transfer-payroll) take the
+    // conservative lock BEFORE their flow runs, and both fail closed on it.
+    expect(src.match(/conservativeLock\(req\.id, Date\.now\(\)\)/g)).toHaveLength(2);
+    expect(src.match(/refusing to arm\./g)).toHaveLength(2);
+    expect(src).toContain("writeArmLock(armedLock(req.id, Date.now()))");
+  });
+
+  it("NEVER releases the lock in the crash handler", () => {
+    // The single most important line of this change that is an ABSENCE.
+    const start = src.indexOf("// Unknown crash:");
+    expect(start).toBeGreaterThan(-1);
+    const crashBlock = src.slice(start, src.indexOf("continue;", start));
+    expect(crashBlock).not.toContain("writeArmLock");
+    expect(crashBlock).toContain("NOT RELEASED");
+  });
+});
