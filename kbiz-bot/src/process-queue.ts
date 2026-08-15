@@ -345,7 +345,16 @@ async function processBatch(): Promise<number> {
           // and never auto-re-queues it (kbiz-poller.ts).
           const dest = req.type === "transfer-other" ? describeDestination(req) : req.type;
           const amount = req.type === "transfer-other" ? req.amount : undefined;
-          const patch = mapFlowOutcomeToPatch({ success: false, error: deferredErrorText(decision, Date.now()) });
+          const errorText = deferredErrorText(decision, Date.now());
+          // F7: a payroll-type defer must NOT get the transfer-other result
+          // shape (`{outcome, ...}`, no `success` key). PayrollQueueRequest's
+          // result is typed `{success: boolean; ...}` and the status view
+          // branches on `req.result.success` — an omitted key falls to the
+          // failure branch by JS coercion accident, not a real `success:false`.
+          const patch =
+            req.type === "transfer-other"
+              ? mapFlowOutcomeToPatch({ success: false, error: errorText })
+              : { status: "failed" as const, result: { success: false as const, error: errorText } };
           try {
             await patchRequest(req.id, { status: patch.status, result: patch.result, completedAt: new Date().toISOString() });
           } catch (e) {
@@ -499,6 +508,19 @@ async function processBatch(): Promise<number> {
       // lock.
       let pushLock: ArmLock | undefined;
       if (req.type === "transfer-payroll" || req.type === "add-payroll") {
+        // F4: the same deliberate gap + operator warning the transfer-other
+        // branch spends above — `gapMs` was already decided by THE GATE for
+        // every gated type, but only transfer-other used to read it, so a
+        // payroll item following an armed push used to arm seconds after the
+        // previous tap with no pause and no "background the app" warning. A
+        // payroll workbook has no single amount to name, so the pause message
+        // names the request type in place of ฿amount → dest.
+        if (gapMs > 0) {
+          await notifySlack(
+            pauseBeforeArmMessage({ dest: req.type, gapSeconds: gapMs / 1000, position: positions.get(req.id) }),
+          );
+          await new Promise((r) => setTimeout(r, gapMs));
+        }
         const candidate = conservativeLock(req.id, Date.now());
         try {
           writeArmLock(candidate);
@@ -562,6 +584,20 @@ async function processBatch(): Promise<number> {
           await notifySlack(`:x: Failed \`${req.id}\` (${req.type}) — ${result.error}`);
           console.log(`❌ ${req.id} failed: ${result.error}`);
         }
+        // F4: what the NEXT money item's gate sees — mirrors the assignment
+        // in the transfer-other branch above. list-registered arms nothing,
+        // so it must never touch `prev`. `pushMayBeLive` is the only signal
+        // (for BOTH flows — see the comment above) that separates "never
+        // armed" from "armed but unresolved"; transfer-payroll's FlowResult
+        // never sets it, so its failures always land on "not-armed", exactly
+        // as its own comment documents.
+        if (pushLock) {
+          prev = result.success
+            ? { kind: "armed", id: req.id, outcome: "success" }
+            : pushMayBeLive
+              ? { kind: "armed", id: req.id, outcome: "unconfirmed" }
+              : { kind: "not-armed", id: req.id };
+        }
       } catch (e) {
         // A transfer-payroll / add-payroll crash leaves its arm lock STANDING
         // on purpose — see the release above.
@@ -573,6 +609,10 @@ async function processBatch(): Promise<number> {
         });
         await notifySlack(`:x: Crashed \`${req.id}\` (${req.type}) — ${error}`);
         console.log(`❌ ${req.id} crashed: ${error}`);
+        // F4: same as the transfer-other crash handler — cannot prove the
+        // push is dead, so the rest of the batch is held (belt to the lock's
+        // braces). list-registered never took a lock, so never touches prev.
+        if (pushLock) prev = { kind: "armed", id: req.id, outcome: "unconfirmed" };
       }
     }
   });

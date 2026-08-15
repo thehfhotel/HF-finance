@@ -93,13 +93,25 @@ function isArmLock(v: unknown): v is ArmLock {
  * bot permanently.
  */
 export function parseArmLock(text: string | null, mtimeMs: number | null, now: number): LockView {
-  if (text === null) return { live: false, source: "none" };
-
   const corrupt = (): LockView => {
     if (mtimeMs === null) return { live: false, source: "corrupt-unknown" };
     const until = mtimeMs + CONSERVATIVE_TOTAL_MS;
     return now < until ? { live: true, until, source: "corrupt-mtime" } : { live: false, source: "expired" };
   };
+
+  if (text === null) {
+    // A TRULY missing file (readArmLockRaw's readFileSync AND statSync both
+    // failed — overwhelmingly ENOENT) has no mtime either, and that is the
+    // common "no push outstanding" case: "none". But readFileSync catches
+    // every errno, not just ENOENT — a PRESENT file that is unreadable
+    // (EACCES after a container restart under a different UID, a transient
+    // read error, …) still has a real mtime from statSync. That is not "no
+    // lock", it is an unparseable one, and must take the same conservative
+    // mtime bound as corrupt JSON below — arming on top of an existing lock
+    // file just because we couldn't read its bytes is exactly the fail-open
+    // gap this function exists to close.
+    return mtimeMs === null ? { live: false, source: "none" } : corrupt();
+  }
 
   let parsed: unknown;
   try {

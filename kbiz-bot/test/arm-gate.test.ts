@@ -159,6 +159,27 @@ describe("parseArmLock", () => {
     // never wedge the bot permanently — but this is the state a human looks at.
     expect(parseArmLock("garbage", null, T0)).toEqual({ live: false, source: "corrupt-unknown" });
   });
+
+  it("F5 — an UNREADABLE file (text null) that DOES have an mtime is corrupt, not 'no lock'", () => {
+    // readArmLockRaw's readFileSync catches every errno, not just ENOENT: a
+    // present-but-unreadable file (EACCES after a restart under a different
+    // UID, a transient read error, …) still gets a real mtime back from the
+    // separate statSync call. Treating that as "none" would arm straight on
+    // top of a lock we simply couldn't read the bytes of — the fail-open gap
+    // this case exists to close. It must take the same mtime-bound hold as
+    // corrupt JSON.
+    expect(parseArmLock(null, T0, T0 + 1_000)).toEqual({
+      live: true,
+      until: T0 + CONSERVATIVE_TOTAL_MS,
+      source: "corrupt-mtime",
+    });
+    // Bounded, same as any other corrupt lock: expires at mtime + 10.5 min.
+    expect(parseArmLock(null, T0, T0 + CONSERVATIVE_TOTAL_MS)).toEqual({ live: false, source: "expired" });
+  });
+
+  it("a TRULY missing file (text null, mtime null) is still 'none' — the common case is unaffected", () => {
+    expect(parseArmLock(null, null, T0)).toEqual({ live: false, source: "none" });
+  });
 });
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -606,6 +627,48 @@ describe("process-queue.ts wiring", () => {
     const crashBlock = src.slice(start, src.indexOf("continue;", start));
     expect(crashBlock).not.toContain("writeArmLock");
     expect(crashBlock).toContain("NOT RELEASED");
+  });
+
+  it("F4 — the payroll branch spends gapMs too, BEFORE the lock is acquired", () => {
+    // The pause has to happen before the conservative lock so the 4-minute
+    // pre-arm window doesn't start ticking during a 90 s wait that hasn't
+    // armed anything yet — same ordering transfer-other uses (gap, THEN
+    // arm-lock, THEN flow).
+    const acquireIdx = src.indexOf('let pushLock: ArmLock | undefined;\n      if (req.type === "transfer-payroll" || req.type === "add-payroll") {');
+    expect(acquireIdx).toBeGreaterThan(-1);
+    const branch = src.slice(acquireIdx, src.indexOf("const candidate = conservativeLock(req.id, Date.now());", acquireIdx));
+    expect(branch).toContain("if (gapMs > 0)");
+    expect(branch).toContain("pauseBeforeArmMessage(");
+  });
+
+  it("F4 — the payroll branch updates `prev` on both the normal return and the crash handler", () => {
+    // Before this fix `prev` was only ever set in the transfer-other branch —
+    // a money item following an armed payroll/add-payroll push saw stale
+    // `prev = {kind:"none"}` and armed with gap 0, no warning.
+    const tryIdx = src.indexOf("const pushMayBeLive = \"pushMayBeLive\" in result");
+    expect(tryIdx).toBeGreaterThan(-1);
+    const crashIdx = src.indexOf("// A transfer-payroll / add-payroll crash leaves its arm lock STANDING");
+    expect(crashIdx).toBeGreaterThan(-1);
+    const normalReturn = src.slice(tryIdx, crashIdx);
+    expect(normalReturn).toContain('if (pushLock) {');
+    expect(normalReturn).toContain('{ kind: "armed", id: req.id, outcome: "success" }');
+    expect(normalReturn).toContain('{ kind: "not-armed", id: req.id }');
+
+    const crashBlock = src.slice(crashIdx, src.indexOf("}\n    }\n  });", crashIdx));
+    expect(crashBlock).toContain('if (pushLock) prev = { kind: "armed", id: req.id, outcome: "unconfirmed" };');
+  });
+
+  it("F7 — a deferred payroll item gets the {success:false} shape, not the transfer-other {outcome} shape", () => {
+    // PayrollQueueRequest.result is typed {success: boolean; ...} and the
+    // status view branches on `req.result.success` — the transfer-other
+    // shape has no `success` key at all, so `undefined` used to fall to the
+    // failure branch by JS coercion accident rather than a real false.
+    const deferIdx = src.indexOf('if (decision.kind === "defer") {');
+    expect(deferIdx).toBeGreaterThan(-1);
+    const deferBlock = src.slice(deferIdx, src.indexOf("continue;", deferIdx));
+    expect(deferBlock).toContain('req.type === "transfer-other"');
+    expect(deferBlock).toContain('mapFlowOutcomeToPatch({ success: false, error: errorText })');
+    expect(deferBlock).toContain('{ status: "failed" as const, result: { success: false as const, error: errorText } }');
   });
 });
 
