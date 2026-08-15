@@ -35,9 +35,14 @@ name: reimbursement-v2
 
 services:
   postgres:
-    # Pinned to digest (estate DB-image hardening, 2026-08-14). Source:
-    # Docker Hub API `library/postgres/tags/16-alpine`. Dependabot (`docker`
-    # ecosystem) will surface new digests as PRs. dev-only
+    # Pinned to digest (estate DB-image hardening, 2026-08-14). Digest
+    # captured from evergreen's live running container — NOT a fresh
+    # registry pull, which may not match what's actually been running. To
+    # bump: `docker inspect reimbursement-v2-postgres --format '{{.Image}}'`
+    # then `docker image inspect <id> --format '{{.RepoDigests}}'`.
+    # Dependabot (`docker` ecosystem) will surface new digests as PRs — a
+    # Dependabot PR still needs the same live-container recipe, not a
+    # registry pull, to actually verify the new digest. dev-only
     # docker-compose.dev.yml is intentionally out of scope (no deploy path).
     image: postgres:16-alpine@sha256:44c4ee9810eff91f7eab4d822642e01115b1a9eccce4bcbdde7604752d68eac6
     container_name: reimbursement-v2-postgres
