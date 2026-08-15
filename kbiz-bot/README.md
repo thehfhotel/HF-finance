@@ -141,8 +141,11 @@ after Next — says so and keeps the hold.
 A batch item that would arm a second push is **deferred**, not skipped or
 forced through: its queue-file `result.error` starts with `HELD: ` (the
 reimbursement UI shows this verbatim next to the Retry button) and a
-masked-destination line goes to Slack — the item is retried on a later poll
-once the lock clears. Running `transfer-other -- --confirm` or
+masked-destination line goes to Slack. **There is no auto-retry**: the bot
+files it as a terminal `failed` — "nothing moved, safe to retry" — and
+reimbursement returns the bundle to `APPROVED`; the watch loop's 30 s poll
+only ever picks up `approved` items, so a human has to click "จ่ายผ่าน KBIZ"
+again once the lock clears. Running `transfer-other -- --confirm` or
 `transfer-payroll` by hand under a live lock refuses outright and prints the
 lock's expiry instead of arming; `transfer-other` in PREVIEW mode is
 untouched, since it never clicks Next.

@@ -260,9 +260,16 @@ async function reconcile(fileName: string, intent: KbizPaymentIntent): Promise<v
       return;
     }
 
+    // F6: this branch also catches a DEFERRED item (process-queue.ts's arm
+    // gate writes a HELD `result.error` here with no `outcome`, which
+    // classifyOutcome above falls back to 'confirmed-failed' for) — a stale
+    // push may still be tappable for one of those, so the notification must
+    // not tell the approver they can just retry. `error` already carries the
+    // real HELD text (shown in Slack below and as bundle.paymentError in the
+    // UI); the portal push just points there instead of asserting either way.
     notifyPortal({
       title: 'การจ่ายไม่สำเร็จ',
-      body: `${bundle.name} — ลองใหม่ได้`,
+      body: `${bundle.name} — ตรวจสอบสถานะในระบบก่อนลองใหม่`,
       path: '/',
       tag: `kbiz-fail-${bundle.id}`,
       audience: 'managers',

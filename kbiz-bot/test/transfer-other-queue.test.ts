@@ -540,4 +540,11 @@ describe("pauseBeforeArmMessage", () => {
     const msg = pauseBeforeArmMessage({ dest: 'handle "revew"', amount: 1, gapSeconds: 90 });
     expect(msg).toContain("Pausing 90s before transfer (");
   });
+
+  it("F4 — works for a payroll item, which has no single amount to name", () => {
+    const msg = pauseBeforeArmMessage({ dest: "transfer-payroll", gapSeconds: 90 });
+    expect(msg).toContain("Pausing 90s before transfer (transfer-payroll)");
+    expect(msg).toContain("background the K BIZ app");
+    expect(msg).not.toContain("฿");
+  });
 });

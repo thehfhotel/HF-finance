@@ -291,14 +291,16 @@ export function requestOrderCompare(
  */
 export function pauseBeforeArmMessage(args: {
   dest: string;
-  amount: number;
+  /** Optional — a payroll workbook has no single sum to name (same loosening as deferredMessage's `amount`). */
+  amount?: number;
   gapSeconds: number;
   position?: { position: number; total: number };
 }): string {
   const seq = args.position ? ` ${args.position.position}/${args.position.total}` : "";
+  const money = args.amount !== undefined ? `฿${args.amount.toFixed(2)} → ${args.dest}` : args.dest;
   return (
     `:double_vertical_bar: Pausing ${args.gapSeconds}s before transfer${seq} ` +
-    `(฿${args.amount.toFixed(2)} → ${args.dest}) — close or background the K BIZ app NOW ` +
+    `(${money}) — close or background the K BIZ app NOW ` +
     `so the next approval push can raise a banner.`
   );
 }
