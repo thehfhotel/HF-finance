@@ -659,6 +659,24 @@ export function App() {
     (route.name === 'home' || route.name === 'my-requests' || route.name === 'record');
 
   if (platform === 'desktop') {
+    // The share inbox needs its own branch, like the admin screens above: the
+    // two shells below only distinguish 'my-requests', so every other route
+    // falls into DesktopApprover and a sidebar click that merely changed
+    // `route` would do visibly nothing. That is exactly the bug this fixes.
+    if (route.name === 'share-inbox') {
+      return (
+        <>
+          <ShareInbox
+            theme={theme}
+            nav={setRoute}
+            shareError={route.shareError ?? null}
+            onCountChange={setShareInboxCount}
+          />
+          {IS_DEV && <TweaksPanel tweaks={tweaks} onChange={setTweak} onJump={onJump} />}
+        </>
+      );
+    }
+
     return (
       <>
         {role === 'approver' && route.name !== 'my-requests' ? (
