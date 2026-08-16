@@ -150,7 +150,21 @@
           — คัดลอกทีละช่องแล้ววางได้เลย ไม่ต้องพิมพ์เอง
         </p>
 
-        <div class="label">URL — คัดลอกช่องที่ 1</div>
+        <div class="note warn">
+          <strong>ผิดพลาดบ่อยที่สุด — อ่านก่อน:</strong> ช่อง URL ต้องเป็น
+          <em>ข้อความลิงก์เท่านั้น</em> ห้ามลาก
+          <strong>Shortcut&nbsp;Input</strong> มาใส่ในช่อง URL
+          <br /><br />
+          <strong>Shortcut&nbsp;Input</strong> คือ "รูปที่แชร์เข้ามา" —
+          ต้องอยู่ในช่อง <code>photo</code> ใต้หัวข้อ Request&nbsp;Body
+          ด้านล่างเท่านั้น
+          <br /><br />
+          ถ้าใส่ผิดจะขึ้นข้อความว่า
+          <em>"Shortcuts couldn't convert from Photo media to URL"</em> —
+          แก้โดยกดปุ่ม ⓧ ในช่อง URL เพื่อลบออก แล้ววางลิงก์แทน
+        </div>
+
+        <div class="label">URL — คัดลอกช่องที่ 1 (พิมพ์/วางเป็นข้อความ)</div>
         <span class="field">https://reimbursement.thehfhotel.org/api/inbox/quick</span>
 
         <div class="label">Method</div>
@@ -170,8 +184,17 @@
         <div class="label">Request Body</div>
         <span class="field">Form</span>
 
-        <div class="label">เพิ่ม 1 field</div>
+        <div class="label">เพิ่ม 1 field — นี่คือที่ของ Shortcut Input</div>
         <span class="field">Key: photo&nbsp;&nbsp;·&nbsp;&nbsp;Type: File&nbsp;&nbsp;·&nbsp;&nbsp;Value: Shortcut Input</span>
+
+        <div class="note">
+          กด <strong>Add new field</strong> → พิมพ์ชื่อ <code>photo</code> →
+          เลือกชนิดเป็น <strong>File</strong> (ไม่ใช่ Text) →
+          แล้วกดที่ช่องค่าเพื่อเลือก <strong>Shortcut Input</strong>
+          <br /><br />
+          ถ้าช่อง <code>photo</code> ว่างอยู่ รูปจะไม่ถูกส่งไปด้วย
+          และจะขึ้น 400 Missing photo
+        </div>
 
         <div class="note">
           ถ้ากดที่ช่อง Value แล้วไม่เห็น <strong>Shortcut Input</strong>
@@ -204,6 +227,16 @@
           <li>
             <strong>403 หรือเจอหน้า login</strong> — ช่องที่ 3/4 ผิดหรือสลับกัน
             กลับไปคัดลอกใหม่จากแอป
+          </li>
+          <li>
+            <strong>"couldn't convert from Photo media to URL"</strong> —
+            เอา <strong>Shortcut Input</strong> ออกจากช่อง URL (กดปุ่ม ⓧ)
+            แล้ววางลิงก์เป็นข้อความแทน ส่วน Shortcut Input ให้ไปอยู่ในช่อง
+            <code>photo</code>
+          </li>
+          <li>
+            <strong>400 Missing photo</strong> — ช่อง <code>photo</code> ใต้
+            Request Body ยังว่าง หรือชนิดเป็น Text แทนที่จะเป็น File
           </li>
           <li><strong>413</strong> — ไฟล์ใหญ่เกิน 20 MB</li>
           <li><strong>415</strong> — ชนิดไฟล์ไม่รองรับ (ใช้ได้: JPEG, PNG, WebP, HEIC, PDF)</li>
