@@ -11,7 +11,14 @@
          icon. The manifest fixes that on both platforms AND declares the
          Android share target (iOS ignores share_target — WebKit has never
          implemented it, hence the Shortcut). See CR-2026-08-16. -->
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- crossorigin="use-credentials" is LOAD-BEARING, not boilerplate.
+         Browsers fetch the manifest WITHOUT cookies by default; behind
+         Cloudflare Access that 302s to the login page, so Chrome never sees the
+         manifest at all — the share target is never registered and Android
+         "installs" degrade to bare shortcuts with the URL bar showing. This
+         sends the CF_Authorization cookie. Same fix, same reason, as HF Portal
+         (hf-erp vite.config.ts `useCredentials: true`). -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <!-- iOS reads none of the manifest's icons for the home screen; this tag
          is the only one it honours, and without it the icon is a screenshot. -->

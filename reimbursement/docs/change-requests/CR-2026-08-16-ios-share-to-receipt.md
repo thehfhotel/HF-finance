@@ -413,6 +413,25 @@ Verified live: unauthenticated → 401 with no leak; authenticated → 200 with
 `Cache-Control: no-store`; id-set-but-secret-missing → `configured: false` and
 both values null.
 
+### Post-deploy fix 2026-08-16 — `crossorigin="use-credentials"` on the manifest link
+
+Caught during live verification, after the first deploy went green. Fetching
+`/manifest.webmanifest` from production returned **302 to the Access login**, and
+that is not only a curl artifact: browsers fetch a manifest with credentials mode
+`omit` by default, so behind Cloudflare Access **Chrome never sees the manifest
+at all**. The share target would never have registered and Android installs would
+have degraded to bare shortcuts with the URL bar showing — precisely the feature
+this CR exists to deliver, silently absent, with green CI.
+
+HF Portal already hit this and already carries the cure: `hf-erp`'s
+`vite.config.ts` sets `useCredentials: true` with a comment describing this exact
+failure. This app hand-writes its `<link rel="manifest">`, so it needed the
+attribute spelled out. Shipped as a follow-up commit.
+
+The lesson worth keeping: green CI proved the manifest was *built and served*,
+and told us nothing about whether the browser could *read* it. Only loading the
+URL did.
+
 ### Known gaps
 
 - **The Android share target could not be exercised locally**: `resolveCfIdentity`
