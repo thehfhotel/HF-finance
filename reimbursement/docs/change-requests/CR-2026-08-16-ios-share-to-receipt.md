@@ -432,6 +432,40 @@ The lesson worth keeping: green CI proved the manifest was *built and served*,
 and told us nothing about whether the browser could *read* it. Only loading the
 URL did.
 
+### Post-deploy fix 2026-08-16 (2) — the inbox was unreachable for approvers and on desktop
+
+Reported immediately after deploy: "where's กล่องขาเข้า?". It was nowhere, for
+the person asking. Three compounding gaps, all mine:
+
+1. `share-inbox` was added to `EMPLOYEE_ITEMS` in the bottom nav but **not to
+   `APPROVER_ITEMS`** — and every manager is an APPROVER, so the entry point
+   existed for exactly the people who were not testing it.
+2. **The desktop shells had no reference to it at all.** `AppSidebar` never
+   listed it, so on a laptop it was unreachable for *both* roles.
+3. The bottom nav only renders on `platform === 'mobile'` anyway.
+
+The only ways in were the employee-on-mobile nav item and the raw `/?inbox=1`
+URL. Worse, this was a promise dropped mid-build: the plan noted the approver bar
+was full at five items and said a Home-screen entry would cover it — and then
+that entry was never written.
+
+Fix: a **กล่องขาเข้า row at the top of the sidebar's "คำขอของฉัน" section**
+(first, because it is the stage *before* a draft — a shared file has no amount
+yet), plus a **badged inbox button in Home's app bar**, which is the one surface
+both roles land on and which does not require cramming a sixth item into an
+already-full approver nav bar.
+
+One trap worth recording: the sidebar key is `share-inbox`, **not** `my-inbox`.
+Both desktop shells route with `key.startsWith('my-')` and read the suffix as a
+bundle filter, so a `my-` name would have been silently swallowed as a filter
+called "inbox" — no error, just a dead click. The handler for it is also placed
+*above* that branch in both shells, and `DesktopEmployee` got its own
+`onOpenShareInbox` callback rather than reusing `onNavigateApprover`, which a
+plain employee's shell is never given.
+
+Caught only because a human opened the app. Nothing in typecheck, tests, or the
+deploy could have found an entry point that was never wired.
+
 ### Known gaps
 
 - **The Android share target could not be exercised locally**: `resolveCfIdentity`

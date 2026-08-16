@@ -287,6 +287,8 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
         // of this one, so the sidebar itself never changes shape.
         if (key === 'employees') return onNavigate?.({ name: 'admin-employees' });
         if (key === 'admin-settings') return onNavigate?.({ name: 'admin-settings' });
+        // Before the `my-` branch below on purpose — see the SidebarKey comment.
+        if (key === 'share-inbox') return onNavigate?.({ name: 'share-inbox' });
         // Your own requests live on the requestor console; the menu there is
         // this same component, so only the highlighted row changes — and the
         // pane it opens is the one that was actually clicked.
