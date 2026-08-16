@@ -83,7 +83,20 @@ Deploy workflows live at the MONOREPO ROOT, not under `reimbursement/`
     only. A Google address can never match the synthetic domain, so this path
     still fails closed with a 403 on no match.
   - See `docs/change-requests/CR-2026-08-10-hfid-owns-identity.md`.
-- **No tests yet** — Phase 6 territory. Don't add a test framework without asking.
+- **Tests: `bun test`** (added 2026-08-16, see
+  `docs/change-requests/CR-2026-08-16-ios-share-to-receipt.md`). Bun's built-in
+  runner — no framework dependency. `bun run test` at the app root, files in
+  `apps/api/test/`. Coverage is deliberately narrow, not a blanket suite: it
+  covers the share-inbox credential path and the pure helpers around it.
+  - **DB-backed tests skip unless `TEST_DATABASE_URL` is set**, so a machine
+    without Postgres still gets a green, meaningful run. Both CI workflows
+    provide a `postgres` service, and the DEPLOY gate (`deploy-reimbursement.yml`'s
+    `contract` job) runs them — the share token is accepted from the open
+    internet, so revocation and ownership are release-blocking, not advisory.
+  - Point it at a throwaway database; the suite creates and deletes users.
+    `TEST_DATABASE_URL=postgresql://…/reimbursement_test bun run test`
+  - Adding tests for the rest of the app is still open ground — but the
+    framework question is settled, so just write them.
 
 ## Important commands
 
@@ -92,6 +105,7 @@ bun install                    # install all workspace deps
 bun run dev:api                # start the API on :3001
 bun run dev:web                # start the frontend on :5173
 bun run typecheck              # typecheck all workspaces
+bun run test                   # bun test (DB tests skip without TEST_DATABASE_URL)
 bun run db:up                  # start dev Postgres in Docker
 bun run db:migrate             # apply prisma migrations (dev DB)
 bun run db:seed                # seed sample users + receipts + bundles
@@ -124,6 +138,26 @@ bun run db:seed                # seed sample users + receipts + bundles
   (`overview.ts::buildOverviewStats`) behind `GET /api/bundles/stats
   ?window=`. Frontend lives at `apps/web/src/screens/approver/overview/`. See
   `docs/change-requests/CR-2026-08-14-overview-analytics-vendors.md`.
+- **Share inbox** (phone → receipt, CR-2026-08-16): `ReceiptInbox` is a QUEUE,
+  not a half-Receipt — `Receipt` keeps every invariant it had. Producers:
+  `routes/inbox.ts` (`POST /api/inbox/quick`, iOS Shortcut, share-token auth)
+  and `routes/share_target.ts` (`POST /api/share-target`, Android Web Share
+  Target, Cloudflare Access auth → `303` back into the SPA). Consumer: the
+  employee, via `screens/employee/ShareInbox.tsx` → the ordinary upload form
+  with `inboxId`. Credentials: `share_tokens.ts` (DB) + `share_token_crypto.ts`
+  (pure, testable without a database) — opaque tokens stored SHA-256-hashed,
+  never JWTs. File handling: `uploads.ts::saveSharedFile` guarantees
+  `photoPath` is always `<img>`-renderable, rasterizing PDF/HEIC via
+  ImageMagick + **Ghostscript** (both installed in `Dockerfile.api`, which also
+  re-enables the PDF coder Debian's ImageMagick policy disables).
+  Cloudflare side lives in hf-erp: `infra/cloudflare/gate-share-upload.ts`.
+  Phone pairing: `GET /api/me/share-setup` (`share_setup.ts`, pure + unit
+  tested) serves the CF Access **service-token** pair — env
+  `CF_SHARE_CLIENT_ID` / `CF_SHARE_CLIENT_SECRET`, optional and
+  **both-or-neither** — to already-authenticated employees, so nobody carries
+  credentials between devices. That pair proves "an HF device", never "this
+  person"; the per-employee `hfr_` token is the identity half and the only
+  revocable one.
 - **Vendor matching**: `apps/api/src/vendors.ts` (lazy upsert on receipt
   save) + `apps/api/src/routes/vendors.ts` (`GET /api/vendors` autocomplete).
   Matching is owned entirely by the `vendor_normalize()` Postgres function —

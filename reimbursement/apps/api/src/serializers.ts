@@ -3,15 +3,18 @@ import type {
   Bundle as SharedBundle,
   BundleStatus,
   BundleWithDetails,
+  InboxItem,
   Receipt as SharedReceipt,
   ReceiptItem,
   Role,
+  ShareTokenSummary,
   User as SharedUser,
 } from '@reimbursement/shared';
 import type {
   Bundle as PrismaBundle,
   BundleStatus as PrismaBundleStatus,
   Receipt as PrismaReceipt,
+  ReceiptInbox as PrismaReceiptInbox,
   Role as PrismaRole,
   User as PrismaUser,
 } from './generated/prisma';
@@ -79,6 +82,55 @@ export function serializeReceipt(receipt: PrismaReceipt): SharedReceipt {
     bundleId: receipt.bundleId,
     vendorId: receipt.vendorId,
     createdAt: receipt.createdAt.toISOString(),
+  };
+}
+
+/**
+ * Extensions every browser can put in an <img>. HEIC is deliberately absent:
+ * Safari renders it, Chrome does not, so an un-rasterized HEIC is a broken
+ * image for half the staff.
+ */
+const PREVIEWABLE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
+
+/**
+ * `previewable` is derived from the file actually sitting at `photoPath`, not
+ * from `mimeType` or from whether an original was kept.
+ *
+ * Deriving it from the received type gets the failure case backwards: a HEIC
+ * that could not be rasterized still has `mimeType: image/heic` and no
+ * `originalPath`, and would read as previewable while being exactly the file
+ * Chrome refuses to render. What is on disk is the only thing that answers the
+ * question the UI is asking.
+ */
+export function serializeInboxItem(item: PrismaReceiptInbox): InboxItem {
+  const stored = item.photoPath.toLowerCase();
+  const previewable = PREVIEWABLE_EXTENSIONS.some((ext) => stored.endsWith(ext));
+  return {
+    id: item.id,
+    photoPath: item.photoPath,
+    originalPath: item.originalPath,
+    mimeType: item.mimeType,
+    filename: item.filename,
+    sizeBytes: item.sizeBytes,
+    source: item.source,
+    createdAt: item.createdAt.toISOString(),
+    previewable,
+  };
+}
+
+export function serializeShareToken(token: {
+  id: string;
+  hint: string;
+  label: string;
+  lastUsedAt: Date | null;
+  createdAt: Date;
+}): ShareTokenSummary {
+  return {
+    id: token.id,
+    hint: token.hint,
+    label: token.label,
+    lastUsedAt: token.lastUsedAt ? token.lastUsedAt.toISOString() : null,
+    createdAt: token.createdAt.toISOString(),
   };
 }
 

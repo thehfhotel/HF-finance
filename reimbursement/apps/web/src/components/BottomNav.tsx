@@ -6,6 +6,7 @@ import { Icon } from './icons';
 export type BottomNavRoute =
   | 'home'
   | 'upload'
+  | 'share-inbox'
   | 'approver-home'
   | 'overview'
   | 'my-requests'
@@ -20,6 +21,7 @@ interface NavItem {
 
 const EMPLOYEE_ITEMS: NavItem[] = [
   { label: 'คำขอ', route: 'home', icon: Icon.receipt },
+  { label: 'กล่องขาเข้า', route: 'share-inbox', icon: Icon.inbox },
 ];
 
 const APPROVER_ITEMS: NavItem[] = [
@@ -35,9 +37,17 @@ interface BottomNavProps {
   activeRoute: BottomNavRoute;
   theme: Theme;
   onNavigate: (route: BottomNavRoute) => void;
+  /** Files waiting in the share inbox. 0 hides the badge entirely. */
+  shareInboxCount?: number;
 }
 
-export function BottomNav({ role, activeRoute, theme, onNavigate }: BottomNavProps) {
+export function BottomNav({
+  role,
+  activeRoute,
+  theme,
+  onNavigate,
+  shareInboxCount = 0,
+}: BottomNavProps) {
   const items = role === 'approver' ? APPROVER_ITEMS : EMPLOYEE_ITEMS;
   // Split around the camera. Both halves are flex:1, so the button stays dead
   // centre even when one side has fewer items than the other.
@@ -48,6 +58,7 @@ export function BottomNav({ role, activeRoute, theme, onNavigate }: BottomNavPro
   const renderItem = (item: NavItem) => {
     const isActive = item.route === activeRoute;
     const color = isActive ? theme.accent : theme.inkSoft;
+    const badge = item.route === 'share-inbox' ? shareInboxCount : 0;
     return (
       <button
         key={item.route}
@@ -67,7 +78,33 @@ export function BottomNav({ role, activeRoute, theme, onNavigate }: BottomNavPro
           minHeight: 56,
         }}
       >
-        {item.icon(color)}
+        <span style={{ position: 'relative', display: 'grid', placeItems: 'center' }}>
+          {item.icon(color)}
+          {badge > 0 && (
+            <span
+              aria-label={`${badge} ไฟล์รอดำเนินการ`}
+              style={{
+                position: 'absolute',
+                top: -5,
+                right: -9,
+                minWidth: 16,
+                height: 16,
+                padding: '0 4px',
+                borderRadius: 8,
+                background: theme.danger,
+                color: '#fff',
+                fontFamily: FONT_UI,
+                fontSize: 10,
+                fontWeight: 700,
+                lineHeight: '16px',
+                textAlign: 'center',
+                boxSizing: 'border-box',
+              }}
+            >
+              {badge > 9 ? '9+' : badge}
+            </span>
+          )}
+        </span>
         <span
           style={{
             fontSize: 10,

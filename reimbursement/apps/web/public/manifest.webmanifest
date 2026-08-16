@@ -1,0 +1,51 @@
+{
+  "$comment": "Web app manifest. Two jobs: make the home-screen install correct on both platforms (this app previously shipped NO manifest, so iOS treated it as a plain bookmark), and declare the Android share target. See docs/change-requests/CR-2026-08-16-ios-share-to-receipt.md.",
+  "name": "เบิกค่าใช้จ่าย HF",
+  "short_name": "เบิกค่าใช้จ่าย",
+  "description": "ระบบเบิกค่าใช้จ่ายพนักงาน โรงแรม HF",
+  "lang": "th",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#151210",
+  "theme_color": "#4F0E0E",
+  "icons": [
+    {
+      "src": "/pwa-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "$share_target_comment": "Android/Chrome only — iOS has never implemented Web Share Target (WebKit bug 194593, open since 2019), which is why iPhones use a Shortcut instead. `action` MUST be an /api/ path: nginx serves the SPA with try_files → /index.html, which answers a POST with 405, so a client-side route could never receive this. The server answers 303 and the browser follows with a GET into the app — that is what removes any need for a service worker here. Renaming the `files.name` field breaks every already-installed phone until it reinstalls, so the server accepts the old name too (routes/share_target.ts).",
+  "share_target": {
+    "action": "/api/share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "photo",
+          "accept": ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"]
+        }
+      ]
+    }
+  }
+}

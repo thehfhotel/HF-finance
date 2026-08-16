@@ -18,6 +18,12 @@ interface UploadProps {
   nav: Nav;
   setState: (updater: (s: AppState) => AppState) => void;
   editId?: string;
+  /**
+   * Draining a file shared in from a phone (CR-2026-08-16). The photo already
+   * lives in the uploads volume, so the form shows it without a file picker and
+   * posts the id instead of re-uploading the bytes.
+   */
+  inboxId?: string;
 }
 
 
@@ -29,7 +35,7 @@ const PALETTE = [
   ['#E6F4EA', '#0A6E40'],
 ] as const;
 
-export function Upload({ theme, nav, state, setState, editId }: UploadProps) {
+export function Upload({ theme, nav, state, setState, editId, inboxId }: UploadProps) {
   const existing = editId ? (state.receipts.find((r) => r.id === editId) ?? null) : null;
 
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -49,6 +55,36 @@ export function Upload({ theme, nav, state, setState, editId }: UploadProps) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const today = todayIso();
+
+  /**
+   * Draining a shared file: fetch the inbox item so the form can show the photo
+   * the employee already sent in.
+   *
+   * The list is fetched rather than threaded through `nav()` because a share
+   * can also arrive as a cold start — Android's share target redirects the
+   * browser into the app, so this screen may be the FIRST thing that renders,
+   * with no in-memory inbox to read from.
+   */
+  useEffect(() => {
+    if (!inboxId) return;
+    let cancelled = false;
+    void api.inbox
+      .list()
+      .then((items) => {
+        if (cancelled) return;
+        const item = items.find((i) => i.id === inboxId);
+        // A missing item means it was drained or discarded elsewhere. Leave the
+        // form photo-less rather than erroring: `canSave` then blocks the save,
+        // which is the honest outcome — there is nothing to attach.
+        if (item) setPhotoPreview(item.photoPath);
+      })
+      .catch(() => {
+        /* Offline or 401 — the save path surfaces the real error. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [inboxId]);
 
   // If the editId changes (e.g. navigation), re-sync state.
   useEffect(() => {
@@ -76,8 +112,11 @@ export function Upload({ theme, nav, state, setState, editId }: UploadProps) {
   };
 
   // Create requires a photo; edit keeps whatever the receipt already has
-  // (imported receipts may legitimately have none).
-  const hasPhoto = !!photoFile || (editId != null && existing?.photoPath != null);
+  // (imported receipts may legitimately have none). A drained inbox item counts
+  // as a photo — it IS one, already stored — but only once its path has
+  // actually loaded, so a slow fetch can't let an empty receipt through.
+  const hasInboxPhoto = inboxId != null && photoPreview != null;
+  const hasPhoto = !!photoFile || hasInboxPhoto || (editId != null && existing?.photoPath != null);
   const canSave = (editId != null || hasPhoto) && parseFloat(amount) > 0 && !submitting;
 
   const handleSave = async () => {
@@ -120,8 +159,9 @@ export function Upload({ theme, nav, state, setState, editId }: UploadProps) {
       return;
     }
 
-    // Create path (original logic)
-    if (!photoFile) return;
+    // Create path — either a freshly picked file, or a shared file already on
+    // the server that we adopt by id.
+    if (!photoFile && !hasInboxPhoto) return;
     const idx = Math.floor(Math.random() * PALETTE.length);
     const palette = PALETTE[idx];
     const form = receiptFormFromFields(
@@ -138,14 +178,20 @@ export function Upload({ theme, nav, state, setState, editId }: UploadProps) {
         items: [],
         tax: '0',
       },
-      photoFile,
+      photoFile ?? undefined,
+      // Sent even when a file was also picked: the server prefers the upload
+      // and still consumes the inbox row, so re-shooting the photo in the form
+      // does not leave the shared original sitting in the queue forever.
+      hasInboxPhoto ? inboxId : undefined,
     );
     setSubmitting(true);
     setSaveError(null);
     try {
       const created = await api.receipts.create(form);
       setState((s) => ({ ...s, receipts: [created, ...s.receipts] }));
-      nav({ name: 'home' });
+      // Back to the queue when draining, so a stack of shared files can be
+      // worked through without re-navigating between each one.
+      nav({ name: inboxId ? 'share-inbox' : 'home' });
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
     } finally {

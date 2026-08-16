@@ -46,6 +46,29 @@ export const Icon: Record<string, IconFn> = {
       <path d="M8 7h4M8 10h4" stroke={c} strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   ),
+  inbox: (c = 'currentColor') => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+      <path d="M3 11.5V15a2 2 0 002 2h10a2 2 0 002-2v-3.5h-3.6l-1 2h-4.8l-1-2H3z" stroke={c} strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M10 3v6m0 0l-2.2-2.2M10 9l2.2-2.2" stroke={c} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  phone: (c = 'currentColor') => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+      <rect x="6" y="2.5" width="8" height="15" rx="2" stroke={c} strokeWidth="1.4" />
+      <path d="M9 15h2" stroke={c} strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  ),
+  document: (c = 'currentColor') => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+      <path d="M5 3h6l4 4v10H5V3z" stroke={c} strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M11 3v4h4" stroke={c} strokeWidth="1.4" strokeLinejoin="round" />
+    </svg>
+  ),
+  trash: (c = 'currentColor') => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+      <path d="M4 6h12M8 6V4h4v2m-6 0v10h8V6" stroke={c} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
   user: (c = 'currentColor') => (
     <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
       <circle cx="10" cy="7" r="3" stroke={c} strokeWidth="1.4" />

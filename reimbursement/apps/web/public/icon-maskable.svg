@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Maskable variant: Android crops this to a platform-chosen shape (circle,
+       squircle, teardrop), so the ground bleeds to the full square and the mark
+       is pulled into the safe zone — the centre 80% circle. Same artwork as
+       icon.svg, scaled down and re-centred; nothing here may sit near an edge. -->
+  <rect width="512" height="512" fill="#4F0E0E"/>
+
+  <g transform="translate(256 256) scale(0.72) translate(-256 -256)">
+    <path fill="#F6EACB" d="M156,152
+      a24,24 0 0 1 24,-24
+      h152
+      a24,24 0 0 1 24,24
+      V372
+      l-25,24 -25,-24 -25,24 -25,-24 -25,24 -25,-24 -25,24 -25,-24
+      Z"/>
+    <rect x="188" y="176" width="136" height="16" rx="8" fill="#4F0E0E" opacity="0.24"/>
+    <rect x="188" y="216" width="100" height="16" rx="8" fill="#4F0E0E" opacity="0.24"/>
+    <rect x="188" y="256" width="120" height="16" rx="8" fill="#4F0E0E" opacity="0.24"/>
+    <rect x="188" y="308" width="136" height="20" rx="10" fill="#D9A441"/>
+  </g>
+</svg>
