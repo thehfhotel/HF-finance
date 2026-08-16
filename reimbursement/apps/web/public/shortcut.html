@@ -160,10 +160,26 @@
           ตั้ง 4 อย่างตามนี้ ไล่จากบนลงล่าง
         </p>
 
-        <div class="label">1. URL — คัดลอกช่องที่ 1 (วางเป็นข้อความ)</div>
+        <div class="note warn">
+          <strong>ลำดับสำคัญมาก:</strong> ต้องเปลี่ยน Method เป็น
+          <strong>POST</strong> ก่อน ไม่งั้นจะ<strong>ไม่เห็นหัวข้อ
+          Request Body</strong> เลย — Shortcuts จะซ่อนไว้ตอนที่ Method
+          ยังเป็น GET
+        </div>
+
+        <div class="label">1. URL — คัดลอกช่องที่ 1</div>
         <span class="field">https://reimbursement.thehfhotel.org/api/inbox/quick</span>
 
-        <div class="label">2. Method</div>
+        <div class="note warn">
+          ช่อง URL ต้องมี<strong>ข้อความลิงก์อย่างเดียว</strong> —
+          ถ้าเห็นก้อนสีฟ้า <strong>Shortcut&nbsp;Input</strong> อยู่ในช่องนี้
+          (ถึงจะมีลิงก์ต่อท้ายก็ตาม) แปลว่ายังผิดอยู่
+          <br /><br />
+          วิธีแก้ที่ง่ายที่สุด: กดปุ่ม <strong>ⓧ</strong> ท้ายช่อง
+          เพื่อล้างทั้งช่อง แล้วค่อยวางลิงก์ลงไปใหม่
+        </div>
+
+        <div class="label">2. Method — กด GET แล้วเปลี่ยนเป็น POST</div>
         <span class="field">POST</span>
 
         <div class="label">3. Headers — กด "Add new header" 3 ครั้ง</div>
@@ -171,7 +187,10 @@
         <span class="field">CF-Access-Client-Id&nbsp;&nbsp;→&nbsp;&nbsp;คัดลอกช่องที่ 3</span>
         <span class="field">CF-Access-Client-Secret&nbsp;&nbsp;→&nbsp;&nbsp;คัดลอกช่องที่ 4</span>
 
-        <div class="label">4. Request Body — เลือก <strong>File</strong></div>
+        <div class="label">
+          4. Request Body — เลือก <strong>File</strong>
+          (จะมีให้เห็นก็ต่อเมื่อ Method เป็น POST แล้ว)
+        </div>
         <span class="field">Request Body: File&nbsp;&nbsp;·&nbsp;&nbsp;File: Shortcut Input</span>
 
         <div class="note">
