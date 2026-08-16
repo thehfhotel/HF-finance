@@ -426,7 +426,7 @@ function Steps({ theme }: { theme: Theme }) {
     'เปิดแอป Shortcuts → กด + → ตั้งชื่อว่า "ส่งใบเสร็จ"',
     'กด ⓘ → เปิด Show in Share Sheet → เลือกเฉพาะ Images และ Files',
     'เพิ่มแอ็กชัน Get Contents of URL แล้วคัดลอก 4 ช่องด้านบนไปวาง',
-    'ช่อง URL ใส่ลิงก์เท่านั้น — Shortcut Input ต้องอยู่ในช่อง photo',
+    'Request Body เลือก File แล้วใส่ Shortcut Input — ช่อง URL ใส่ลิงก์เท่านั้น',
     'เสร็จแล้ว: เปิดรูปใบเสร็จ → ปุ่มแชร์ → "ส่งใบเสร็จ"',
   ];
 

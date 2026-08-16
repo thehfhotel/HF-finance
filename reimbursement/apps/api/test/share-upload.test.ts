@@ -4,6 +4,7 @@ import {
   ShareTooLargeError,
   UnsupportedShareTypeError,
   normalizeSharedMime,
+  fileFromRawBody,
   saveSharedFile,
 } from '../src/uploads';
 
@@ -97,5 +98,64 @@ describe('saveSharedFile rejections', () => {
 
   test('the size cap sits at or below what nginx will pass (25 MB)', () => {
     expect(MAX_SHARED_FILE_BYTES).toBeLessThanOrEqual(25 * 1024 * 1024);
+  });
+});
+
+/**
+ * The raw-body path — what an iPhone Shortcut's `Request Body: File` sends.
+ *
+ * It exists because the multipart recipe is the one people get wrong: the field
+ * type cannot be changed after the field is added, and the first empty box on
+ * that screen is the URL, so the photo ends up there and Shortcuts reports
+ * "couldn't convert from Photo media to URL". A raw body has one value and no
+ * field name, so there is nothing to misplace.
+ */
+describe('fileFromRawBody', () => {
+  const bytes = () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]).buffer;
+
+  test('wraps a JPEG body as a File with the declared type', () => {
+    const file = fileFromRawBody(bytes(), 'image/jpeg', undefined);
+    expect(file).not.toBeNull();
+    expect(file!.type).toBe('image/jpeg');
+    expect(file!.name).toBe('share.jpg');
+    expect(file!.size).toBe(7);
+  });
+
+  test.each([
+    ['application/pdf', 'share.pdf'],
+    ['image/png', 'share.png'],
+    ['image/heic', 'share.heic'],
+  ])('names a %s body %s', (type, expected) => {
+    expect(fileFromRawBody(bytes(), type, undefined)!.name).toBe(expected);
+  });
+
+  test('tolerates a charset parameter on the content type', () => {
+    expect(fileFromRawBody(bytes(), 'image/jpeg; charset=binary', undefined)!.type).toBe(
+      'image/jpeg',
+    );
+  });
+
+  test('honours a filename from Content-Disposition when one is sent', () => {
+    const file = fileFromRawBody(bytes(), 'image/jpeg', 'attachment; filename="IMG_0042.JPG"');
+    expect(file!.name).toBe('IMG_0042.JPG');
+  });
+
+  test('falls back to a generated name when Content-Disposition has no filename', () => {
+    expect(fileFromRawBody(bytes(), 'image/jpeg', 'attachment')!.name).toBe('share.jpg');
+  });
+
+  test('returns null for an empty body — nothing was actually sent', () => {
+    expect(fileFromRawBody(new ArrayBuffer(0), 'image/jpeg', undefined)).toBeNull();
+  });
+
+  test.each([
+    ['a missing content type', undefined],
+    ['an unsupported type', 'application/zip'],
+    ['a shell script', 'text/x-shellscript'],
+    // The exact shape a misconfigured Shortcut sends when the photo lands in
+    // the URL field and only form text reaches the body.
+    ['form-urlencoded', 'application/x-www-form-urlencoded'],
+  ])('returns null for %s', (_label, type) => {
+    expect(fileFromRawBody(bytes(), type, undefined)).toBeNull();
   });
 });

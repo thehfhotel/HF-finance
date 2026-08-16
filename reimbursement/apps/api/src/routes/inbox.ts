@@ -1,4 +1,4 @@
-import { Elysia, t } from 'elysia';
+import { Elysia } from 'elysia';
 import { auth } from '../auth';
 import { prisma } from '../db';
 import { serializeInboxItem } from '../serializers';
@@ -6,6 +6,7 @@ import {
   MAX_SHARED_FILE_BYTES,
   ShareTooLargeError,
   UnsupportedShareTypeError,
+  fileFromRawBody,
   saveSharedFile,
 } from '../uploads';
 import { resolveShareToken } from '../share_tokens';
@@ -77,7 +78,7 @@ export const inboxRoutes = new Elysia({ prefix: '/inbox' })
  */
 export const inboxQuickRoutes = new Elysia({ prefix: '/inbox' }).post(
   '/quick',
-  async ({ headers, body, status, set }) => {
+  async ({ headers, body, request, status, set }) => {
     const authz = headers.authorization;
     if (!authz?.startsWith('Bearer ')) {
       return status(401, { message: 'Missing Authorization: Bearer header' });
@@ -90,8 +91,40 @@ export const inboxQuickRoutes = new Elysia({ prefix: '/inbox' }).post(
       return status(401, { message: 'Invalid share token' });
     }
 
-    const file = body.photo;
-    if (!file) return status(400, { message: 'Missing photo' });
+    /**
+     * TWO body shapes, because the iPhone Shortcuts UI makes one of them much
+     * easier to get right than the other:
+     *
+     *   multipart/form-data with a `photo` field — the Form recipe, and what
+     *     any ordinary client sends.
+     *   a raw body — Shortcuts' `Request Body: File`, which posts the bytes
+     *     with the file's own Content-Type. One value, no field name, no field
+     *     type to choose, so there is nothing to put in the wrong box.
+     *
+     * The dispatch is safe because of how Elysia actually behaves (verified,
+     * not assumed): for multipart it parses into `body` and the underlying
+     * request stream is already consumed; for any other content type it leaves
+     * `body` undefined and the stream readable. So checking `body` first and
+     * falling back to the raw stream never double-reads.
+     */
+    let file: File | null = null;
+    let source = 'ios-share';
+
+    const parsed = body as { photo?: File; source?: string } | undefined;
+    if (parsed && typeof parsed === 'object' && parsed.photo instanceof File) {
+      file = parsed.photo;
+      if (typeof parsed.source === 'string') source = parsed.source.slice(0, 32);
+    } else {
+      const raw = await request.arrayBuffer();
+      file = fileFromRawBody(raw, headers['content-type'], headers['content-disposition']);
+    }
+
+    if (!file) {
+      return status(400, {
+        message:
+          'Missing photo — send multipart/form-data with a `photo` field, or the file as the raw request body',
+      });
+    }
 
     let saved;
     try {
@@ -117,18 +150,14 @@ export const inboxQuickRoutes = new Elysia({ prefix: '/inbox' }).post(
         // Untrusted: display only. uploads.ts always generates its own path.
         filename: file.name ? file.name.slice(0, 120) : null,
         sizeBytes: saved.sizeBytes,
-        source: typeof body.source === 'string' ? body.source.slice(0, 32) : 'ios-share',
+        source,
       },
     });
 
     set.status = 201;
     return serializeInboxItem(item);
   },
-  {
-    body: t.Object({
-      photo: t.Optional(t.File()),
-      source: t.Optional(t.String()),
-    }),
-    type: 'multipart/form-data',
-  },
+  // Deliberately NO body schema and no `type`: declaring multipart here made
+  // Elysia reject a raw body outright, which is exactly the shape the simpler
+  // Shortcut sends. Validation happens in the handler instead.
 );
