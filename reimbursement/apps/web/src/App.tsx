@@ -129,6 +129,7 @@ export function App() {
     approved: stats ? stats.approved.count + stats.paying.count : undefined,
     paid: stats?.paid.count,
     rejected: stats?.rejected.count,
+    shareInbox: shareInboxCount,
     myDrafts: myStats?.drafts,
     myPending: myStats?.pending.count,
     myApproved: myStats ? myStats.approved.count + myStats.paying.count : undefined,
@@ -631,6 +632,7 @@ export function App() {
     onLogout: handleLogout,
     stats,
     onShareInboxCount: setShareInboxCount,
+    shareInboxCount,
   });
 
   // Bottom nav is visible on top-level screens only (not sub-screens or auth).
@@ -687,6 +689,7 @@ export function App() {
             onLogout={handleLogout}
             sidebarCounts={sidebarCounts}
             initialView={route.name === 'my-requests' ? route.view : undefined}
+            onOpenShareInbox={() => setRoute({ name: 'share-inbox' })}
             onNavigateApprover={(key) => {
               if (key === 'employees') return setRoute({ name: 'admin-employees' });
               if (key === 'admin-settings') return setRoute({ name: 'admin-settings' });
@@ -702,6 +705,8 @@ export function App() {
             setState={setState}
             currentUser={currentUser}
             onLogout={handleLogout}
+            sidebarCounts={sidebarCounts}
+            onOpenShareInbox={() => setRoute({ name: 'share-inbox' })}
           />
         )}
         {IS_DEV && <TweaksPanel tweaks={tweaks} onChange={setTweak} onJump={onJump} />}
@@ -810,9 +815,11 @@ interface RenderArgs {
   stats: BundleStats | null;
   /** Lets the share-inbox screen keep the bottom-nav badge in sync. */
   onShareInboxCount: (count: number) => void;
+  /** Current queue length, for the badge on Home's app-bar entry point. */
+  shareInboxCount: number;
 }
 
-function renderScreen({ route, theme, state, setState, reqState, reqSetState, nav, reqNav, role, currentUser, onLogout, stats, onShareInboxCount }: RenderArgs) {
+function renderScreen({ route, theme, state, setState, reqState, reqSetState, nav, reqNav, role, currentUser, onLogout, stats, onShareInboxCount, shareInboxCount }: RenderArgs) {
   // Requestor flow — available to any signed-in user (owner-scoped data)
   if (route.name === 'upload')
     return (
@@ -840,7 +847,16 @@ function renderScreen({ route, theme, state, setState, reqState, reqSetState, na
     return <BundleSubmitted theme={theme} state={reqState} nav={reqNav} bundleId={route.id} />;
   if (route.name === 'bundle') return <BundleDetail theme={theme} state={reqState} nav={reqNav} bundleId={route.id} />;
   if (route.name === 'my-requests')
-    return <Home theme={theme} state={reqState} nav={nav} currentUser={currentUser} isApprover={role === 'approver'} />;
+    return (
+      <Home
+        theme={theme}
+        state={reqState}
+        nav={nav}
+        currentUser={currentUser}
+        isApprover={role === 'approver'}
+        shareInboxCount={shareInboxCount}
+      />
+    );
 
   // Approver inbox flow
   if (route.name === 'approver-review')
@@ -866,6 +882,7 @@ function renderScreen({ route, theme, state, setState, reqState, reqSetState, na
         nav={nav}
         currentUser={currentUser}
         onLogout={onLogout}
+        shareInboxCount={shareInboxCount}
       />
     );
   return <Inbox theme={theme} state={state} nav={nav} currentUser={currentUser} onLogout={onLogout} stats={stats} />;

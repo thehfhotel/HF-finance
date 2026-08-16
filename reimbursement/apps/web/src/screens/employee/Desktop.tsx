@@ -47,13 +47,17 @@ interface DesktopEmployeeProps {
   /** Approvers see the approval box and พนักงาน in the shared sidebar; this
    *  carries those clicks back to the approver console. */
   onNavigateApprover?: (key: SidebarKey) => void;
+  /** Open the share inbox (files sent in from a phone). Its own callback
+   *  rather than a SidebarKey on onNavigateApprover, because a plain
+   *  employee's shell is never given that prop. */
+  onOpenShareInbox?: () => void;
   /** Which pane the click that brought us here actually meant. */
   initialView?: 'drafts' | 'pending' | 'approved' | 'paid' | 'rejected';
   /** Shared across every screen so the menu's numbers never change shape. */
   sidebarCounts?: SidebarCounts;
 }
 
-export function DesktopEmployee({ theme, state, setState, currentUser, onBackToInbox, onLogout, onNavigateApprover, initialView, sidebarCounts }: DesktopEmployeeProps): JSX.Element {
+export function DesktopEmployee({ theme, state, setState, currentUser, onBackToInbox, onLogout, onNavigateApprover, onOpenShareInbox, initialView, sidebarCounts }: DesktopEmployeeProps): JSX.Element {
   // onBackToInbox is only supplied for approvers, so it doubles as the role flag.
   const isApprover = onBackToInbox !== undefined;
   const [view, setView] = useState<View>(
@@ -268,6 +272,10 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
       active={view === 'drafts' ? 'my-drafts' : (`my-${listFilter}` as SidebarKey)}
       counts={sidebarCounts}
       onSelect={(key) => {
+        // Before the `my-` branch on purpose — see the SidebarKey comment. It
+        // also needs its own callback rather than falling through to
+        // onNavigateApprover, which a plain employee's shell never receives.
+        if (key === 'share-inbox') return onOpenShareInbox?.();
         if (key === 'my-drafts') return goToDrafts();
         if (key.startsWith('my-')) return openBundleList(key.slice(3) as BundleFilter);
         // Everything else lives on the approver console.

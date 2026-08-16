@@ -17,9 +17,11 @@ interface HomeProps {
   currentUser: User | null;
   isApprover?: boolean;
   onLogout?: () => void;
+  /** Files shared in from a phone, waiting to become receipts. */
+  shareInboxCount?: number;
 }
 
-export function Home({ theme, state, nav, currentUser, isApprover, onLogout }: HomeProps) {
+export function Home({ theme, state, nav, currentUser, isApprover, onLogout, shareInboxCount = 0 }: HomeProps) {
   const { receipts, bundles } = state;
 
   const loose = receipts.filter((r) => r.bundleId === null);
@@ -52,6 +54,55 @@ export function Home({ theme, state, nav, currentUser, isApprover, onLogout }: H
         leading={<Avatar theme={theme} initials={currentUser?.initials ?? ''} />}
         trailing={
           <>
+            {/* The share inbox lives here as well as in the bottom nav, because
+                the approver bar is already full at five items and an approver
+                is also an employee who shares receipts. This app bar is the one
+                surface both roles land on. */}
+            <button
+              onClick={() => nav({ name: 'share-inbox' })}
+              title="กล่องขาเข้า"
+              aria-label={
+                shareInboxCount > 0
+                  ? `กล่องขาเข้า ${shareInboxCount} ไฟล์รอดำเนินการ`
+                  : 'กล่องขาเข้า'
+              }
+              style={{
+                position: 'relative',
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '8px 10px',
+                borderRadius: 100,
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                color: theme.inkSoft,
+              }}
+            >
+              {Icon.inbox(theme.inkSoft)}
+              {shareInboxCount > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 2,
+                    right: 3,
+                    minWidth: 16,
+                    height: 16,
+                    padding: '0 4px',
+                    borderRadius: 8,
+                    background: theme.danger,
+                    color: '#fff',
+                    fontFamily: FONT,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    lineHeight: '16px',
+                    textAlign: 'center',
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  {shareInboxCount > 9 ? '9+' : shareInboxCount}
+                </span>
+              )}
+            </button>
             {onLogout && !isApprover && (
               <button
                 onClick={onLogout}

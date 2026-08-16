@@ -23,6 +23,11 @@ export type SidebarKey =
   | 'approved'
   | 'paid'
   | 'rejected'
+  // Files shared in from a phone, waiting to become receipts. Deliberately NOT
+  // named `my-inbox`: both desktop shells route on `key.startsWith('my-')` and
+  // read the suffix as a bundle filter, so a `my-` name here would be silently
+  // swallowed as a filter called "inbox".
+  | 'share-inbox'
   // Your own requests. Laid out as their own four rows rather than collapsed
   // behind one "my requests" link: an approver is also an employee, and hiding
   // their own work one click deeper is the mode switch this menu exists to kill.
@@ -40,6 +45,8 @@ export interface SidebarCounts {
   approved?: number;
   paid?: number;
   rejected?: number;
+  /** Files shared in from a phone that are not receipts yet. */
+  shareInbox?: number;
   myDrafts?: number;
   myPending?: number;
   myApproved?: number;
@@ -194,6 +201,11 @@ export function AppSidebar({
       )}
 
       <Section theme={theme} label="คำขอของฉัน" />
+      {/* First in the section because it is the stage BEFORE a draft: a file
+          shared from a phone has not been given an amount yet. Shown to
+          approvers too — an approver is also an employee, which is the whole
+          premise of this section. */}
+      {item('share-inbox', 'กล่องขาเข้า', Icon.inbox, { count: counts.shareInbox })}
       {item('my-drafts', 'รายการใหม่', Icon.draft, { count: counts.myDrafts })}
       {item('my-pending', 'รออนุมัติ', Icon.clock, { count: counts.myPending, dot: theme.statusPending })}
       {item('my-approved', 'อนุมัติแล้ว', Icon.checkCircle, { count: counts.myApproved, dot: theme.statusApproved })}
