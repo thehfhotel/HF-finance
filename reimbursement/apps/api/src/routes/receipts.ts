@@ -29,6 +29,15 @@ const receiptMultipartBody = t.Object({
   items: t.Optional(t.Union([t.String(), t.Array(t.Unknown())])),
   tax: t.Optional(t.String()),
   photo: t.Optional(t.File()),
+  /**
+   * Drain an inbox item instead of uploading a photo (CR-2026-08-16).
+   *
+   * The file already sits in the uploads volume — the phone put it there when
+   * it was shared — so the receipt form re-posting those same bytes would be a
+   * pointless second upload over a hotel wifi. Sending the id instead adopts
+   * the stored file and deletes the queue row.
+   */
+  inboxId: t.Optional(t.String()),
 });
 
 const requiredCreateFields = ['merchant', 'category', 'amount', 'date', 'items'] as const;
@@ -47,6 +56,8 @@ interface ParsedReceiptInput {
   items?: ReceiptItem[];
   tax?: string;
   photoPath?: string;
+  /** Set when the photo came from the share inbox; the row is consumed on save. */
+  inboxId?: string;
 }
 
 function parseItems(rawItems: string): ReceiptItem[] {
@@ -105,6 +116,12 @@ async function parseReceiptMultipart(
 
   if (body.photo) {
     parsed.photoPath = await saveUploadedFile(body.photo);
+  }
+
+  // Ownership cannot be checked here (no `user` in scope), so this only carries
+  // the id forward — the create handler resolves it against the caller.
+  if (body.inboxId !== undefined && body.inboxId.length > 0) {
+    parsed.inboxId = body.inboxId;
   }
 
   return parsed;
@@ -180,27 +197,59 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
         return status(400, { message });
       }
 
+      // Draining a shared file: adopt the already-stored photo rather than
+      // making the phone upload the same bytes again. Scoped to the caller in
+      // the WHERE clause, so one employee can never adopt another's file by
+      // guessing an id — the lookup simply finds nothing.
+      let inboxItem = null;
+      if (parsed.inboxId !== undefined) {
+        inboxItem = await prisma.receiptInbox.findFirst({
+          where: { id: parsed.inboxId, userId: user.id },
+        });
+        if (!inboxItem) {
+          return status(404, { message: 'Inbox item not found' });
+        }
+      }
+
+      // An explicitly uploaded photo wins over the inbox one: if the employee
+      // re-shot the receipt in the form, that is the photo they meant.
+      const photoPath = parsed.photoPath ?? inboxItem?.photoPath ?? null;
+
       // The vendor is resolved from the typed merchant on the way in, so there
       // is exactly one path to a vendorId and the client never posts one.
       const vendorId = await resolveVendorId(parsed.merchant);
 
-      const created = await prisma.receipt.create({
-        data: {
-          userId: user.id,
-          merchant: parsed.merchant,
-          vendorId,
-          category: parsed.category,
-          property: parsed.property ?? 'hf-hotel',
-          quantity: parsed.quantity ?? null,
-          amount: parsed.amount,
-          date: parsed.date,
-          note: parsed.note ?? null,
-          color: parsed.color ?? '#F5EBD9',
-          accent: parsed.accent ?? '#7E5E3A',
-          items: parsed.items,
-          tax: parsed.tax ?? '0',
-          photoPath: parsed.photoPath ?? null,
-        },
+      // One transaction so a receipt can never exist while its inbox row also
+      // still does — that would show the employee the same shared photo again
+      // and invite a duplicate claim for the same expense.
+      const created = await prisma.$transaction(async (tx) => {
+        const receipt = await tx.receipt.create({
+          data: {
+            userId: user.id,
+            merchant: parsed.merchant,
+            vendorId,
+            category: parsed.category,
+            property: parsed.property ?? 'hf-hotel',
+            quantity: parsed.quantity ?? null,
+            amount: parsed.amount,
+            date: parsed.date,
+            note: parsed.note ?? null,
+            color: parsed.color ?? '#F5EBD9',
+            accent: parsed.accent ?? '#7E5E3A',
+            items: parsed.items,
+            tax: parsed.tax ?? '0',
+            photoPath,
+          },
+        });
+
+        if (inboxItem) {
+          // deleteMany, not delete: a concurrent drain of the same item (two
+          // tabs, a double-tap) must not throw P2025 and lose the receipt that
+          // was just created. Whoever gets there second simply deletes nothing.
+          await tx.receiptInbox.deleteMany({ where: { id: inboxItem.id, userId: user.id } });
+        }
+
+        return receipt;
       });
 
       return serializeReceipt(created);

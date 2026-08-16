@@ -90,6 +90,25 @@ jobs:
     name: Root contract check (packages/shared)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Postgres for reimbursement's own test suite (added 2026-08-16 with the
+    # share-inbox feature). The share-token tests cover a credential that is
+    # accepted from the open internet — revocation actually taking effect, and
+    # one employee being unable to revoke another's token — so they gate the
+    # DEPLOY, not just PR CI. Without this service they would silently skip.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: reimbursement_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v5.0.0
@@ -117,6 +136,18 @@ jobs:
           bun install --frozen-lockfile
           bun --filter api db:generate
           bun run typecheck
+
+      - name: Reimbursement migrations (test database)
+        working-directory: reimbursement/apps/api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/reimbursement_test
+        run: bunx prisma migrate deploy --schema=prisma/schema.prisma
+
+      - name: Reimbursement test suite
+        working-directory: reimbursement
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/reimbursement_test
+        run: bun run test
 
   # ──────────────────────────────────────────────────────────────────────
   # Deploy to evergreen via SSH from a GitHub-hosted runner.
@@ -263,6 +294,23 @@ jobs:
           # "จ่ายผ่าน KBIZ" action answers 503 and the poller never starts,
           # and without the webhook nothing goes to Slack.
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          # Cloudflare Access SERVICE TOKEN for the iPhone share-sheet upload
+          # path (CR-2026-08-16). Served to already-authenticated employees on
+          # the "เชื่อมต่อมือถือ" screen so the pair never has to be carried to a
+          # phone by hand — and so nobody publishes a pre-filled Shortcut via an
+          # iCloud link, which would embed these in a publicly fetchable URL.
+          #
+          # These prove "an HF device", NOT "this person": on their own they can
+          # create nothing, because /api/inbox/quick still demands the
+          # employee's own share token. That is what makes serving them to staff
+          # acceptable where serving a real credential would not be.
+          #
+          # Optional, and BOTH-OR-NEITHER (see share_setup.ts). Unset ⇒ the
+          # screen reports "ask your admin" and iOS setup stays manual; Android
+          # is unaffected either way, since it authenticates by the employee's
+          # own Access session.
+          CF_SHARE_CLIENT_ID: ${{ secrets.CF_SHARE_CLIENT_ID }}
+          CF_SHARE_CLIENT_SECRET: ${{ secrets.CF_SHARE_CLIENT_SECRET }}
           IMAGE_TAG: sha-${{ github.sha }}
         run: |
           set -euo pipefail
@@ -317,6 +365,11 @@ jobs:
           # (root) and here, together, in the same commit.
           KBIZ_QUEUE_HOST_DIR=/home/deploy/kbiz-queue
           SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+
+          # iPhone share-sheet upload — Cloudflare Access service token.
+          # Optional and both-or-neither; unset leaves iOS setup manual.
+          CF_SHARE_CLIENT_ID=${CF_SHARE_CLIENT_ID}
+          CF_SHARE_CLIENT_SECRET=${CF_SHARE_CLIENT_SECRET}
           EOF
 
       - name: Log in to GHCR (on remote host)

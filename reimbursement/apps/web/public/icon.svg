@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- HF One family: same burgundy ground and gold accent as the HF Portal
+       icon (hf-erp/public/icon.svg), but a receipt rather than the "HF"
+       diamond — on a home screen carrying both, they must not read as the
+       same app. Font-free on purpose: the mark has to survive rasterization
+       on any host, and a glyph that silently falls back to tofu is worse than
+       no glyph. -->
+  <rect width="512" height="512" rx="112" fill="#4F0E0E"/>
+
+  <!-- Receipt: rounded top, torn zigzag bottom. -->
+  <path fill="#F6EACB" d="M156,152
+    a24,24 0 0 1 24,-24
+    h152
+    a24,24 0 0 1 24,24
+    V372
+    l-25,24 -25,-24 -25,24 -25,-24 -25,24 -25,-24 -25,24 -25,-24
+    Z"/>
+
+  <!-- Line items. Ragged widths so it reads as a printed slip, not a form. -->
+  <rect x="188" y="176" width="136" height="16" rx="8" fill="#4F0E0E" opacity="0.24"/>
+  <rect x="188" y="216" width="100" height="16" rx="8" fill="#4F0E0E" opacity="0.24"/>
+  <rect x="188" y="256" width="120" height="16" rx="8" fill="#4F0E0E" opacity="0.24"/>
+
+  <!-- The total, in gold: the one line anybody actually looks at. -->
+  <rect x="188" y="308" width="136" height="20" rx="10" fill="#D9A441"/>
+</svg>

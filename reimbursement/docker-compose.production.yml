@@ -116,6 +116,12 @@ services:
       # Slack alerts for payments that need a human (shared payroll webhook).
       # Absent → no Slack, same fail-dark posture as the portal token above.
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      # Cloudflare Access service token for the iPhone share-sheet upload path
+      # (CR-2026-08-16), served to authenticated employees on the
+      # "เชื่อมต่อมือถือ" screen. Both-or-neither: unset leaves iOS setup manual
+      # and changes nothing else. Android never needs these.
+      CF_SHARE_CLIENT_ID: ${CF_SHARE_CLIENT_ID:-}
+      CF_SHARE_CLIENT_SECRET: ${CF_SHARE_CLIENT_SECRET:-}
     volumes:
       # Persistent storage for receipt photos and transfer screenshots.
       # Mount path matches the apps/api/uploads directory inside the image.

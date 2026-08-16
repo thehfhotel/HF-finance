@@ -5,6 +5,8 @@ import { mkdir } from 'node:fs/promises';
 import { prisma } from './db';
 import { meRoutes } from './routes/me';
 import { receiptRoutes } from './routes/receipts';
+import { inboxQuickRoutes, inboxRoutes } from './routes/inbox';
+import { shareTargetRoutes } from './routes/share_target';
 import { bundleRoutes } from './routes/bundles';
 import { vendorRoutes } from './routes/vendors';
 import { authCfRoutes, hasValidCfIdentity } from './routes/auth_cf';
@@ -152,6 +154,14 @@ const app = new Elysia()
     api
       .use(meRoutes)
       .use(receiptRoutes)
+      .use(inboxRoutes)
+      // The two phone-facing producers carry their OWN authentication —
+      // a share token and a Cloudflare Access assertion respectively — so
+      // neither mounts the session `auth` plugin. Keeping them as separate
+      // instances is what stops a future `.use(auth)` on a sibling from
+      // silently making them require a session that a phone cannot have.
+      .use(inboxQuickRoutes)
+      .use(shareTargetRoutes)
       .use(bundleRoutes)
       .use(vendorRoutes)
       .use(authCfRoutes)

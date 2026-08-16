@@ -6,6 +6,19 @@
     <title>เบิกค่าใช้จ่าย</title>
     <!-- HF One brand colour for the browser/PWA chrome (--hf-brand-800). -->
     <meta name="theme-color" content="#4F0E0E" />
+    <!-- Until 2026-08-16 this app shipped no manifest at all, so an iPhone
+         "Add to Home Screen" was a plain bookmark with a screenshot for an
+         icon. The manifest fixes that on both platforms AND declares the
+         Android share target (iOS ignores share_target — WebKit has never
+         implemented it, hence the Shortcut). See CR-2026-08-16. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <!-- iOS reads none of the manifest's icons for the home screen; this tag
+         is the only one it honours, and without it the icon is a screenshot. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="เบิกค่าใช้จ่าย" />
     <!-- Sarabun is the HF One face. Weights 400/500/600/700 are the only ones
          the design contract uses. display=swap so a slow font never blanks the
          app; lib/theme.ts keeps a Thai-capable system fallback behind it. -->

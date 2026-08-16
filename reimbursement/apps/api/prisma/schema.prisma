@@ -47,8 +47,103 @@ model User {
   bundlesOwned    Bundle[]  @relation("submitter")
   bundlesApproved Bundle[]  @relation("approver")
   auditEvents     AuditEvent[]
+  inboxItems      ReceiptInbox[]
+  shareTokens     ShareToken[]
 
   @@map("users")
+}
+
+/// A file that arrived from outside the app — an iPhone share-sheet Shortcut or
+/// an Android Web Share Target — and is waiting to become a Receipt.
+///
+/// This table exists so that `Receipt` never has to represent a half-receipt. A
+/// shared photo carries no amount, merchant, category or date, and every
+/// consumer of a Receipt (bundle totals, the KBIZ category mapping, the
+/// approver inbox, stats) is entitled to assume those are present. Parking the
+/// file here instead keeps that invariant absolute: an inbox row is a file with
+/// an owner, nothing more, and the employee turns it into a real Receipt in the
+/// ordinary upload form.
+///
+/// Rows are deleted when drained (or discarded) — this is a queue, not history.
+/// The Receipt it becomes owns the file from then on.
+model ReceiptInbox {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Public URL path of the DISPLAYABLE image, always something an <img> can
+  /// render. A shared PDF is rasterized to page 1 at upload and this points at
+  /// that JPEG, so the drain screen and the receipt form need no PDF branch.
+  photoPath String
+
+  /// Public URL path of the original upload when it is not itself the
+  /// displayable image — i.e. the source PDF. Null when an image arrived and
+  /// was stored as-is. Kept so the true document survives rasterization.
+  originalPath String?
+
+  /// MIME type as received, after the allowlist check. The ORIGINAL type, not
+  /// the rasterized one: "application/pdf" here still means a PDF came in.
+  mimeType String
+
+  /// Filename the phone sent, for display in the drain list. Untrusted — never
+  /// used to build a path (see uploads.ts, which always generates its own).
+  filename String?
+
+  /// Size of the original upload in bytes. Display + abuse forensics.
+  sizeBytes Int
+
+  /// Which producer created this row: "ios-share" | "android-share". A string,
+  /// not an enum, so a later producer (kiosk scan, email-in) is a new value
+  /// rather than a migration. The drain UI treats every source identically.
+  source String @default("ios-share")
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("receipt_inbox")
+}
+
+/// A long-lived credential that lets one employee's phone POST a shared file
+/// into their own inbox, without a browser and without a Cloudflare Access
+/// session.
+///
+/// Opaque random token, NOT a JWT: revocation has to be immediate and real, and
+/// a JWT would need this same database lookup to be revocable — so the JWT
+/// would buy nothing while adding a signature to leak. Only the SHA-256 hash is
+/// stored, so a dump of this table cannot be replayed against the API. The
+/// plaintext is shown exactly once, at creation.
+///
+/// This is not the app's session credential: it authenticates ONE endpoint
+/// (`POST /api/receipts/quick`) and can do nothing else — it cannot read
+/// receipts, cannot list bundles, cannot log in.
+model ShareToken {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// SHA-256 of the plaintext token, hex. Unique so the database itself refuses
+  /// to hold the same token twice.
+  tokenHash String @unique
+
+  /// First 6 characters of the random part, e.g. "a1b2c3", shown in the UI as
+  /// `hfr_a1b2c3…` so a person can tell two tokens apart without seeing either.
+  hint String
+
+  /// Free-text label — "iPhone ของนัท". Employee-supplied, display only.
+  label String @default("")
+
+  /// Stamped on every accepted upload. Lets the settings screen show "last used"
+  /// and makes an unused (possibly leaked-and-forgotten) token visible.
+  lastUsedAt DateTime?
+
+  /// Set instead of deleting the row, so a revoked token's hash stays claimed
+  /// and its usage history survives. A revoked token is rejected at verify time.
+  revokedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("share_tokens")
 }
 
 model Receipt {

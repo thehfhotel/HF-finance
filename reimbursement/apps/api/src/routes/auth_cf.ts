@@ -1,6 +1,7 @@
 import { Elysia } from 'elysia';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { prisma } from '../db';
+import type { User } from '../generated/prisma';
 import { signAuthToken } from '../jwt';
 import { serializeUser } from '../serializers';
 
@@ -161,70 +162,104 @@ function initialsFor(name: string): string {
   return (raw || '??').slice(0, 4);
 }
 
+// ─── Shared identity resolution ──────────────────────────────────────────────
+
+/**
+ * What a verified Cloudflare Access assertion turned out to be.
+ *
+ * `kiosk` is not a failure: a kiosk is a place, not a person (see
+ * `KIOSK_EMAILS` above), and callers have to decide for themselves what a place
+ * is allowed to do. The login route offers it a card-tap screen; the Android
+ * share-target route refuses it, because a shared file with no person attached
+ * has no inbox to land in.
+ */
+export type CfIdentity =
+  | { kind: 'user'; user: User }
+  | { kind: 'kiosk'; kioskId: string }
+  | { kind: 'unconfigured'; missing: string[] }
+  | { kind: 'unauthenticated' }
+  | { kind: 'unknown-identity' };
+
+/**
+ * Verify an Access assertion and resolve who it belongs to.
+ *
+ * Extracted from the login route so that every endpoint authenticating by
+ * Access identity — the login exchange and the Android share target — runs the
+ * SAME verification. Two copies of "verify RS256, pin iss/aud, map the email"
+ * is exactly the kind of duplication where one copy later forgets to pin the
+ * audience.
+ */
+export async function resolveCfIdentity(assertion: string | undefined): Promise<CfIdentity> {
+  const config = getCfAccessConfig();
+  if ('missing' in config) return { kind: 'unconfigured', missing: config.missing };
+  if (!assertion) return { kind: 'unauthenticated' };
+
+  let payload;
+  try {
+    const result = await jwtVerify(assertion, jwks, {
+      issuer: `https://${CF_ACCESS_TEAM_DOMAIN}`,
+      audience: config.aud,
+      algorithms: ['RS256'],
+    });
+    payload = result.payload;
+  } catch {
+    return { kind: 'unauthenticated' };
+  }
+
+  const rawEmail = payload.email;
+  if (typeof rawEmail !== 'string' || rawEmail.length === 0) {
+    return { kind: 'unknown-identity' };
+  }
+
+  // Kiosk check comes BEFORE the user lookup, deliberately. The office PC's
+  // shared Google is also present on an employee row, and the kiosk identity
+  // has to win — otherwise that terminal keeps signing itself in as a person.
+  // Ordering it this way also means switching a terminal to kiosk mode is a
+  // pure env change, with no row to migrate and nothing to undo.
+  const kioskId = KIOSK_EMAILS.get(rawEmail.trim().toLowerCase());
+  if (kioskId) return { kind: 'kiosk', kioskId };
+
+  // Cloudflare forwards the IdP's display name when it has one; HF-ID's own
+  // fallback (`พนักงาน <badge>`) is used when it doesn't, and the next card or
+  // QR login refreshes it from central either way.
+  const cfName = typeof payload.name === 'string' ? payload.name : undefined;
+
+  const user = await resolveUserByCfEmail(rawEmail, cfName);
+  if (!user) return { kind: 'unknown-identity' };
+
+  return { kind: 'user', user };
+}
+
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 export const authCfRoutes = new Elysia().group('/auth', (group) =>
   group.post('/cf-login', async ({ headers, status }) => {
-    const config = getCfAccessConfig();
-    if ('missing' in config) {
-      return status(503, {
-        message: `Cloudflare Access login not configured. Missing env: ${config.missing.join(', ')}`,
-      });
+    const identity = await resolveCfIdentity(headers['cf-access-jwt-assertion']);
+
+    switch (identity.kind) {
+      case 'unconfigured':
+        return status(503, {
+          message: `Cloudflare Access login not configured. Missing env: ${identity.missing.join(', ')}`,
+        });
+      case 'unauthenticated':
+        return status(401, {
+          message: 'ไม่พบข้อมูลยืนยันตัวตนจาก Cloudflare Access กรุณาเข้าสู่ระบบใหม่อีกครั้ง',
+        });
+      case 'unknown-identity':
+        return status(403, {
+          message: 'บัญชีนี้ยังไม่ได้ผูกกับพนักงานในระบบเบิกค่าใช้จ่าย — ติดต่อผู้ดูแลระบบ',
+        });
+      case 'kiosk':
+        // Not an error: a place has no session. The SPA reads this as "show the
+        // card-tap screen" so an employee can attach themselves to the terminal.
+        return { kiosk: true as const, kioskId: identity.kioskId };
+      case 'user': {
+        const token = await signAuthToken({
+          userId: identity.user.id,
+          badge: identity.user.badge ?? undefined,
+        });
+        return { token, user: serializeUser(identity.user) };
+      }
     }
-
-    const assertion = headers['cf-access-jwt-assertion'];
-    if (!assertion) {
-      return status(401, {
-        message: 'ไม่พบข้อมูลยืนยันตัวตนจาก Cloudflare Access กรุณาเข้าสู่ระบบใหม่อีกครั้ง',
-      });
-    }
-
-    let payload;
-    try {
-      const result = await jwtVerify(assertion, jwks, {
-        issuer: `https://${CF_ACCESS_TEAM_DOMAIN}`,
-        audience: config.aud,
-        algorithms: ['RS256'],
-      });
-      payload = result.payload;
-    } catch {
-      return status(401, {
-        message: 'ไม่พบข้อมูลยืนยันตัวตนจาก Cloudflare Access กรุณาเข้าสู่ระบบใหม่อีกครั้ง',
-      });
-    }
-
-    const rawEmail = payload.email;
-    if (typeof rawEmail !== 'string' || rawEmail.length === 0) {
-      return status(403, {
-        message: 'บัญชีนี้ยังไม่ได้ผูกกับพนักงานในระบบเบิกค่าใช้จ่าย — ติดต่อผู้ดูแลระบบ',
-      });
-    }
-
-    // Kiosk check comes BEFORE the user lookup, deliberately. The office PC's
-    // shared Google is also present on an employee row, and the kiosk identity
-    // has to win — otherwise that terminal keeps signing itself in as a person.
-    // Ordering it this way also means switching a terminal to kiosk mode is a
-    // pure env change, with no row to migrate and nothing to undo.
-    const kioskId = KIOSK_EMAILS.get(rawEmail.trim().toLowerCase());
-    if (kioskId) {
-      // Not an error: a place has no session. The SPA reads this as "show the
-      // card-tap screen" so an employee can attach themselves to the terminal.
-      return { kiosk: true as const, kioskId };
-    }
-
-    // Cloudflare forwards the IdP's display name when it has one; HF-ID's own
-    // fallback (`พนักงาน <badge>`) is used when it doesn't, and the next card or
-    // QR login refreshes it from central either way.
-    const cfName = typeof payload.name === 'string' ? payload.name : undefined;
-
-    const user = await resolveUserByCfEmail(rawEmail, cfName);
-    if (!user) {
-      return status(403, {
-        message: 'บัญชีนี้ยังไม่ได้ผูกกับพนักงานในระบบเบิกค่าใช้จ่าย — ติดต่อผู้ดูแลระบบ',
-      });
-    }
-
-    const token = await signAuthToken({ userId: user.id, badge: user.badge ?? undefined });
-    return { token, user: serializeUser(user) };
   }),
 );

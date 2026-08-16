@@ -24,6 +24,9 @@ import { BundleBuilder } from './screens/employee/BundleBuilder';
 import { BundleSubmitted } from './screens/employee/BundleSubmitted';
 import { BundleDetail } from './screens/employee/BundleDetail';
 import { Inbox } from './screens/approver/Inbox';
+// The employee's share queue. Distinct from the approver `Inbox` above — that
+// one is the bundle review queue, this one is files shared in from a phone.
+import { ShareInbox } from './screens/employee/ShareInbox';
 import { Overview } from './screens/approver/Overview';
 import { Review } from './screens/approver/Review';
 import { Pay } from './screens/approver/Pay';
@@ -58,6 +61,18 @@ function initialRouteFromUrl(): Route {
   if (path === '/admin/kbiz') return { name: 'admin-settings' };
   if (path === '/my-requests') return { name: 'my-requests' };
   if (path === '/overview') return { name: 'overview' };
+
+  // Android's share target hands the browser back here after storing the file
+  // (`303 → /?inbox=1`), so this query param is a real entry point into the app
+  // and may be the FIRST thing that ever renders — including a cold start with
+  // no session yet. `shareError` carries WHY a share failed, as a reason code
+  // rather than a sentence, so the Thai wording lives in the UI and not in a
+  // Location header. See apps/api/src/routes/share_target.ts.
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('inbox') === '1') {
+    return { name: 'share-inbox', shareError: params.get('shareError') ?? undefined };
+  }
+
   return { name: 'home' };
 }
 
@@ -98,6 +113,8 @@ export function App() {
   const [kioskId, setKioskId] = useState<string | null>(null);
   const [stats, setStats] = useState<BundleStats | null>(null);
   const [myStats, setMyStats] = useState<BundleStats | null>(null);
+  /** Badge count for the share inbox. Refreshed on every visit to that screen. */
+  const [shareInboxCount, setShareInboxCount] = useState(0);
   // One set of numbers for the sidebar, computed once and given to every
   // desktop screen. Each screen used to pass only the counts it happened to
   // own, so numbers appeared and vanished as you navigated and the "identical"
@@ -128,18 +145,23 @@ export function App() {
       // the ?mine=1 list, each joined to receipts, submitter and approver.
       // Counts and charts come from /stats now, so the lists only need enough
       // rows to fill a screen.
-      const [receipts, bundles, stats, myReceipts, myBundles, myStats] = await Promise.all([
+      const [receipts, bundles, stats, myReceipts, myBundles, myStats, inbox] = await Promise.all([
         api.receipts.list(),
         api.bundles.list(undefined, { limit: PAGE_SIZE }),
         api.bundles.stats(),
         api.receipts.list({ mine: true }),
         api.bundles.list(undefined, { mine: true, limit: PAGE_SIZE }),
         api.bundles.stats({ mine: true }),
+        // Files shared in from a phone. Fetched with the rest so the nav badge
+        // is right on first paint — an inbox nobody notices is an inbox that
+        // silently fills up.
+        api.inbox.list().catch(() => []),
       ]);
       setState({ receipts, bundles });
       setMyState({ receipts: myReceipts, bundles: myBundles });
       setStats(stats);
       setMyStats(myStats);
+      setShareInboxCount(inbox.length);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Unknown error');
     }
@@ -608,10 +630,17 @@ export function App() {
     currentUser,
     onLogout: handleLogout,
     stats,
+    onShareInboxCount: setShareInboxCount,
   });
 
   // Bottom nav is visible on top-level screens only (not sub-screens or auth).
-  const BOTTOM_NAV_ROUTES = new Set<Route['name']>(['home', 'approver-home', 'overview', 'my-requests']);
+  const BOTTOM_NAV_ROUTES = new Set<Route['name']>([
+    'home',
+    'share-inbox',
+    'approver-home',
+    'overview',
+    'my-requests',
+  ]);
   const showBottomNav = platform === 'mobile' && BOTTOM_NAV_ROUTES.has(route.name);
   const handleBottomNav = (r: BottomNavRoute) => setRoute({ name: r } as Route);
   // An approver landing at '/' sits on route 'home' but sees the Inbox —
@@ -699,6 +728,7 @@ export function App() {
           activeRoute={activeBottomRoute}
           theme={theme}
           onNavigate={handleBottomNav}
+          shareInboxCount={shareInboxCount}
         />
       )}
       {showFab && (
@@ -778,11 +808,32 @@ interface RenderArgs {
   currentUser: User | null;
   onLogout: () => void;
   stats: BundleStats | null;
+  /** Lets the share-inbox screen keep the bottom-nav badge in sync. */
+  onShareInboxCount: (count: number) => void;
 }
 
-function renderScreen({ route, theme, state, setState, reqState, reqSetState, nav, reqNav, role, currentUser, onLogout, stats }: RenderArgs) {
+function renderScreen({ route, theme, state, setState, reqState, reqSetState, nav, reqNav, role, currentUser, onLogout, stats, onShareInboxCount }: RenderArgs) {
   // Requestor flow — available to any signed-in user (owner-scoped data)
-  if (route.name === 'upload') return <Upload theme={theme} state={reqState} nav={reqNav} setState={reqSetState} editId={route.editId} />;
+  if (route.name === 'upload')
+    return (
+      <Upload
+        theme={theme}
+        state={reqState}
+        nav={reqNav}
+        setState={reqSetState}
+        editId={route.editId}
+        inboxId={route.inboxId}
+      />
+    );
+  if (route.name === 'share-inbox')
+    return (
+      <ShareInbox
+        theme={theme}
+        nav={reqNav}
+        shareError={route.shareError ?? null}
+        onCountChange={onShareInboxCount}
+      />
+    );
   if (route.name === 'record') return <RecordDetail theme={theme} state={reqState} setState={reqSetState} nav={reqNav} recordId={route.id} />;
   if (route.name === 'bundle-new') return <BundleBuilder theme={theme} state={reqState} nav={reqNav} setState={reqSetState} preselectId={route.id} />;
   if (route.name === 'bundle-submitted')

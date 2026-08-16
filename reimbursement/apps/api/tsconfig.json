@@ -16,5 +16,5 @@
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true
   },
-  "include": ["src", "prisma"]
+  "include": ["src", "prisma", "test"]
 }

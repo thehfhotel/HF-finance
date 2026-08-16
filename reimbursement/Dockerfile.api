@@ -66,9 +66,38 @@ LABEL org.opencontainers.image.licenses=Proprietary
 # curl is needed for the HEALTHCHECK probe below. openssl ships with the bun
 # image but Prisma's query engine wants libssl at runtime — bun:slim already
 # carries it, so no extra install.
+#
+# ghostscript is what lets ImageMagick rasterize a PDF. A receipt shared from
+# an iPhone is very often a PDF (Notes → Scan Documents produces one), and every
+# consumer in this app renders `photoPath` in an <img> — so a PDF that is not
+# converted to an image on the way in is a broken picture in three screens.
+# ImageMagick alone CANNOT do it: `convert foo.pdf` delegates to Ghostscript.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates imagemagick \
+    && apt-get install -y --no-install-recommends curl ca-certificates imagemagick ghostscript \
     && rm -rf /var/lib/apt/lists/*
+
+# Debian's ImageMagick ships with the PDF/PS coders DISABLED by policy — the
+# blanket response to CVE-2016-3714 ("ImageTragick"), which was a shell-injection
+# hole in the *delegate* mechanism. Without re-enabling PDF, every rasterize
+# attempt fails with "attempt to perform an operation not allowed by the
+# security policy `PDF'" and shared PDFs silently arrive unpreviewable.
+#
+# Re-enabling reads alarming, so state exactly what is and is not true here:
+# the risk of the original CVE was untrusted input reaching Ghostscript through
+# ImageMagick's delegates. That input is still untrusted — a PDF from a phone —
+# so this does NOT rely on the file being safe. What makes it acceptable is the
+# rest of the setup: the modern Ghostscript in this image has -dSAFER on by
+# default (no shell-out, no filesystem escape), `convert` runs as the unprivileged
+# `bun` user in a container with no secrets on disk beyond this app's own, and
+# reaching it at all requires an authenticated share token AND a Cloudflare
+# Access service token. We re-enable READ on PDF only — writing PDFs stays
+# forbidden, since nothing here has any reason to produce one.
+RUN set -eux; \
+    for policy in /etc/ImageMagick-6/policy.xml /etc/ImageMagick-7/policy.xml; do \
+      if [ -f "$policy" ]; then \
+        sed -i 's|<policy domain="coder" rights="none" pattern="PDF" />|<policy domain="coder" rights="read" pattern="PDF" />|' "$policy"; \
+      fi; \
+    done
 
 WORKDIR /app
 

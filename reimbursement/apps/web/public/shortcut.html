@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ตั้งค่าแชร์ใบเสร็จจาก iPhone</title>
+    <meta name="theme-color" content="#4F0E0E" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --brand: #4f0e0e;
+        --gold: #d9a441;
+        --paper: #faf9f7;
+        --surface: #ffffff;
+        --ink: #26221e;
+        --ink-soft: #6b625a;
+        --hairline: #e8e3dc;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: 'Sarabun', 'Noto Sans Thai', system-ui, -apple-system, sans-serif;
+        line-height: 1.65;
+      }
+      header {
+        background: radial-gradient(ellipse at 30% 20%, #3b0a0a 0%, var(--brand) 70%);
+        color: #f6eacb;
+        padding: 40px 22px 30px;
+      }
+      header h1 { margin: 0 0 6px; font-size: 22px; font-weight: 600; }
+      header p { margin: 0; font-size: 14px; opacity: 0.85; }
+      main { max-width: 680px; margin: 0 auto; padding: 22px 18px 60px; }
+      section {
+        background: var(--surface);
+        border: 1px solid var(--hairline);
+        border-radius: 14px;
+        padding: 18px;
+        margin-bottom: 16px;
+      }
+      h2 { font-size: 16px; margin: 0 0 10px; font-weight: 600; }
+      ol, ul { padding-inline-start: 22px; margin: 0; }
+      li { margin-bottom: 10px; }
+      code, .field {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12.5px;
+        background: #f4f1ec;
+        border: 1px solid var(--hairline);
+        border-radius: 6px;
+        padding: 2px 6px;
+        word-break: break-all;
+      }
+      .field { display: block; padding: 9px 11px; margin: 6px 0; }
+      .label { font-size: 12px; color: var(--ink-soft); margin-top: 12px; }
+      .note {
+        border-inline-start: 3px solid var(--gold);
+        background: #fdf8ee;
+        padding: 12px 14px;
+        border-radius: 0 8px 8px 0;
+        font-size: 13.5px;
+        margin-top: 14px;
+      }
+      .warn { border-inline-start-color: #a83232; background: #fdf1f1; }
+      a { color: var(--brand); }
+      footer { text-align: center; color: var(--ink-soft); font-size: 12.5px; padding: 0 18px 40px; }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --paper: #151210; --surface: #1f1a17; --ink: #f0e9e2;
+          --ink-soft: #a2968b; --hairline: #342c26;
+        }
+        code, .field { background: #2a231e; }
+        .note { background: #2a2114; }
+        .warn { background: #2c1a1a; }
+        a { color: var(--gold); }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>แชร์ใบเสร็จจาก iPhone</h1>
+      <p>ตั้งค่าครั้งเดียว ใช้ได้ตลอด — ประมาณ 5 นาที</p>
+    </header>
+
+    <main>
+      <section>
+        <h2>ทำไมต้องตั้งค่าเอง</h2>
+        <p style="margin: 0; font-size: 14px">
+          iPhone ไม่รองรับให้เว็บแอปแสดงในเมนูแชร์ (Apple ยังไม่เปิดฟีเจอร์นี้)
+          เราจึงใช้แอป <strong>Shortcuts</strong> ของ Apple แทน ซึ่งทำงานได้เหมือนกัน
+          <br /><br />
+          <strong>Android ไม่ต้องทำอะไร</strong> — แค่ติดตั้งแอปจากเบราว์เซอร์
+          แล้ว "เบิกค่าใช้จ่าย" จะขึ้นในเมนูแชร์เอง
+        </p>
+      </section>
+
+      <section>
+        <h2>สิ่งที่ต้องเตรียม</h2>
+        <p style="margin: 0 0 10px; font-size: 14px">
+          ทุกค่าอยู่ในแอปแล้ว ไม่ต้องขอจากใคร — เปิดแอปบนเครื่องเดียวกันนี้ →
+          <strong>กล่องขาเข้า</strong> → ปุ่มรูปมือถือมุมขวาบน →
+          <strong>สร้างรหัสเชื่อมต่อ</strong>
+        </p>
+        <p style="margin: 0; font-size: 14px">
+          จะได้ 4 ช่องพร้อมปุ่ม <strong>คัดลอก</strong> ข้างละช่อง
+          เปิดหน้านั้นค้างไว้แล้วสลับไปมากับแอป Shortcuts ได้เลย
+        </p>
+        <div class="note">
+          <strong>รหัสเชื่อมต่อ (<code>hfr_…</code>) จะแสดงครั้งเดียว</strong>
+          ถ้าปิดไปแล้วยังไม่ได้คัดลอก ให้กดสร้างใหม่ — ของเดิมจะยังใช้ได้
+          แต่กด "เพิกถอน" ทิ้งได้ ไม่ต้องเสียดาย
+          <br /><br />
+          ทำมือถือหาย? เข้าแอปแล้วกด <strong>เพิกถอน</strong> ที่เครื่องนั้น —
+          ใช้ไม่ได้ทันที และไม่กระทบเครื่องอื่น
+        </div>
+      </section>
+
+      <section>
+        <h2>สร้าง Shortcut</h2>
+        <ol style="font-size: 14px">
+          <li>เปิดแอป <strong>Shortcuts</strong> → กด <strong>+</strong> สร้างใหม่</li>
+          <li>
+            กดชื่อด้านบน → <strong>Rename</strong> → ตั้งชื่อว่า
+            <strong>ส่งใบเสร็จ</strong> (ชื่อนี้จะขึ้นในเมนูแชร์)
+          </li>
+          <li>
+            กดไอคอน <strong>ⓘ</strong> (Details) → เปิด
+            <strong>Show in Share Sheet</strong>
+          </li>
+          <li>
+            ในหน้าเดียวกัน กด <strong>Share Sheet Types</strong> → เลือกเฉพาะ
+            <strong>Images</strong> และ <strong>Files</strong> (เอาอย่างอื่นออกให้หมด
+            ไม่งั้น Shortcut จะโผล่ตอนแชร์ข้อความหรือลิงก์ด้วย)
+          </li>
+          <li>
+            เพิ่มแอ็กชัน <strong>Get Contents of URL</strong> แล้วตั้งค่าตามด้านล่าง
+          </li>
+          <li>กด <strong>Done</strong></li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>ค่าใน Get Contents of URL</h2>
+        <p style="margin: 0 0 12px; font-size: 14px">
+          แต่ละช่องด้านล่างตรงกับปุ่ม <strong>คัดลอก</strong> ในแอปตามลำดับ
+          — คัดลอกทีละช่องแล้ววางได้เลย ไม่ต้องพิมพ์เอง
+        </p>
+
+        <div class="label">URL — คัดลอกช่องที่ 1</div>
+        <span class="field">https://reimbursement.thehfhotel.org/api/inbox/quick</span>
+
+        <div class="label">Method</div>
+        <span class="field">POST</span>
+
+        <div class="label">Headers — กด "Add new header" 3 ครั้ง</div>
+        <span class="field">Authorization&nbsp;&nbsp;→&nbsp;&nbsp;คัดลอกช่องที่ 2</span>
+        <span class="field">CF-Access-Client-Id&nbsp;&nbsp;→&nbsp;&nbsp;คัดลอกช่องที่ 3</span>
+        <span class="field">CF-Access-Client-Secret&nbsp;&nbsp;→&nbsp;&nbsp;คัดลอกช่องที่ 4</span>
+
+        <div class="note warn">
+          <strong>ระวัง:</strong> ช่องที่ 2 ในแอปมีคำว่า <code>Bearer</code>
+          เว้นวรรค อยู่หน้ารหัสให้แล้ว — ให้วางทั้งก้อน อย่าลบคำว่า Bearer ออก
+          ไม่งั้นจะขึ้น 401
+        </div>
+
+        <div class="label">Request Body</div>
+        <span class="field">Form</span>
+
+        <div class="label">เพิ่ม 1 field</div>
+        <span class="field">Key: photo&nbsp;&nbsp;·&nbsp;&nbsp;Type: File&nbsp;&nbsp;·&nbsp;&nbsp;Value: Shortcut Input</span>
+
+        <div class="note">
+          ถ้ากดที่ช่อง Value แล้วไม่เห็น <strong>Shortcut Input</strong>
+          แปลว่ายังไม่ได้เปิด "Show in Share Sheet" ในขั้นตอนที่ 3 — กลับไปเปิดก่อน
+        </div>
+      </section>
+
+      <section>
+        <h2>วิธีใช้</h2>
+        <ol style="font-size: 14px">
+          <li>เปิดรูปใบเสร็จในแอป <strong>Photos</strong> หรือ <strong>Files</strong></li>
+          <li>กดปุ่ม <strong>แชร์</strong></li>
+          <li>เลื่อนลงหา <strong>ส่งใบเสร็จ</strong> แล้วกด</li>
+          <li>เปิดแอป → <strong>กล่องขาเข้า</strong> → แตะรูป → กรอกจำนวนเงินและหมวดหมู่</li>
+        </ol>
+        <div class="note">
+          <strong>ใบเสร็จกระดาษ:</strong> ใช้ Notes → กล้อง →
+          <strong>Scan Documents</strong> จะได้ PDF ที่ตัดขอบและปรับให้ตรงอัตโนมัติ
+          แล้วแชร์ PDF นั้นเข้ามาได้เลย — ระบบแปลงเป็นรูปให้เอง
+        </div>
+      </section>
+
+      <section>
+        <h2>ถ้าไม่สำเร็จ</h2>
+        <ul style="font-size: 14px">
+          <li>
+            <strong>401</strong> — รหัสผิด ถูกเพิกถอน หรือลืมคำว่า
+            <code>Bearer</code> หน้ารหัส ให้สร้างรหัสใหม่แล้ววางทั้งก้อน
+          </li>
+          <li>
+            <strong>403 หรือเจอหน้า login</strong> — ช่องที่ 3/4 ผิดหรือสลับกัน
+            กลับไปคัดลอกใหม่จากแอป
+          </li>
+          <li><strong>413</strong> — ไฟล์ใหญ่เกิน 20 MB</li>
+          <li><strong>415</strong> — ชนิดไฟล์ไม่รองรับ (ใช้ได้: JPEG, PNG, WebP, HEIC, PDF)</li>
+          <li>
+            <strong>ไม่เห็น "ส่งใบเสร็จ" ในเมนูแชร์</strong> — เลื่อนลงสุดแล้วกด
+            <strong>Edit Actions</strong> เพื่อปักหมุดไว้ด้านบน
+          </li>
+        </ul>
+      </section>
+    </main>
+
+    <footer>
+      HF Hotel · ระบบเบิกค่าใช้จ่าย — มีปัญหาติดต่อผู้ดูแลระบบ
+    </footer>
+  </body>
+</html>

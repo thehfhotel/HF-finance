@@ -1,6 +1,12 @@
 export type Route =
   | { name: 'home' }
-  | { name: 'upload'; editId?: string }
+  // `inboxId` drains a file shared from a phone: the form opens with that
+  // photo already attached and consumes the inbox row on save (CR-2026-08-16).
+  | { name: 'upload'; editId?: string; inboxId?: string }
+  // The employee's share inbox. Named `share-inbox`, not `inbox`, because
+  // `screens/approver/Inbox.tsx` is a different screen entirely (the approver's
+  // bundle queue) and one of the two names had to say which it meant.
+  | { name: 'share-inbox'; shareError?: string }
   | { name: 'record'; id: string }
   | { name: 'bundle-new'; id?: string }
   | { name: 'bundle-submitted'; id: string }

@@ -201,6 +201,78 @@ export interface PayBundleRequest {
   transferRef: string;
 }
 
+// ─── Share inbox (iPhone share sheet / Android Web Share Target) ──
+
+/** Where an inbox item came from. Open-ended by design — a later producer
+ *  (kiosk scan, email-in) is a new value, not a migration. */
+export type InboxSource = 'ios-share' | 'android-share' | (string & {});
+
+/**
+ * A file shared from a phone that has not yet become a Receipt.
+ *
+ * Deliberately NOT a Receipt with null fields: a Receipt always has an amount,
+ * a merchant and a category, and every consumer relies on that. See
+ * docs/change-requests/CR-2026-08-16-ios-share-to-receipt.md.
+ */
+export interface InboxItem {
+  id: string;
+  /** Always renderable by an <img> — a shared PDF is rasterized on upload. */
+  photoPath: string;
+  /** The source PDF when the displayable image was rendered from one. */
+  originalPath: string | null;
+  /** The type as received. `application/pdf` here means a PDF arrived. */
+  mimeType: string;
+  filename: string | null;
+  sizeBytes: number;
+  source: InboxSource;
+  createdAt: string;
+  /**
+   * False when the file could not be rendered to an image (a PDF on a host
+   * without Ghostscript). The UI shows a document placeholder instead of a
+   * broken <img>; the receipt can still be created from it.
+   */
+  previewable: boolean;
+}
+
+/** A phone's upload credential, as shown in settings. Never carries the token. */
+export interface ShareTokenSummary {
+  id: string;
+  /** First characters of the random part, rendered as `hfr_a1b2c3…`. */
+  hint: string;
+  label: string;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
+/** The one-time creation response. `token` is never retrievable again. */
+export interface CreateShareTokenResponse extends ShareTokenSummary {
+  /** Plaintext, shown once. Put it in a QR code, not in a log line. */
+  token: string;
+}
+
+export interface CreateShareTokenRequest {
+  label?: string;
+}
+
+/**
+ * Everything an iPhone Shortcut needs, minus the per-employee token.
+ *
+ * `clientId`/`clientSecret` are a Cloudflare Access **service token** — they
+ * prove "an HF device", not "this person", and cannot create anything on their
+ * own. Served to an already-authenticated employee so nobody has to carry them
+ * between devices by hand. See `apps/api/src/share_setup.ts` for the reasoning.
+ *
+ * `configured: false` means the deploy has no service token wired up yet; the
+ * UI then falls back to telling the employee to ask an admin.
+ */
+export interface ShareSetup {
+  configured: boolean;
+  /** Absolute URL the Shortcut posts to. */
+  uploadUrl: string;
+  clientId: string | null;
+  clientSecret: string | null;
+}
+
 // ─── View-model conveniences ─────────────────────────────────────
 
 /**

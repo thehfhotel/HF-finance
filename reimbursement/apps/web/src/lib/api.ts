@@ -4,7 +4,9 @@ import type {
   BundleStatus,
   BundleWithDetails,
   CreateBundleRequest,
+  CreateShareTokenResponse,
   CreateUserRequest,
+  InboxItem,
   KbizCategoryMapping,
   KbizDestination,
   KbizFavorite,
@@ -14,6 +16,8 @@ import type {
   OverviewWindowKey,
   Receipt,
   ReceiptItem,
+  ShareSetup,
+  ShareTokenSummary,
   UpdateUserRequest,
   User,
   VendorSearchResponse,
@@ -25,6 +29,10 @@ import type {
  * reaches into `@reimbursement/shared` directly.
  */
 export type {
+  CreateShareTokenResponse,
+  InboxItem,
+  ShareSetup,
+  ShareTokenSummary,
   OverviewActivityEvent,
   OverviewActivityRow,
   OverviewAgeBand,
@@ -238,6 +246,13 @@ export interface ReceiptFormFields {
 export function receiptFormFromFields(
   fields: ReceiptFormFields,
   photo?: File,
+  /**
+   * Drain a share-inbox item instead of uploading bytes (CR-2026-08-16). The
+   * file is already in the uploads volume — the phone put it there when it was
+   * shared — so re-posting it over hotel wifi would be a second upload of
+   * something the server already has.
+   */
+  inboxId?: string,
 ): FormData {
   const form = new FormData();
   form.append('merchant', fields.merchant);
@@ -254,6 +269,7 @@ export function receiptFormFromFields(
   if (fields.tax !== undefined) form.append('tax', fields.tax);
   form.append('items', JSON.stringify(fields.items));
   if (photo) form.append('photo', photo);
+  if (inboxId) form.append('inboxId', inboxId);
   return form;
 }
 
@@ -436,6 +452,38 @@ export const api = {
       request<Receipt>(`/api/receipts/${encodeURIComponent(id)}`, { method: 'PATCH', body: form }),
     delete: (id: string): Promise<void> =>
       request<void>(`/api/receipts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  },
+
+  /**
+   * The share inbox — files an employee sent in from their phone that have not
+   * become receipts yet. Always the caller's own; the server scopes by session.
+   */
+  inbox: {
+    list: (): Promise<InboxItem[]> => request<InboxItem[]>('/api/inbox'),
+    discard: (id: string): Promise<{ ok: boolean }> =>
+      request<{ ok: boolean }>(`/api/inbox/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  },
+
+  /**
+   * Upload credentials held by an employee's phone, for the iOS Shortcut.
+   * `create` returns the plaintext token ONCE — it is not retrievable again,
+   * so the caller must render it immediately and never log it.
+   */
+  shareTokens: {
+    /**
+     * The Cloudflare service-token pair + upload URL the Shortcut needs.
+     * Server-assembled so nobody carries credentials between devices by hand.
+     * `configured: false` ⇒ this deploy has no service token yet.
+     */
+    setup: (): Promise<ShareSetup> => request<ShareSetup>('/api/me/share-setup'),
+    list: (): Promise<ShareTokenSummary[]> =>
+      request<ShareTokenSummary[]>('/api/me/share-tokens'),
+    create: (label: string): Promise<CreateShareTokenResponse> =>
+      request<CreateShareTokenResponse>('/api/me/share-tokens', jsonBody({ label })),
+    revoke: (id: string): Promise<{ ok: boolean }> =>
+      request<{ ok: boolean }>(`/api/me/share-tokens/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
   },
 
   bundles: {
