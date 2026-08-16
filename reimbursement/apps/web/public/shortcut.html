@@ -146,59 +146,47 @@
       <section>
         <h2>ค่าใน Get Contents of URL</h2>
         <p style="margin: 0 0 12px; font-size: 14px">
-          แต่ละช่องด้านล่างตรงกับปุ่ม <strong>คัดลอก</strong> ในแอปตามลำดับ
-          — คัดลอกทีละช่องแล้ววางได้เลย ไม่ต้องพิมพ์เอง
+          ตั้ง 4 อย่างตามนี้ ไล่จากบนลงล่าง
         </p>
 
-        <div class="note warn">
-          <strong>ผิดพลาดบ่อยที่สุด — อ่านก่อน:</strong> ช่อง URL ต้องเป็น
-          <em>ข้อความลิงก์เท่านั้น</em> ห้ามลาก
-          <strong>Shortcut&nbsp;Input</strong> มาใส่ในช่อง URL
-          <br /><br />
-          <strong>Shortcut&nbsp;Input</strong> คือ "รูปที่แชร์เข้ามา" —
-          ต้องอยู่ในช่อง <code>photo</code> ใต้หัวข้อ Request&nbsp;Body
-          ด้านล่างเท่านั้น
-          <br /><br />
-          ถ้าใส่ผิดจะขึ้นข้อความว่า
-          <em>"Shortcuts couldn't convert from Photo media to URL"</em> —
-          แก้โดยกดปุ่ม ⓧ ในช่อง URL เพื่อลบออก แล้ววางลิงก์แทน
-        </div>
-
-        <div class="label">URL — คัดลอกช่องที่ 1 (พิมพ์/วางเป็นข้อความ)</div>
+        <div class="label">1. URL — คัดลอกช่องที่ 1 (วางเป็นข้อความ)</div>
         <span class="field">https://reimbursement.thehfhotel.org/api/inbox/quick</span>
 
-        <div class="label">Method</div>
+        <div class="label">2. Method</div>
         <span class="field">POST</span>
 
-        <div class="label">Headers — กด "Add new header" 3 ครั้ง</div>
+        <div class="label">3. Headers — กด "Add new header" 3 ครั้ง</div>
         <span class="field">Authorization&nbsp;&nbsp;→&nbsp;&nbsp;คัดลอกช่องที่ 2</span>
         <span class="field">CF-Access-Client-Id&nbsp;&nbsp;→&nbsp;&nbsp;คัดลอกช่องที่ 3</span>
         <span class="field">CF-Access-Client-Secret&nbsp;&nbsp;→&nbsp;&nbsp;คัดลอกช่องที่ 4</span>
 
-        <div class="note warn">
-          <strong>ระวัง:</strong> ช่องที่ 2 ในแอปมีคำว่า <code>Bearer</code>
-          เว้นวรรค อยู่หน้ารหัสให้แล้ว — ให้วางทั้งก้อน อย่าลบคำว่า Bearer ออก
-          ไม่งั้นจะขึ้น 401
-        </div>
-
-        <div class="label">Request Body</div>
-        <span class="field">Form</span>
-
-        <div class="label">เพิ่ม 1 field — นี่คือที่ของ Shortcut Input</div>
-        <span class="field">Key: photo&nbsp;&nbsp;·&nbsp;&nbsp;Type: File&nbsp;&nbsp;·&nbsp;&nbsp;Value: Shortcut Input</span>
+        <div class="label">4. Request Body — เลือก <strong>File</strong></div>
+        <span class="field">Request Body: File&nbsp;&nbsp;·&nbsp;&nbsp;File: Shortcut Input</span>
 
         <div class="note">
-          กด <strong>Add new field</strong> → พิมพ์ชื่อ <code>photo</code> →
-          เลือกชนิดเป็น <strong>File</strong> (ไม่ใช่ Text) →
-          แล้วกดที่ช่องค่าเพื่อเลือก <strong>Shortcut Input</strong>
+          กดที่คำว่า <strong>Request Body</strong> แล้วเลือก <strong>File</strong>
+          (ไม่ใช่ Form / ไม่ใช่ JSON) จะมีช่องให้ใส่ค่าเดียว —
+          เลือก <strong>Shortcut Input</strong> ลงไป
           <br /><br />
-          ถ้าช่อง <code>photo</code> ว่างอยู่ รูปจะไม่ถูกส่งไปด้วย
-          และจะขึ้น 400 Missing photo
+          แบบ File ง่ายกว่าแบบ Form เพราะไม่ต้องตั้งชื่อช่อง
+          ไม่ต้องเลือกชนิดของช่อง และมีที่ให้ใส่ Shortcut Input แค่ที่เดียว
+        </div>
+
+        <div class="note warn">
+          <strong>จุดที่พลาดบ่อย:</strong> ช่อง <strong>URL</strong> ต้องเป็น
+          ข้อความลิงก์เท่านั้น — ห้ามใส่ <strong>Shortcut&nbsp;Input</strong>
+          ลงในช่อง URL
+          <br /><br />
+          ถ้าใส่ผิดจะขึ้น
+          <em>"Shortcuts couldn't convert from Photo media to URL"</em>
+          แก้โดยกดปุ่ม ⓧ ในช่อง URL เพื่อลบออก แล้ววางลิงก์แทน
+          ส่วน Shortcut Input ให้ไปอยู่ที่ Request Body เท่านั้น
         </div>
 
         <div class="note">
-          ถ้ากดที่ช่อง Value แล้วไม่เห็น <strong>Shortcut Input</strong>
-          แปลว่ายังไม่ได้เปิด "Show in Share Sheet" ในขั้นตอนที่ 3 — กลับไปเปิดก่อน
+          <strong>เคยตั้งแบบ Form ไว้แล้ว?</strong> ใช้ต่อได้ ไม่ต้องแก้ —
+          ระบบรับทั้งสองแบบ แต่ถ้าตั้งค้างไว้ไม่สำเร็จ
+          แนะนำให้เปลี่ยนมาเป็นแบบ File จะง่ายกว่า
         </div>
       </section>
 
@@ -235,8 +223,8 @@
             <code>photo</code>
           </li>
           <li>
-            <strong>400 Missing photo</strong> — ช่อง <code>photo</code> ใต้
-            Request Body ยังว่าง หรือชนิดเป็น Text แทนที่จะเป็น File
+            <strong>400 Missing photo</strong> — Request Body ยังไม่ได้ตั้ง
+            หรือตั้งเป็น File แต่ยังไม่ได้ใส่ Shortcut Input
           </li>
           <li><strong>413</strong> — ไฟล์ใหญ่เกิน 20 MB</li>
           <li><strong>415</strong> — ชนิดไฟล์ไม่รองรับ (ใช้ได้: JPEG, PNG, WebP, HEIC, PDF)</li>

@@ -109,6 +109,41 @@ export function normalizeSharedMime(rawType: string | undefined, filename: strin
   return null;
 }
 
+/**
+ * Wrap a raw request body as a File.
+ *
+ * This exists so an iPhone Shortcut can use `Request Body: File`, which posts
+ * the bytes with the file's own Content-Type and no multipart envelope at all.
+ * That matters for a human reason rather than a technical one: the multipart
+ * recipe needs an "Add new field" → choose **File** → name it `photo` → set its
+ * value dance, the field type cannot be changed after the field is created, and
+ * the first empty box on that screen is the URL — so the overwhelmingly common
+ * mistake is dropping the photo into the URL and getting "Shortcuts couldn't
+ * convert from Photo media to URL". `Request Body: File` has one value and no
+ * field name, so there is nothing to put in the wrong place.
+ *
+ * Returns null when the body is empty or the type is not on the allowlist;
+ * `saveSharedFile` re-checks the type anyway, so this is a shaping step, not
+ * the security boundary.
+ */
+export function fileFromRawBody(
+  bytes: ArrayBuffer,
+  contentType: string | undefined,
+  contentDisposition?: string | undefined,
+): File | null {
+  if (bytes.byteLength === 0) return null;
+
+  const mimeType = normalizeSharedMime(contentType, '');
+  if (mimeType === null) return null;
+
+  // Shortcuts does not send a filename, but other clients might; honour it for
+  // display when present. Untrusted — uploads always generate their own path.
+  const named = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(contentDisposition ?? '');
+  const filename = named?.[1]?.trim() || `share${SHARED_MIME_EXTENSIONS[mimeType]}`;
+
+  return new File([bytes], filename, { type: mimeType });
+}
+
 export interface SavedShare {
   /** Always renderable by an <img>. */
   photoPath: string;
