@@ -76,9 +76,18 @@ model ReceiptInbox {
   /// that JPEG, so the drain screen and the receipt form need no PDF branch.
   photoPath String
 
-  /// Public URL path of the original upload when it is not itself the
-  /// displayable image — i.e. the source PDF. Null when an image arrived and
-  /// was stored as-is. Kept so the true document survives rasterization.
+  /// Every rendered page, in order, with `photoPath` as the first.
+  ///
+  /// A shared PDF becomes one image PER PAGE (CR-2026-08-17), and all of them
+  /// have to survive the queue — otherwise draining a three-page invoice would
+  /// silently produce a one-page receipt. The tile shows `photoPath`; the drain
+  /// creates one ReceiptFile per entry here.
+  pagePaths String[] @default([])
+
+  /// Public URL path of the original upload, kept ONLY when rasterization
+  /// failed and those bytes are the sole copy of the content. On success the
+  /// source is deleted — the rendered pages carry it and nothing in the app can
+  /// reach the original.
   originalPath String?
 
   /// MIME type as received, after the allowlist check. The ORIGINAL type, not

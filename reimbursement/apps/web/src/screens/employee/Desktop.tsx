@@ -781,6 +781,24 @@ function ShareInboxTile({
               </div>
             </div>
           )}
+          {item.pageCount > 1 && (
+            <span
+              style={{
+                position: 'absolute',
+                bottom: 6,
+                left: 6,
+                fontFamily: FONT_UI,
+                fontSize: 10,
+                fontWeight: 700,
+                color: '#fff',
+                background: 'rgba(0,0,0,0.62)',
+                padding: '3px 7px',
+                borderRadius: 100,
+              }}
+            >
+              {item.pageCount} หน้า
+            </span>
+          )}
         </div>
         <div style={{ padding: '11px 13px 13px' }}>
           <div

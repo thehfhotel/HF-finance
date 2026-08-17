@@ -148,12 +148,19 @@ async function parseReceiptMultipart(
       // the same treatment as one shared from a phone — before this, a PDF
       // attached here was stored raw and rendered as a broken image.
       const saved = await saveSharedFile(file);
-      parsed.uploadedPaths.push({
-        photoPath: saved.photoPath,
-        originalPath: saved.originalPath,
-        mimeType: saved.mimeType,
-        filename: file.name ? file.name.slice(0, 120) : null,
-        sizeBytes: saved.sizeBytes,
+      // One attachment PER PAGE: a three-page PDF picked in the form becomes
+      // three files on the receipt, not one tall image.
+      saved.pagePaths.forEach((path, i) => {
+        parsed.uploadedPaths!.push({
+          photoPath: path,
+          originalPath: i === 0 ? saved.originalPath : null,
+          mimeType: saved.mimeType,
+          filename: file.name
+            ? `${file.name.slice(0, 110)}${saved.pagePaths.length > 1 ? ` (${i + 1})` : ''}`
+            : null,
+          // Report the source size once rather than multiplying it per page.
+          sizeBytes: i === 0 ? saved.sizeBytes : 0,
+        });
       });
     }
     parsed.photoPath = parsed.uploadedPaths[0]!.photoPath;
@@ -271,13 +278,20 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
       // the photo the employee most recently chose), then drained shares.
       const attachments = [
         ...(parsed.uploadedPaths ?? []),
-        ...inboxItems.map((item) => ({
-          photoPath: item.photoPath,
-          originalPath: item.originalPath,
-          mimeType: item.mimeType,
-          filename: item.filename,
-          sizeBytes: item.sizeBytes,
-        })),
+        // Each drained item contributes ALL of its pages, so a shared
+        // three-page invoice arrives as three attachments.
+        ...inboxItems.flatMap((item) => {
+          const pages = item.pagePaths.length > 0 ? item.pagePaths : [item.photoPath];
+          return pages.map((path, i) => ({
+            photoPath: path,
+            originalPath: i === 0 ? item.originalPath : null,
+            mimeType: item.mimeType,
+            filename: item.filename
+              ? `${item.filename.slice(0, 110)}${pages.length > 1 ? ` (${i + 1})` : ''}`
+              : null,
+            sizeBytes: i === 0 ? item.sizeBytes : 0,
+          }));
+        }),
       ];
 
       // The cover mirrors the first attachment. Written together with `files`
@@ -340,9 +354,11 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
       // ReceiptFile keeps it, so it is carried over above — nothing to delete
       // here unless an attachment was dropped.
       const adopted = new Set(created.files.map((f) => f.photoPath));
-      const orphaned = inboxItems
-        .filter((item) => !adopted.has(item.photoPath))
-        .flatMap((item) => [item.photoPath, item.originalPath]);
+      const orphaned = inboxItems.flatMap((item) =>
+        [...item.pagePaths, item.photoPath, item.originalPath].filter(
+          (p) => p !== null && !adopted.has(p),
+        ),
+      );
       if (orphaned.length > 0) await deleteUploadedFiles(orphaned);
 
       return serializeReceipt(created);

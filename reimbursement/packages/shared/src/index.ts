@@ -247,6 +247,8 @@ export interface InboxItem {
   filename: string | null;
   sizeBytes: number;
   source: InboxSource;
+  /** How many rendered pages this share carries — a PDF can be several. */
+  pageCount: number;
   createdAt: string;
   /**
    * False when the file could not be rendered to an image (a PDF on a host

@@ -17,6 +17,7 @@ function item(overrides: Partial<ReceiptInbox>): ReceiptInbox {
     id: 'inbox_1',
     userId: 'user_1',
     photoPath: '/uploads/a.jpg',
+    pagePaths: ['/uploads/a.jpg'],
     originalPath: null,
     mimeType: 'image/jpeg',
     filename: 'IMG_0001.JPG',
@@ -88,6 +89,25 @@ describe('serializeInboxItem previewable', () => {
       serializeInboxItem(item({ photoPath: '/uploads/a.jpg.pdf', mimeType: 'application/pdf' }))
         .previewable,
     ).toBe(false);
+  });
+});
+
+describe('serializeInboxItem pageCount', () => {
+  test('counts the rendered pages of a multi-page share', () => {
+    const serialized = serializeInboxItem(
+      item({ pagePaths: ['/uploads/a-0.jpg', '/uploads/a-1.jpg', '/uploads/a-2.jpg'] }),
+    );
+    expect(serialized.pageCount).toBe(3);
+  });
+
+  test('a single-page share reports 1', () => {
+    expect(serializeInboxItem(item({})).pageCount).toBe(1);
+  });
+
+  // Rows created before per-page rendering carry an empty array; they are
+  // single-page by construction, so 0 would be a lie.
+  test('an empty pagePaths floors at 1 rather than 0', () => {
+    expect(serializeInboxItem(item({ pagePaths: [] })).pageCount).toBe(1);
   });
 });
 
