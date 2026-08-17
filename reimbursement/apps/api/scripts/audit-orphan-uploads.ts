@@ -19,7 +19,7 @@
  *   - Report-only by DEFAULT. Deleting requires an explicit `--delete`.
  *   - It enumerates EVERY column in the schema that can hold an uploads path
  *     (receipts.photoPath, receipt_files.photoPath +
- *     originalPath, receipt_inbox.photoPath + originalPath,
+ *     originalPath, receipt_inbox.photoPath + pagePaths + originalPath,
  *     bundles.transferProofPath). If a future migration adds another one and it
  *     is not added to REFERENCE_COLUMNS below, this script will happily delete
  *     live files — the check at the end guards against that by refusing to run
@@ -79,6 +79,7 @@ const REFERENCE_COLUMNS = [
   { table: 'receipt_files', column: 'photoPath' },
   { table: 'receipt_files', column: 'originalPath' },
   { table: 'receipt_inbox', column: 'photoPath' },
+  { table: 'receipt_inbox', column: 'pagePaths' },
   { table: 'receipt_inbox', column: 'originalPath' },
   { table: 'bundles', column: 'transferProofPath' },
 ] as const;
@@ -144,10 +145,14 @@ async function main(): Promise<void> {
     add(f.originalPath);
   }
   for (const i of await prisma.receiptInbox.findMany({
-    select: { photoPath: true, originalPath: true },
+    select: { photoPath: true, originalPath: true, pagePaths: true },
   })) {
     add(i.photoPath);
     add(i.originalPath);
+    // An array column: every rendered page of a queued multi-page share. These
+    // are live files — missing them would delete pages 2..n of anything sitting
+    // in somebody's inbox.
+    for (const page of i.pagePaths) add(page);
   }
   for (const b of await prisma.bundle.findMany({ select: { transferProofPath: true } })) {
     add(b.transferProofPath);
