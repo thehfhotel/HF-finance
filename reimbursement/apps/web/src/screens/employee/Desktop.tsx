@@ -244,10 +244,11 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
           tax: editTarget?.tax ?? '0',
         },
         photoFile,
-        // Draining a shared file: the bytes are already in the uploads volume,
-        // so the server adopts them by id and deletes the queue row in the same
+        // Draining shared files: the bytes are already in the uploads volume, so
+        // the server adopts them by id and deletes the queue rows in the same
         // transaction. Re-uploading would be a second copy of what it has.
         drainingItems.map((i) => i.id),
+        input.extraFiles,
       );
       if (editTarget) {
         const updated = await api.receipts.update(editTarget.id, form);
@@ -2157,6 +2158,12 @@ function BundleStatusBlock({ theme, bundle, total }: BundleStatusBlockProps) {
 interface NewReceiptInput {
   /** Data URL of a newly picked photo; null when unchanged (edit) or absent. */
   photo: string | null;
+  /**
+   * Attachments beyond the cover, kept as Files rather than data URLs — they
+   * are never previewed, so round-tripping megabytes through base64 would buy
+   * nothing.
+   */
+  extraFiles: File[];
   amount: number;
   merchant: string;
   category: string;
@@ -2186,6 +2193,10 @@ interface CreateReceiptModalProps {
 function CreateReceiptModal({ theme, initial, presetPhotoPath, presetPhotoCount = 0, saving, onClose, onSave }: CreateReceiptModalProps): JSX.Element {
   const modalToday = new Date().toISOString().slice(0, 10);
   const [photo, setPhoto] = useState<string | null>(null);
+  /** Attachments beyond the cover — a receipt photographed page by page. */
+  const [extraFiles, setExtraFiles] = useState<File[]>([]);
+  /** True when the picked cover is a PDF, which an <img> cannot preview. */
+  const [coverIsPdf, setCoverIsPdf] = useState(false);
   const [amount, setAmount] = useState<string>(initial ? String(initial.amount) : '');
   const [merchant, setMerchant] = useState<string>(initial?.merchant ?? '');
   const categories = useReceiptCategories();
@@ -2214,6 +2225,7 @@ function CreateReceiptModal({ theme, initial, presetPhotoPath, presetPhotoCount 
   }, [onClose]);
 
   const handleFile = (file: File): void => {
+    setCoverIsPdf(file.type === 'application/pdf');
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = typeof reader.result === 'string' ? reader.result : null;
@@ -2222,11 +2234,24 @@ function CreateReceiptModal({ theme, initial, presetPhotoPath, presetPhotoCount 
     reader.readAsDataURL(file);
   };
 
+  /**
+   * The picker is `multiple`, so a receipt spanning several pages is attached in
+   * one go: the first becomes the cover (the only one previewed) and the rest
+   * ride along, surfaced as a count.
+   */
+  const handleFiles = (files: FileList): void => {
+    const picked = [...files];
+    if (picked.length === 0) return;
+    handleFile(picked[0]!);
+    setExtraFiles(picked.slice(1));
+  };
+
   const handleSave = (): void => {
     if (!canSave) return;
     if (!isEdit && !photo && !presetPhotoPath) return;
     onSave({
       photo,
+      extraFiles,
       amount: parsedAmount,
       merchant,
       category,
@@ -2292,11 +2317,14 @@ function CreateReceiptModal({ theme, initial, presetPhotoPath, presetPhotoCount 
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          // PDFs are accepted here as well as images: the server rasterizes them
+          // on the way in, so an e-tax-invoice PDF no longer has to be
+          // screenshotted before it can be attached.
+          accept="image/*,application/pdf"
+          multiple
           style={{ display: 'none' }}
           onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) handleFile(file);
+            if (e.target.files && e.target.files.length > 0) handleFiles(e.target.files);
             e.target.value = '';
           }}
         />
@@ -2374,14 +2402,37 @@ function CreateReceiptModal({ theme, initial, presetPhotoPath, presetPhotoCount 
           >
             {photoPreview ? (
               <>
-                <img
-                  src={photoPreview}
-                  alt="ใบเสร็จ"
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
+                {coverIsPdf ? (
+                  // A picked PDF has no <img> preview until the server renders
+                  // it, so say what is attached rather than showing a broken
+                  // image. The saved receipt shows the rendered page.
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      display: 'grid',
+                      placeItems: 'center',
+                      color: theme.inkSofter,
+                      fontFamily: FONT_UI,
+                      fontSize: 12,
+                      gap: 6,
+                    }}
+                  >
+                    <div style={{ textAlign: 'center' }}>
+                      {Icon.document(theme.inkSofter)}
+                      <div style={{ marginTop: 6 }}>PDF</div>
+                    </div>
+                  </div>
+                ) : (
+                  <img
+                    src={photoPreview}
+                    alt="ใบเสร็จ"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                )}
                 {/* Draining several shares at once: the preview can only show
                     the first, so say plainly how many will be attached. */}
-                {presetPhotoCount > 1 && (
+                {Math.max(presetPhotoCount, photo ? extraFiles.length + 1 : 0) > 1 && (
                   <div
                     style={{
                       position: 'absolute',
@@ -2396,7 +2447,7 @@ function CreateReceiptModal({ theme, initial, presetPhotoPath, presetPhotoCount 
                       borderRadius: 100,
                     }}
                   >
-                    แนบ {presetPhotoCount} ไฟล์
+                    แนบ {Math.max(presetPhotoCount, photo ? extraFiles.length + 1 : 0)} ไฟล์
                   </div>
                 )}
                 <div
