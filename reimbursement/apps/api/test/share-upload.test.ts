@@ -208,16 +208,21 @@ describe('sniffMime', () => {
 describe('saveSharedFile trusts bytes over labels', () => {
   // The exact shape of the incident: PDF content, JPEG label, .jpg name.
   test('a PDF mislabelled as image/jpeg is treated as a PDF', async () => {
+    const { readdir, rm } = await import('node:fs/promises');
+    const { resolve } = await import('node:path');
+    const dir = resolve(process.cwd(), 'uploads');
+    // Diff the directory rather than trusting the returned paths: a rasterize
+    // writes an output file too, and an earlier version of this test leaked one
+    // per run into the real uploads directory.
+    const before = new Set(await readdir(dir).catch(() => [] as string[]));
+
     const pdfBytes = new TextEncoder().encode('%PDF-1.4\n%mock pdf body');
     const lying = new File([pdfBytes], 'receipt.jpg', { type: 'image/jpeg' });
     const saved = await saveSharedFile(lying);
-    // Stored as a PDF, so rasterization is attempted and the truth is recorded.
     expect(saved.mimeType).toBe('application/pdf');
-    // Cleanup: remove whatever it wrote.
-    const { rm } = await import('node:fs/promises');
-    const { resolve } = await import('node:path');
-    for (const p of [saved.photoPath, saved.originalPath].filter(Boolean)) {
-      await rm(resolve(process.cwd(), 'uploads', p!.split('/').pop()!), { force: true });
+
+    for (const name of await readdir(dir).catch(() => [] as string[])) {
+      if (!before.has(name)) await rm(resolve(dir, name), { force: true, recursive: true });
     }
   });
 });
