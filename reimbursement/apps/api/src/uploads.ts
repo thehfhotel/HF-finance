@@ -254,33 +254,66 @@ export async function saveSharedFile(file: File): Promise<SavedShare> {
 }
 
 /**
- * Render page 1 of a PDF (or a HEIC) to JPEG via ImageMagick, returning the new
+ * Most pages of a shared PDF we will render. A receipt is one to three pages;
+ * this is the runaway guard, not a target. Exceeding it is logged loudly
+ * because the excess pages are genuinely lost — a Receipt keeps only the render.
+ */
+const MAX_PDF_PAGES = 10;
+
+/**
+ * Width every rendered page is scaled to. ~240 DPI for A4, chosen by looking at
+ * Thai fine print at 1:1: at the old 150 DPI the tone and vowel marks
+ * (สระ/วรรณยุกต์) broke up — they are small, stacked, and JPEG's ringing hits
+ * them far harder than it hits Latin text. Pages are rendered at 300 DPI and
+ * downsampled to this, which is sharper than rendering at 240 directly.
+ */
+const RENDER_WIDTH = 2000;
+
+/**
+ * Render a shared document to a single displayable JPEG, returning the new
  * public path — or null if it could not be done.
  *
- * `[0]` selects the first page and is essential: without it a ten-page scan
- * becomes ten output files and the caller's path points at none of them.
+ * ALL pages, stacked vertically, not just the first. A two-page invoice used to
+ * lose page two silently: `[0]` rendered the first page and the source PDF is
+ * deleted once the receipt exists, so the rest was simply gone.
  *
- * PDF rasterization needs Ghostscript AND an ImageMagick policy that permits
- * the PDF coder — Debian ships with it disabled (post-CVE-2016-3714). Both are
- * handled in Dockerfile.api; on a machine without them this returns null and
- * the upload still succeeds.
+ * The `-resize` MUST come before `-append`. Appending first builds one canvas
+ * of every page at full render resolution — for ten A4 pages at 300 DPI that is
+ * ~104 megapixels, which pushes ImageMagick into its disk-backed pixel cache and
+ * takes over nine minutes (measured). Scaling each page first and then stacking
+ * does the same job in about ten seconds.
+ *
+ * PDF rasterization needs Ghostscript AND an ImageMagick policy that permits the
+ * PDF coder — Debian ships with it disabled (post-CVE-2016-3714). Both are
+ * handled in Dockerfile.api; on a machine without them this returns null and the
+ * upload still succeeds.
  */
 async function rasterizeToJpeg(publicPath: string, mimeType: string): Promise<string | null> {
   const filename = publicPath.slice(PUBLIC_PREFIX.length + 1);
   const source = resolve(UPLOADS_DIR, filename);
   const outName = `${crypto.randomUUID()}.jpg`;
   const out = resolve(UPLOADS_DIR, outName);
+  const isPdf = mimeType === 'application/pdf';
 
-  // A PDF page is vector art: rasterize at 150 DPI or the JPEG comes out as a
-  // blurry thumbnail of a page. Raster sources ignore -density entirely.
-  const densityArgs = mimeType === 'application/pdf' ? ['-density', '150'] : [];
+  if (isPdf) await warnIfPagesDropped(source);
+
+  // A PDF page is vector art: rasterize at 300 DPI and downsample, or the text
+  // comes out soft. Raster sources ignore -density entirely.
+  const densityArgs = isPdf ? ['-density', '300'] : [];
+  // Only PDFs get a page range and a vertical stack. A stacked document must be
+  // capped on WIDTH alone — a `2000x2000` box would squash ten pages into a
+  // 240px-wide strip.
+  const frames = isPdf ? `${source}[0-${MAX_PDF_PAGES - 1}]` : `${source}[0]`;
+  const resizeArg = isPdf ? `${RENDER_WIDTH}x>` : `${RENDER_WIDTH}x${RENDER_WIDTH}>`;
+  const appendArgs = isPdf ? ['-append'] : [];
 
   try {
     const proc = Bun.spawn(
       [
         'convert',
         ...densityArgs,
-        `${source}[0]`,
+        frames,
+        // Honour EXIF rotation before resizing, or phone photos come out sideways.
         '-auto-orient',
         // Scanned pages arrive with transparent or alpha regions that JPEG
         // cannot express; without this they render as black blocks.
@@ -290,11 +323,11 @@ async function rasterizeToJpeg(publicPath: string, mimeType: string): Promise<st
         'remove',
         '-alpha',
         'off',
-        // A 4000px-wide scan helps nobody on a phone and costs disk forever.
         '-resize',
-        '2000x2000>',
+        resizeArg,
+        ...appendArgs,
         '-quality',
-        '85',
+        '92',
         '-strip',
         out,
       ],
@@ -312,5 +345,31 @@ async function rasterizeToJpeg(publicPath: string, mimeType: string): Promise<st
   } catch (error) {
     console.error(`[share] rasterize ${mimeType}:`, error);
     return null;
+  }
+}
+
+/**
+ * Log when a PDF has more pages than we render, because those pages are lost.
+ *
+ * Reading the page count costs ~0.4s against a ~3s render, which is worth it:
+ * the alternative is a truncated document that looks complete.
+ */
+async function warnIfPagesDropped(source: string): Promise<void> {
+  try {
+    const proc = Bun.spawn(['identify', '-format', '%n\n', source], {
+      stdout: 'pipe',
+      stderr: 'ignore',
+    });
+    const text = await new Response(proc.stdout).text();
+    await proc.exited;
+    const pages = Number.parseInt(text.trim().split('\n')[0] ?? '', 10);
+    if (Number.isFinite(pages) && pages > MAX_PDF_PAGES) {
+      console.error(
+        `[share] PDF has ${pages} pages; only the first ${MAX_PDF_PAGES} were rendered — ` +
+          `pages ${MAX_PDF_PAGES + 1}-${pages} are NOT in the receipt image (${source})`,
+      );
+    }
+  } catch {
+    // Page count is advisory; never let it stop an upload.
   }
 }
