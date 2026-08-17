@@ -2330,6 +2330,6 @@ if (readonly) {
   loadPeriod(periodSelect.value).then(() => { refreshHistory(); maybeAutoPrint(); });
 }
 </script>
-<script defer src="https://erp.thehfhotel.org/shell/hf-bar.js" data-app="Payroll" data-module="finance"></script>
+<!--HF_BAR-->
 </body>
 </html>`;

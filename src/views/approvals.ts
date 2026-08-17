@@ -508,6 +508,6 @@ refresh();
 setInterval(refresh, 5000);
 setInterval(() => { tickUpdatedLabel(); repaintRelativeTimes(); }, 1000);
 </script>
-<script defer src="https://erp.thehfhotel.org/shell/hf-bar.js" data-app="Payroll" data-module="finance"></script>
+<!--HF_BAR-->
 </body>
 </html>`;
