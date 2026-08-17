@@ -18,7 +18,8 @@
  *
  *   - Report-only by DEFAULT. Deleting requires an explicit `--delete`.
  *   - It enumerates EVERY column in the schema that can hold an uploads path
- *     (receipts.photoPath, receipt_inbox.photoPath + originalPath,
+ *     (receipts.photoPath, receipt_files.photoPath +
+ *     originalPath, receipt_inbox.photoPath + originalPath,
  *     bundles.transferProofPath). If a future migration adds another one and it
  *     is not added to REFERENCE_COLUMNS below, this script will happily delete
  *     live files — the check at the end guards against that by refusing to run
@@ -75,6 +76,8 @@ const KEEP = new Set(['.gitkeep', '.thumbs']);
  */
 const REFERENCE_COLUMNS = [
   { table: 'receipts', column: 'photoPath' },
+  { table: 'receipt_files', column: 'photoPath' },
+  { table: 'receipt_files', column: 'originalPath' },
   { table: 'receipt_inbox', column: 'photoPath' },
   { table: 'receipt_inbox', column: 'originalPath' },
   { table: 'bundles', column: 'transferProofPath' },
@@ -131,6 +134,15 @@ async function main(): Promise<void> {
   };
 
   for (const r of await prisma.receipt.findMany({ select: { photoPath: true } })) add(r.photoPath);
+  // Attachments beyond the cover. Missing these would mark every page after the
+  // first as an orphan — the guard above refuses to run without them for
+  // exactly that reason.
+  for (const f of await prisma.receiptFile.findMany({
+    select: { photoPath: true, originalPath: true },
+  })) {
+    add(f.photoPath);
+    add(f.originalPath);
+  }
   for (const i of await prisma.receiptInbox.findMany({
     select: { photoPath: true, originalPath: true },
   })) {

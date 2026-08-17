@@ -62,6 +62,14 @@ Deploy workflows live at the MONOREPO ROOT, not under `reimbursement/`
 
 ## Conventions
 
+- **Mobile and desktop are two independent render paths.** `App.tsx` branches on
+  platform: mobile goes through `renderScreen`, desktop through
+  `DesktopApprover`/`DesktopEmployee`, and the desktop branch only special-cases
+  a couple of routes. So a new route, sidebar row, or input attribute does
+  NOTHING on the other platform until wired into both — silently, with green
+  typecheck and tests. Three separate bugs shipped this way on 2026-08-16/17
+  (a dead sidebar row, a dead upload route, a single-file picker on desktop
+  after multi-file landed). Check both before calling a UI change done.
 - **Thai-first UI**. All user-visible strings in Thai. Categories, statuses, button
   labels — never English.
 - **Currency** is Thai Baht ฿, formatted with comma grouping (`฿1,234.56`).
