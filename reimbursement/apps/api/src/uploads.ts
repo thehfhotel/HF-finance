@@ -236,9 +236,20 @@ export function fileFromRawBody(
 }
 
 export interface SavedShare {
-  /** Always renderable by an <img>. */
+  /** The cover — always renderable by an <img>. Same as `pagePaths[0]`. */
   photoPath: string;
-  /** The source document when it is not the displayable image (a PDF). */
+  /**
+   * Every page, in order. A multi-page PDF becomes one image PER PAGE rather
+   * than a single tall strip: pages are what the gallery pages through, what
+   * thumbnails are generated from, and what the page count counts. A stacked
+   * strip thumbnailed to 320px showed nothing but the top of page one.
+   */
+  pagePaths: string[];
+  /**
+   * The source document when it was kept — only when rasterization FAILED and
+   * these bytes are all we have. On success the source is deleted: the rendered
+   * pages carry the content and the original is unreachable from the app.
+   */
   originalPath: string | null;
   /** The type as received — "application/pdf" still reads as a PDF here. */
   mimeType: string;
@@ -280,17 +291,35 @@ export async function saveSharedFile(file: File): Promise<SavedShare> {
   const storedPath = await persist(file, SHARED_MIME_EXTENSIONS[mimeType]!);
 
   if (DIRECTLY_DISPLAYABLE.has(mimeType)) {
-    return { photoPath: storedPath, originalPath: null, mimeType, sizeBytes };
+    return {
+      photoPath: storedPath,
+      pagePaths: [storedPath],
+      originalPath: null,
+      mimeType,
+      sizeBytes,
+    };
   }
 
   // HEIC/HEIF and PDF both need rasterizing before anything can display them.
-  const rendered = await rasterizeToJpeg(storedPath, mimeType);
-  if (rendered === null) {
-    // Kept the bytes, could not render them. The inbox shows a placeholder.
-    return { photoPath: storedPath, originalPath: null, mimeType, sizeBytes };
+  const pages = await rasterizePages(storedPath, mimeType);
+  if (pages.length === 0) {
+    // Kept the bytes, could not render them. The UI shows a placeholder, and
+    // the source is NOT deleted — it is the only copy of the content left.
+    return {
+      photoPath: storedPath,
+      pagePaths: [storedPath],
+      originalPath: null,
+      mimeType,
+      sizeBytes,
+    };
   }
 
-  return { photoPath: rendered, originalPath: storedPath, mimeType, sizeBytes };
+  // The rendered pages carry everything the source did, and nothing in the app
+  // can reach the source afterwards — a Receipt has no field for it. Keeping it
+  // would be storage nobody can open.
+  await deleteUploadedFiles([storedPath]);
+
+  return { photoPath: pages[0]!, pagePaths: pages, originalPath: null, mimeType, sizeBytes };
 }
 
 /**
@@ -310,42 +339,37 @@ const MAX_PDF_PAGES = 10;
 const RENDER_WIDTH = 2000;
 
 /**
- * Render a shared document to a single displayable JPEG, returning the new
- * public path — or null if it could not be done.
+ * Render a shared document to one JPEG PER PAGE, returning their public paths
+ * in order — or an empty array if it could not be done.
  *
- * ALL pages, stacked vertically, not just the first. A two-page invoice used to
- * lose page two silently: `[0]` rendered the first page and the source PDF is
- * deleted once the receipt exists, so the rest was simply gone.
+ * One file per page, not one tall strip. Pages are the unit the rest of the app
+ * already works in: the gallery pages through them, the thumbnailer generates
+ * one per file, and the page-count badge counts them. A stacked strip
+ * thumbnailed to 320px showed nothing but the top of page one.
  *
- * The `-resize` MUST come before `-append`. Appending first builds one canvas
- * of every page at full render resolution — for ten A4 pages at 300 DPI that is
- * ~104 megapixels, which pushes ImageMagick into its disk-backed pixel cache and
- * takes over nine minutes (measured). Scaling each page first and then stacking
- * does the same job in about ten seconds.
+ * `%d` in the output name makes ImageMagick write one file per frame; it
+ * substitutes even for a single-page document, so there is no special case.
+ * Sizing each page during the render (rather than after an -append) also keeps
+ * peak memory to one page instead of the whole document.
  *
  * PDF rasterization needs Ghostscript AND an ImageMagick policy that permits the
  * PDF coder — Debian ships with it disabled (post-CVE-2016-3714). Both are
- * handled in Dockerfile.api; on a machine without them this returns null and the
- * upload still succeeds.
+ * handled in Dockerfile.api; on a machine without them this returns [] and the
+ * upload still succeeds with the original bytes kept.
  */
-async function rasterizeToJpeg(publicPath: string, mimeType: string): Promise<string | null> {
+async function rasterizePages(publicPath: string, mimeType: string): Promise<string[]> {
   const filename = publicPath.slice(PUBLIC_PREFIX.length + 1);
   const source = resolve(UPLOADS_DIR, filename);
-  const outName = `${crypto.randomUUID()}.jpg`;
-  const out = resolve(UPLOADS_DIR, outName);
   const isPdf = mimeType === 'application/pdf';
+  const stem = crypto.randomUUID();
+  const outPattern = resolve(UPLOADS_DIR, `${stem}-%d.jpg`);
 
   if (isPdf) await warnIfPagesDropped(source);
 
   // A PDF page is vector art: rasterize at 300 DPI and downsample, or the text
   // comes out soft. Raster sources ignore -density entirely.
   const densityArgs = isPdf ? ['-density', '300'] : [];
-  // Only PDFs get a page range and a vertical stack. A stacked document must be
-  // capped on WIDTH alone — a `2000x2000` box would squash ten pages into a
-  // 240px-wide strip.
   const frames = isPdf ? `${source}[0-${MAX_PDF_PAGES - 1}]` : `${source}[0]`;
-  const resizeArg = isPdf ? `${RENDER_WIDTH}x>` : `${RENDER_WIDTH}x${RENDER_WIDTH}>`;
-  const appendArgs = isPdf ? ['-append'] : [];
 
   try {
     const proc = Bun.spawn(
@@ -364,12 +388,11 @@ async function rasterizeToJpeg(publicPath: string, mimeType: string): Promise<st
         '-alpha',
         'off',
         '-resize',
-        resizeArg,
-        ...appendArgs,
+        `${RENDER_WIDTH}x>`,
         '-quality',
         '92',
         '-strip',
-        out,
+        outPattern,
       ],
       { stdout: 'ignore', stderr: 'pipe' },
     );
@@ -378,13 +401,21 @@ async function rasterizeToJpeg(publicPath: string, mimeType: string): Promise<st
     if (code !== 0) {
       const stderr = await new Response(proc.stderr).text();
       console.error(`[share] convert failed (${code}) for ${mimeType}: ${stderr.trim()}`);
-      return null;
+      return [];
     }
 
-    return (await Bun.file(out).exists()) ? `${PUBLIC_PREFIX}/${outName}` : null;
+    // Collect by index rather than by listing the directory: the order is the
+    // page order, and a concurrent upload must not be able to leak into it.
+    const pages: string[] = [];
+    for (let i = 0; i < MAX_PDF_PAGES; i += 1) {
+      const name = `${stem}-${i}.jpg`;
+      if (!(await Bun.file(resolve(UPLOADS_DIR, name)).exists())) break;
+      pages.push(`${PUBLIC_PREFIX}/${name}`);
+    }
+    return pages;
   } catch (error) {
     console.error(`[share] rasterize ${mimeType}:`, error);
-    return null;
+    return [];
   }
 }
 

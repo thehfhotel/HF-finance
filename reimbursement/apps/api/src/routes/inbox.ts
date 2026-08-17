@@ -71,8 +71,8 @@ export const inboxRoutes = new Elysia({ prefix: '/inbox' })
     });
     if (count === 0) return status(404, { message: 'Inbox item not found' });
 
-    // Both the displayable render and the original document (a shared PDF).
-    await deleteUploadedFiles([item.photoPath, item.originalPath]);
+    // Every rendered page, plus any original kept because rasterization failed.
+    await deleteUploadedFiles([...item.pagePaths, item.photoPath, item.originalPath]);
     return { ok: true };
   });
 
@@ -158,6 +158,7 @@ export const inboxQuickRoutes = new Elysia({ prefix: '/inbox' }).post(
       data: {
         userId: user.id,
         photoPath: saved.photoPath,
+        pagePaths: saved.pagePaths,
         originalPath: saved.originalPath,
         mimeType: saved.mimeType,
         // Untrusted: display only. uploads.ts always generates its own path.

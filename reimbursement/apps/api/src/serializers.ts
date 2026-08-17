@@ -142,6 +142,11 @@ export function serializeInboxItem(item: PrismaReceiptInbox): InboxItem {
     filename: item.filename,
     sizeBytes: item.sizeBytes,
     source: item.source,
+    // Rows created before per-page rendering have an empty pagePaths and are
+    // single-page by construction, so floor at 1 rather than reporting 0.
+    // Optional-chained deliberately: a caller doing a partial `select` should
+    // not be able to crash the whole response over a display-only count.
+    pageCount: Math.max(item.pagePaths?.length ?? 0, 1),
     createdAt: item.createdAt.toISOString(),
     previewable,
   };
