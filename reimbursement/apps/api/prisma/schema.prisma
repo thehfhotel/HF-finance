@@ -163,7 +163,16 @@ model Receipt {
   accent     String   @default("#7E5E3A")
   items      Json     @default("[]") // ReceiptItem[]
   tax        String   @default("0")
+  /// The COVER image — kept as a mirror of `files[0].photoPath`.
+  ///
+  /// Not dropped when multi-file landed (CR-2026-08-17): it is read in fourteen
+  /// files including the approver's review and pay screens, and 1,545 rows
+  /// already carry it. Keeping it means every screen that has not learned about
+  /// `files` still renders something correct, instead of a receipt with no photo
+  /// wherever one was missed. Write it only through the helper that also writes
+  /// `files`, never on its own.
   photoPath  String?
+  files      ReceiptFile[]
   bundleId   String?
   bundle     Bundle?  @relation(fields: [bundleId], references: [id], onDelete: SetNull)
   /// Resolved from `merchant` on every save. Nullable: receipts whose merchant
@@ -182,6 +191,45 @@ model Receipt {
   @@index([bundleId, property])
   @@index([bundleId, userId])
   @@map("receipts")
+}
+
+/// One attachment on a receipt: a photo, or a page-stack rendered from a PDF.
+///
+/// Exists because one expense is often several files — a paper receipt
+/// photographed as three shots, or an invoice plus its delivery note. Before
+/// this, each file had to become its own receipt, which double-counted the
+/// amount or forced people to drop evidence.
+///
+/// `photoPath` is always something an <img> can render; `originalPath` holds the
+/// source document when one was rasterized to get there (a shared PDF). Same
+/// contract as ReceiptInbox, so draining an inbox item is a straight carry-over.
+model ReceiptFile {
+  id        String  @id @default(cuid())
+  receiptId String
+  receipt   Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  /// Always <img>-renderable. A multi-page PDF is one tall stacked image.
+  photoPath String
+
+  /// The source document when `photoPath` was rendered from one. Null when the
+  /// upload was already an image.
+  originalPath String?
+
+  /// The type as received — `application/pdf` here still means a PDF arrived.
+  mimeType String @default("image/jpeg")
+
+  /// Untrusted, display only. Never used to build a path.
+  filename String?
+
+  sizeBytes Int @default(0)
+
+  /// Display order. Position 0 is the cover mirrored into `Receipt.photoPath`.
+  position Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([receiptId, position])
+  @@map("receipt_files")
 }
 
 /// A merchant the team has actually spent money at.

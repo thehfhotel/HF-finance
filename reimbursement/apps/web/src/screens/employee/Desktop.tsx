@@ -78,8 +78,16 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
    */
   const [inboxItems, setInboxItems] = useState<InboxItem[] | null>(null);
   /** The item the create modal is currently draining, if any. */
-  const [drainingItem, setDrainingItem] = useState<InboxItem | null>(null);
-  const [discardingItem, setDiscardingItem] = useState<InboxItem | null>(null);
+    const [discardingItem, setDiscardingItem] = useState<InboxItem | null>(null);
+  /**
+   * Inbox items ticked to become ONE receipt. A paper receipt photographed page
+   * by page arrives as several shares; without this each page would have to
+   * become its own receipt, which either double-counts the amount or loses
+   * evidence.
+   */
+  const [selectedInbox, setSelectedInbox] = useState<Set<string>>(new Set());
+  /** The items the create modal is draining — one, or a whole selection. */
+  const [drainingItems, setDrainingItems] = useState<InboxItem[]>([]);
   const [selectedBundleId, setSelectedBundleId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bundleName, setBundleName] = useState<string>('');
@@ -239,7 +247,7 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
         // Draining a shared file: the bytes are already in the uploads volume,
         // so the server adopts them by id and deletes the queue row in the same
         // transaction. Re-uploading would be a second copy of what it has.
-        drainingItem?.id,
+        drainingItems.map((i) => i.id),
       );
       if (editTarget) {
         const updated = await api.receipts.update(editTarget.id, form);
@@ -251,17 +259,26 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
       } else {
         const created = await api.receipts.create(form);
         setState((s) => ({ ...s, receipts: [created, ...s.receipts] }));
-        if (drainingItem) {
-          // The server already deleted the queue row; mirror that locally so
+        if (drainingItems.length > 0) {
+          // The server already deleted the queue rows; mirror that locally so
           // the pane and the sidebar count both drop without a refetch.
-          setInboxItems((items) => (items ?? []).filter((i) => i.id !== drainingItem.id));
-          onShareInboxCountChange?.(Math.max((inboxItems?.length ?? 1) - 1, 0));
+          const drained = new Set(drainingItems.map((i) => i.id));
+          const remaining = (inboxItems ?? []).filter((i) => !drained.has(i.id));
+          setInboxItems(remaining);
+          onShareInboxCountChange?.(remaining.length);
+          setSelectedInbox(new Set());
         }
-        showCreateToast(drainingItem ? 'สร้างใบเสร็จจากไฟล์ที่แชร์แล้ว' : 'บันทึกใบเสร็จแล้ว');
+        showCreateToast(
+          drainingItems.length > 1
+            ? `สร้างใบเสร็จจาก ${drainingItems.length} ไฟล์แล้ว`
+            : drainingItems.length === 1
+              ? 'สร้างใบเสร็จจากไฟล์ที่แชร์แล้ว'
+              : 'บันทึกใบเสร็จแล้ว',
+        );
       }
       setCreateOpen(false);
       setEditTarget(null);
-      setDrainingItem(null);
+      setDrainingItems([]);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
     } finally {
@@ -271,14 +288,23 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
 
   const openCreateModal = (): void => {
     setEditTarget(null);
-    setDrainingItem(null);
+    setDrainingItems([]);
     setCreateOpen(true);
   };
-  /** Turn a shared file into a receipt: same modal, photo already attached. */
-  const openDrainModal = (item: InboxItem): void => {
+  /** Turn shared files into a receipt: same modal, photos already attached. */
+  const openDrainModal = (items: InboxItem[]): void => {
+    if (items.length === 0) return;
     setEditTarget(null);
-    setDrainingItem(item);
+    setDrainingItems(items);
     setCreateOpen(true);
+  };
+  const toggleInboxSelection = (id: string): void => {
+    setSelectedInbox((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
   const discardInboxItem = async (item: InboxItem): Promise<void> => {
     setDiscardingItem(null);
@@ -297,7 +323,7 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
   };
   const closeCreateModal = (): void => {
     if (savingReceipt) return;
-    setDrainingItem(null);
+    setDrainingItems([]);
     setCreateOpen(false);
     setEditTarget(null);
   };
@@ -364,8 +390,11 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
       <ShareInboxPane
         theme={theme}
         items={inboxItems}
+        selected={selectedInbox}
+        onToggleSelect={toggleInboxSelection}
         onDrain={openDrainModal}
         onDiscard={setDiscardingItem}
+        onClearSelection={() => setSelectedInbox(new Set())}
       />
     ) : view === 'bundle-detail' && selectedBundle ? (
       <BundleDetailPane
@@ -447,7 +476,8 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
         <CreateReceiptModal
           theme={theme}
           initial={editTarget}
-          presetPhotoPath={drainingItem?.photoPath ?? null}
+          presetPhotoPath={drainingItems[0]?.photoPath ?? null}
+          presetPhotoCount={drainingItems.length}
           saving={savingReceipt}
           onClose={closeCreateModal}
           onSave={handleSaveReceipt}
@@ -517,11 +547,23 @@ interface DraftsPaneProps {
 interface ShareInboxPaneProps {
   theme: Theme;
   items: InboxItem[] | null;
-  onDrain: (item: InboxItem) => void;
+  selected: Set<string>;
+  onToggleSelect: (id: string) => void;
+  onDrain: (items: InboxItem[]) => void;
   onDiscard: (item: InboxItem) => void;
+  onClearSelection: () => void;
 }
 
-function ShareInboxPane({ theme, items, onDrain, onDiscard }: ShareInboxPaneProps): JSX.Element {
+function ShareInboxPane({
+  theme,
+  items,
+  selected,
+  onToggleSelect,
+  onDrain,
+  onDiscard,
+  onClearSelection,
+}: ShareInboxPaneProps): JSX.Element {
+  const chosen = (items ?? []).filter((i) => selected.has(i.id));
   return (
     <div style={{ display: 'flex', height: '100%', background: theme.paper }}>
       <div style={{ flex: 1, overflow: 'auto', padding: '40px 40px 56px' }}>
@@ -562,8 +604,64 @@ function ShareInboxPane({ theme, items, onDrain, onDiscard }: ShareInboxPaneProp
               }}
             >
               คลิกไฟล์เพื่อกรอกจำนวนเงินและหมวดหมู่ ให้กลายเป็นใบเสร็จ
+              <br />
+              ใบเสร็จแผ่นเดียวที่ถ่ายหลายรูป — ติ๊กเลือกหลายไฟล์
+              แล้วรวมเป็นใบเสร็จใบเดียวได้
             </p>
           </div>
+
+          {/* Selection bar. Appears only with something ticked, so the ordinary
+              one-file-one-receipt flow is never cluttered by it. */}
+          {chosen.length > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '12px 16px',
+                marginBottom: 18,
+                borderRadius: 12,
+                background: theme.surface2,
+                border: `0.5px solid ${theme.hairlineStrong}`,
+              }}
+            >
+              <span style={{ fontFamily: FONT_UI, fontSize: 13, color: theme.ink }}>
+                เลือกไว้ {chosen.length} ไฟล์
+              </span>
+              <div style={{ flex: 1 }} />
+              <button
+                onClick={onClearSelection}
+                style={{
+                  padding: '9px 14px',
+                  borderRadius: 100,
+                  background: 'transparent',
+                  border: `0.5px solid ${theme.hairlineStrong}`,
+                  fontFamily: FONT_UI,
+                  fontSize: 13,
+                  color: theme.ink,
+                  cursor: 'pointer',
+                }}
+              >
+                ล้างที่เลือก
+              </button>
+              <button
+                onClick={() => onDrain(chosen)}
+                style={{
+                  padding: '9px 16px',
+                  borderRadius: 100,
+                  background: theme.accent,
+                  border: 'none',
+                  fontFamily: FONT_UI,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: '#fff',
+                  cursor: 'pointer',
+                }}
+              >
+                รวมเป็นใบเสร็จใบเดียว
+              </button>
+            </div>
+          )}
 
           {items === null ? (
             <div
@@ -607,7 +705,9 @@ function ShareInboxPane({ theme, items, onDrain, onDiscard }: ShareInboxPaneProp
                   key={item.id}
                   theme={theme}
                   item={item}
-                  onOpen={() => onDrain(item)}
+                  selected={selected.has(item.id)}
+                  onToggleSelect={() => onToggleSelect(item.id)}
+                  onOpen={() => onDrain([item])}
                   onDiscard={() => onDiscard(item)}
                 />
               ))}
@@ -622,11 +722,15 @@ function ShareInboxPane({ theme, items, onDrain, onDiscard }: ShareInboxPaneProp
 function ShareInboxTile({
   theme,
   item,
+  selected,
+  onToggleSelect,
   onOpen,
   onDiscard,
 }: {
   theme: Theme;
   item: InboxItem;
+  selected: boolean;
+  onToggleSelect: () => void;
   onOpen: () => void;
   onDiscard: () => void;
 }): JSX.Element {
@@ -638,7 +742,8 @@ function ShareInboxTile({
           display: 'block',
           width: '100%',
           padding: 0,
-          border: `0.5px solid ${theme.hairline}`,
+          border: `0.5px solid ${selected ? theme.accent : theme.hairline}`,
+          outline: selected ? `2px solid ${theme.accent}` : 'none',
           borderRadius: 14,
           overflow: 'hidden',
           background: theme.surface,
@@ -689,6 +794,29 @@ function ShareInboxTile({
             {relativeThaiTime(item.createdAt)}
           </div>
         </div>
+      </button>
+      <button
+        onClick={onToggleSelect}
+        aria-label={selected ? 'เอาออกจากที่เลือก' : 'เลือกไฟล์นี้'}
+        title="เลือกเพื่อรวมหลายไฟล์เป็นใบเสร็จเดียว"
+        style={{
+          position: 'absolute',
+          top: 8,
+          left: 8,
+          width: 28,
+          height: 28,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: 8,
+          border: `1.5px solid ${selected ? theme.accent : 'rgba(255,255,255,0.85)'}`,
+          background: selected ? theme.accent : 'rgba(0,0,0,0.35)',
+          color: '#fff',
+          cursor: 'pointer',
+          padding: 0,
+        }}
+      >
+        {selected ? Icon.check('#fff') : null}
       </button>
       <button
         onClick={onDiscard}
@@ -1977,12 +2105,14 @@ interface CreateReceiptModalProps {
    * path sends the inbox id and the server adopts the stored bytes.
    */
   presetPhotoPath?: string | null;
+  /** How many shared files this save will attach. >1 shows a count on the preview. */
+  presetPhotoCount?: number;
   saving?: boolean;
   onClose: () => void;
   onSave: (input: NewReceiptInput) => void;
 }
 
-function CreateReceiptModal({ theme, initial, presetPhotoPath, saving, onClose, onSave }: CreateReceiptModalProps): JSX.Element {
+function CreateReceiptModal({ theme, initial, presetPhotoPath, presetPhotoCount = 0, saving, onClose, onSave }: CreateReceiptModalProps): JSX.Element {
   const modalToday = new Date().toISOString().slice(0, 10);
   const [photo, setPhoto] = useState<string | null>(null);
   const [amount, setAmount] = useState<string>(initial ? String(initial.amount) : '');
@@ -2178,6 +2308,26 @@ function CreateReceiptModal({ theme, initial, presetPhotoPath, saving, onClose, 
                   alt="ใบเสร็จ"
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
+                {/* Draining several shares at once: the preview can only show
+                    the first, so say plainly how many will be attached. */}
+                {presetPhotoCount > 1 && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 10,
+                      left: 10,
+                      fontFamily: FONT_UI,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: '#fff',
+                      background: 'rgba(0,0,0,0.62)',
+                      padding: '5px 10px',
+                      borderRadius: 100,
+                    }}
+                  >
+                    แนบ {presetPhotoCount} ไฟล์
+                  </div>
+                )}
                 <div
                   style={{
                     position: 'absolute',

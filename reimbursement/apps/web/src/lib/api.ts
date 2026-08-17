@@ -245,14 +245,18 @@ export interface ReceiptFormFields {
 
 export function receiptFormFromFields(
   fields: ReceiptFormFields,
+  /** The cover. Kept as its own argument so existing call sites are unchanged. */
   photo?: File,
   /**
-   * Drain a share-inbox item instead of uploading bytes (CR-2026-08-16). The
-   * file is already in the uploads volume — the phone put it there when it was
-   * shared — so re-posting it over hotel wifi would be a second upload of
-   * something the server already has.
+   * Drain share-inbox items instead of uploading bytes (CR-2026-08-16). The
+   * files are already in the uploads volume — the phone put them there when
+   * they were shared — so re-posting would be a second upload of something the
+   * server already has. Accepts several so one expense photographed as three
+   * pages becomes ONE receipt (CR-2026-08-17).
    */
-  inboxId?: string,
+  inboxId?: string | string[],
+  /** Attachments beyond the cover, in display order. */
+  extraPhotos?: File[],
 ): FormData {
   const form = new FormData();
   form.append('merchant', fields.merchant);
@@ -269,7 +273,12 @@ export function receiptFormFromFields(
   if (fields.tax !== undefined) form.append('tax', fields.tax);
   form.append('items', JSON.stringify(fields.items));
   if (photo) form.append('photo', photo);
-  if (inboxId) form.append('inboxId', inboxId);
+  for (const extra of extraPhotos ?? []) form.append('photos', extra);
+  if (Array.isArray(inboxId)) {
+    if (inboxId.length > 0) form.append('inboxIds', inboxId.join(','));
+  } else if (inboxId) {
+    form.append('inboxId', inboxId);
+  }
   return form;
 }
 
