@@ -17,7 +17,7 @@ import {
   StatusPill,
 } from '../../components/primitives';
 import { Icon } from '../../components/icons';
-import { ReceiptPhoto, ReceiptThumb } from '../../components/Receipts';
+import { ReceiptPhoto, ReceiptThumb, receiptPages } from '../../components/Receipts';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Toast, useToast } from '../../components/Toast';
 import { KbizDestinationPicker } from '../../components/KbizDestinationPicker';
@@ -773,28 +773,73 @@ interface PhotoLightboxProps {
 
 function PhotoLightbox({ items, index, onClose, setIndex }: PhotoLightboxProps) {
   const [zoomed, setZoomed] = useState(false);
+  /** Which page of the CURRENT receipt is showing. */
+  const [page, setPage] = useState(0);
   const r = items[index];
+  const pages = r ? receiptPages(r) : [];
 
-  // Reset zoom when navigating
+  // Reset zoom and go back to page one whenever the receipt changes.
   useEffect(() => {
     setZoomed(false);
+    setPage(0);
   }, [index]);
 
-  // Esc to close, arrow keys to navigate
+  /**
+   * Arrows walk PAGES, not receipts — running off the end of one receipt's
+   * pages steps into the next receipt. An approver reading a bundle wants one
+   * continuous sequence of evidence; having to know which arrow changes
+   * receipt and which changes page would be the wrong kind of precision.
+   *
+   * `pageCountOf` is read from `items` rather than closed over, so the handler
+   * does not need `pages` in its dependency list.
+   */
   useEffect(() => {
+    const pageCountOf = (i: number): number => {
+      const item = items[i];
+      return item ? Math.max(receiptPages(item).length, 1) : 1;
+    };
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { onClose(); return; }
-      if (e.key === 'ArrowLeft' && index > 0) { setIndex(index - 1); return; }
-      if (e.key === 'ArrowRight' && index < items.length - 1) { setIndex(index + 1); return; }
+      if (e.key === 'ArrowLeft') {
+        if (page > 0) { setPage(page - 1); return; }
+        if (index > 0) {
+          // Entering the previous receipt from the right: land on its LAST page.
+          setIndex(index - 1);
+          setPage(pageCountOf(index - 1) - 1);
+        }
+        return;
+      }
+      if (e.key === 'ArrowRight') {
+        if (page < pageCountOf(index) - 1) { setPage(page + 1); return; }
+        if (index < items.length - 1) { setIndex(index + 1); setPage(0); }
+        return;
+      }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [index, items.length, onClose, setIndex]);
+  }, [index, page, items, onClose, setIndex]);
 
   if (!r) return null;
 
-  const hasPrev = index > 0;
-  const hasNext = index < items.length - 1;
+  // "Previous/next" spans the whole bundle, so the controls stay enabled while
+  // there is any page left in either direction.
+  const hasPrev = index > 0 || page > 0;
+  const hasNext = index < items.length - 1 || page < pages.length - 1;
+
+  // The on-screen arrows share this with the key handler above, so a click and
+  // a keypress can never disagree about what "next" means.
+  const goPrev = (): void => {
+    if (page > 0) { setPage(page - 1); return; }
+    if (index > 0) {
+      const prev = items[index - 1];
+      setIndex(index - 1);
+      setPage(Math.max(receiptPages(prev ?? r).length - 1, 0));
+    }
+  };
+  const goNext = (): void => {
+    if (page < pages.length - 1) { setPage(page + 1); return; }
+    if (index < items.length - 1) { setIndex(index + 1); setPage(0); }
+  };
 
   return (
     <div
@@ -822,6 +867,9 @@ function PhotoLightbox({ items, index, onClose, setIndex }: PhotoLightboxProps) 
         <div style={{ width: 36 }} />
         <div style={{ fontFamily: FONT_UI, fontSize: 13, color: '#fff', opacity: 0.7 }}>
           {index + 1} / {items.length}
+          {pages.length > 1 && (
+            <span style={{ opacity: 0.7 }}> · หน้า {page + 1}/{pages.length}</span>
+          )}
         </div>
         {/* × close button top-right */}
         <button
@@ -856,10 +904,10 @@ function PhotoLightbox({ items, index, onClose, setIndex }: PhotoLightboxProps) 
           cursor: zoomed ? 'zoom-out' : 'zoom-in',
         }}
       >
-        {r.photoPath ? (
+        {pages[page] ? (
           <img
-            src={r.photoPath}
-            alt={r.merchant}
+            src={pages[page]}
+            alt={`${r.merchant}${pages.length > 1 ? ` — หน้า ${page + 1}` : ''}`}
             style={{
               maxWidth: '100%',
               maxHeight: '100%',
@@ -903,7 +951,7 @@ function PhotoLightbox({ items, index, onClose, setIndex }: PhotoLightboxProps) 
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
           <button
-            onClick={() => hasPrev && setIndex(index - 1)}
+            onClick={() => hasPrev && goPrev()}
             disabled={!hasPrev}
             style={{
               padding: '10px 16px',
@@ -920,7 +968,7 @@ function PhotoLightbox({ items, index, onClose, setIndex }: PhotoLightboxProps) 
             ← ก่อนหน้า
           </button>
           <button
-            onClick={() => hasNext && setIndex(index + 1)}
+            onClick={() => hasNext && goNext()}
             disabled={!hasNext}
             style={{
               padding: '10px 16px',

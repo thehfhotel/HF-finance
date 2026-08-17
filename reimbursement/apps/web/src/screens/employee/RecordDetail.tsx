@@ -6,7 +6,7 @@ import { FONT_DISPLAY, FONT_UI } from '../../lib/theme';
 import { AppBar } from '../../components/AppBar';
 import { Card, DetailRow, GhostButton, IconBtn, PrimaryButton, SectionHeader } from '../../components/primitives';
 import { Icon } from '../../components/icons';
-import { ReceiptPhoto } from '../../components/Receipts';
+import { ReceiptPhoto, photoSrc, receiptPages } from '../../components/Receipts';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { api } from '../../lib/api';
 
@@ -25,6 +25,7 @@ export function RecordDetail({ theme, state, setState, nav, recordId }: RecordDe
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   if (!r) return null;
+  const pages = receiptPages(r);
   const isDraft = r.bundleId === null;
   const parentBundle = r.bundleId ? state.bundles.find((b) => b.id === r.bundleId) ?? null : null;
   const backRoute: Parameters<Nav>[0] = parentBundle
@@ -57,9 +58,63 @@ export function RecordDetail({ theme, state, setState, nav, recordId }: RecordDe
         }
       />
 
-      <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 20px 28px' }}>
-        <ReceiptPhoto receipt={r} height={300} />
-      </div>
+      {/* Multi-page receipts scroll horizontally rather than stacking: a phone
+          screen fits one page at a time, and a swipe is the gesture people
+          already use for photos. Single-page receipts render exactly as before. */}
+      {pages.length > 1 ? (
+        <div style={{ padding: '8px 0 10px' }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: 14,
+              overflowX: 'auto',
+              padding: '0 20px',
+              scrollSnapType: 'x mandatory',
+              WebkitOverflowScrolling: 'touch',
+            }}
+          >
+            {pages.map((path, i) => (
+              <div
+                key={path}
+                style={{
+                  flex: '0 0 auto',
+                  scrollSnapAlign: 'center',
+                  position: 'relative',
+                  width: 220,
+                  height: 300,
+                  borderRadius: 6,
+                  overflow: 'hidden',
+                  background: '#fff',
+                  filter: 'drop-shadow(0 6px 16px rgba(0,0,0,0.18))',
+                }}
+              >
+                <img
+                  src={photoSrc(path, 320)}
+                  alt={`${r.merchant} — หน้า ${i + 1}`}
+                  loading="lazy"
+                  decoding="async"
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                />
+              </div>
+            ))}
+          </div>
+          <div
+            style={{
+              textAlign: 'center',
+              marginTop: 10,
+              fontFamily: FONT_UI,
+              fontSize: 12,
+              color: theme.inkSofter,
+            }}
+          >
+            {pages.length} หน้า — เลื่อนเพื่อดูทั้งหมด
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 20px 28px' }}>
+          <ReceiptPhoto receipt={r} height={300} />
+        </div>
+      )}
 
       <div style={{ padding: '0 20px', textAlign: 'center', marginBottom: 28 }}>
         <div
