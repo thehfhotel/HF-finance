@@ -165,13 +165,19 @@ jobs:
           context: .
           file: Dockerfile
           push: true
+          # Image names below are LITERALS, deliberately decoupled from the
+          # repo name (repo renamed payroll → HF-finance 2026-08-12 →
+          # hf-finance 2026-08-13): GHCR packages keep their names and
+          # evergreen's compose pulls these exact strings. Renaming the
+          # packages would orphan sha history and require a synchronized
+          # compose+prod change — don't.
+          #
+          # This note lives ABOVE `tags:`, never inside it: every line of that
+          # block is a tag literal, not YAML, so a `#` line there ships to
+          # buildx as `invalid tag "# Image names are LITERALS"` and fails the
+          # build. It did, on the first payroll-path commit after the comment
+          # landed — paths filtering had kept the job from running until then.
           tags: |
-            # Image names are LITERALS, deliberately decoupled from the repo
-            # name (repo renamed payroll → HF-finance 2026-08-12 →
-            # hf-finance 2026-08-13): GHCR
-            # packages keep their names and evergreen's compose pulls these
-            # exact strings. Renaming the packages would orphan sha history
-            # and require a synchronized compose+prod change — don't.
             ${{ env.REGISTRY }}/thehfhotel/payroll:latest
             ${{ env.REGISTRY }}/thehfhotel/payroll:${{ github.sha }}
           # `scope: payroll` isolates GHA cache namespace from kbiz-bot.
