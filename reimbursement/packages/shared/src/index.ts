@@ -32,6 +32,22 @@ export const PROPERTY_LABELS: Record<Property, string> = {
   'hf-ville': 'HF Ville',
 };
 
+/**
+ * One attachment on a receipt. `photoPath` is always <img>-renderable — a
+ * multi-page PDF arrives here as a single tall stacked image; `originalPath`
+ * holds the source document when one was rasterized to produce it.
+ */
+export interface ReceiptFile {
+  id: string;
+  photoPath: string;
+  originalPath: string | null;
+  mimeType: string;
+  filename: string | null;
+  sizeBytes: number;
+  /** Display order. Position 0 is the cover mirrored into `Receipt.photoPath`. */
+  position: number;
+}
+
 export interface Receipt {
   id: string;
   userId: string;
@@ -50,7 +66,13 @@ export interface Receipt {
   items: ReceiptItem[];
   tax: string;
   /** URL path to the uploaded photo (e.g. "/uploads/abc.jpg"), null if no photo. */
+  /**
+   * The COVER image — a mirror of `files[0].photoPath`, kept so that screens
+   * predating multi-file keep rendering correctly. Prefer `files` in new code.
+   */
   photoPath: string | null;
+  /** Every attachment, in display order. Empty only for receipts with no photo. */
+  files: ReceiptFile[];
   bundleId: string | null;
   /**
    * Resolved Vendor, matched on the normalized `merchant` string at save time.

@@ -39,6 +39,8 @@ export function Upload({ theme, nav, state, setState, editId, inboxId }: UploadP
   const existing = editId ? (state.receipts.find((r) => r.id === editId) ?? null) : null;
 
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  /** Attachments beyond the cover — one expense photographed as several pages. */
+  const [extraFiles, setExtraFiles] = useState<File[]>([]);
   const [photoPreview, setPhotoPreview] = useState<string | null>(
     existing?.photoPath ?? null,
   );
@@ -111,6 +113,18 @@ export function Upload({ theme, nav, state, setState, editId, inboxId }: UploadP
     reader.readAsDataURL(file);
   };
 
+  /**
+   * The picker is `multiple`, so a paper receipt shot page by page is attached
+   * in one go. The first becomes the cover (the only one previewed); the rest
+   * ride along and are listed by count.
+   */
+  const onFiles = (files: FileList) => {
+    const picked = [...files];
+    if (picked.length === 0) return;
+    onFile(picked[0]!);
+    setExtraFiles(picked.slice(1));
+  };
+
   // Create requires a photo; edit keeps whatever the receipt already has
   // (imported receipts may legitimately have none). A drained inbox item counts
   // as a photo — it IS one, already stored — but only once its path has
@@ -141,6 +155,8 @@ export function Upload({ theme, nav, state, setState, editId, inboxId }: UploadP
           tax: existing?.tax ?? '0',
         },
         photoFile ?? undefined,
+        undefined,
+        extraFiles,
       );
       setSubmitting(true);
       setSaveError(null);
@@ -179,10 +195,11 @@ export function Upload({ theme, nav, state, setState, editId, inboxId }: UploadP
         tax: '0',
       },
       photoFile ?? undefined,
-      // Sent even when a file was also picked: the server prefers the upload
-      // and still consumes the inbox row, so re-shooting the photo in the form
-      // does not leave the shared original sitting in the queue forever.
+      // Sent even when a file was also picked: the server attaches both and
+      // still consumes the inbox row, so re-shooting the photo in the form does
+      // not leave the shared original sitting in the queue forever.
       hasInboxPhoto ? inboxId : undefined,
+      extraFiles,
     );
     setSubmitting(true);
     setSaveError(null);
@@ -215,9 +232,15 @@ export function Upload({ theme, nav, state, setState, editId, inboxId }: UploadP
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept="image/*,application/pdf"
+        multiple
         style={{ display: 'none' }}
         onChange={(e) => {
+          if (e.target.files && e.target.files.length > 1) {
+            onFiles(e.target.files);
+            e.target.value = '';
+            return;
+          }
           const f = e.target.files?.[0];
           if (f) onFile(f);
         }}
@@ -246,6 +269,26 @@ export function Upload({ theme, nav, state, setState, editId, inboxId }: UploadP
                 alt="ใบเสร็จ"
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />
+              {/* Only the cover is previewed, so the count has to be stated —
+                  otherwise picking four pages looks like picking one. */}
+              {extraFiles.length > 0 && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 12,
+                    left: 12,
+                    fontFamily: FONT_UI,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: '#fff',
+                    background: 'rgba(0,0,0,0.62)',
+                    padding: '5px 10px',
+                    borderRadius: 100,
+                  }}
+                >
+                  แนบ {extraFiles.length + 1} ไฟล์
+                </div>
+              )}
               <div
                 style={{
                   position: 'absolute',
@@ -464,6 +507,7 @@ export function Upload({ theme, nav, state, setState, editId, inboxId }: UploadP
               items: [['—', amount]],
               tax: '0',
               photoPath: null,
+        files: [],
               bundleId: null,
               createdAt: today,
             }}

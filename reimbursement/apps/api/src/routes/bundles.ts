@@ -150,7 +150,7 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
       const [bundles, kbiz] = await Promise.all([
         prisma.bundle.findMany({
           where: filters,
-          include: { receipts: true, user: true, approver: true },
+          include: { receipts: { include: { files: true } }, user: true, approver: true },
           orderBy: { submittedAt: 'desc' },
           take,
           skip,
@@ -314,7 +314,7 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
 
         return tx.bundle.findUniqueOrThrow({
           where: { id: bundle.id },
-          include: { receipts: true, user: true, approver: true },
+          include: { receipts: { include: { files: true } }, user: true, approver: true },
         });
       });
 
@@ -350,7 +350,7 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
     const [bundle, kbiz] = await Promise.all([
       prisma.bundle.findUnique({
         where: { id: params.id },
-        include: { receipts: true, user: true, approver: true },
+        include: { receipts: { include: { files: true } }, user: true, approver: true },
       }),
       loadKbizPaymentContext(),
     ]);
@@ -389,7 +389,7 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
           approvedAt,
           approvedById: user.id,
         },
-        include: { receipts: true, user: true, approver: true },
+        include: { receipts: { include: { files: true } }, user: true, approver: true },
       });
 
       await tx.auditEvent.create({
@@ -518,7 +518,7 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
           // approved and then rejected. A leftover confirmed-failed KBIZ note
           // is cleared: the rejection supersedes the retry offer.
           data: { status: 'REJECTED', rejectReason: reason, paymentError: null },
-          include: { receipts: true, user: true, approver: true },
+          include: { receipts: { include: { files: true } }, user: true, approver: true },
         });
 
         await tx.auditEvent.create({
@@ -570,7 +570,7 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
 
       const bundle = await prisma.bundle.findUnique({
         where: { id: params.id },
-        include: { receipts: true },
+        include: { receipts: { include: { files: true } } },
       });
       if (!bundle) {
         return status(404, { message: 'Bundle not found' });
@@ -614,7 +614,7 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
             paymentError: null,
             payingSince: null,
           },
-          include: { receipts: true, user: true, approver: true },
+          include: { receipts: { include: { files: true } }, user: true, approver: true },
         });
 
         await tx.auditEvent.create({
@@ -693,7 +693,7 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
 
       const bundle = await prisma.bundle.findUnique({
         where: { id: params.id },
-        include: { receipts: true, user: true, approver: true },
+        include: { receipts: { include: { files: true } }, user: true, approver: true },
       });
       if (!bundle) {
         return status(404, { message: 'Bundle not found' });
@@ -908,7 +908,7 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
       const [updated, kbiz] = await Promise.all([
         prisma.bundle.findUniqueOrThrow({
           where: { id: params.id },
-          include: { receipts: true, user: true, approver: true },
+          include: { receipts: { include: { files: true } }, user: true, approver: true },
         }),
         loadKbizPaymentContext(),
       ]);
@@ -1045,7 +1045,7 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
       const [updated, kbiz] = await Promise.all([
         prisma.bundle.findUniqueOrThrow({
           where: { id: params.id },
-          include: { receipts: true, user: true, approver: true },
+          include: { receipts: { include: { files: true } }, user: true, approver: true },
         }),
         loadKbizPaymentContext(),
       ]);

@@ -5,6 +5,7 @@ import type {
   BundleWithDetails,
   InboxItem,
   Receipt as SharedReceipt,
+  ReceiptFile as SharedReceiptFile,
   ReceiptItem,
   Role,
   ShareTokenSummary,
@@ -14,6 +15,7 @@ import type {
   Bundle as PrismaBundle,
   BundleStatus as PrismaBundleStatus,
   Receipt as PrismaReceipt,
+  ReceiptFile as PrismaReceiptFile,
   ReceiptInbox as PrismaReceiptInbox,
   Role as PrismaRole,
   User as PrismaUser,
@@ -63,7 +65,27 @@ export function serializeUser(user: PrismaUser): SharedUser {
   };
 }
 
-export function serializeReceipt(receipt: PrismaReceipt): SharedReceipt {
+/**
+ * A receipt joined with its attachments. Every read path that serializes a
+ * receipt should include `files` — the type makes that explicit rather than
+ * letting a missing include silently produce `files: []` on a receipt that has
+ * some.
+ */
+export type PrismaReceiptWithFiles = PrismaReceipt & { files?: PrismaReceiptFile[] };
+
+function serializeReceiptFile(file: PrismaReceiptFile): SharedReceiptFile {
+  return {
+    id: file.id,
+    photoPath: file.photoPath,
+    originalPath: file.originalPath,
+    mimeType: file.mimeType,
+    filename: file.filename,
+    sizeBytes: file.sizeBytes,
+    position: file.position,
+  };
+}
+
+export function serializeReceipt(receipt: PrismaReceiptWithFiles): SharedReceipt {
   return {
     id: receipt.id,
     userId: receipt.userId,
@@ -79,6 +101,13 @@ export function serializeReceipt(receipt: PrismaReceipt): SharedReceipt {
     items: (receipt.items ?? []) as unknown as ReceiptItem[],
     tax: receipt.tax,
     photoPath: receipt.photoPath,
+    // Sorted here rather than trusted from the query: `position` is the display
+    // contract, and a caller that forgets `orderBy` should not silently reorder
+    // somebody's pages.
+    files: (receipt.files ?? [])
+      .slice()
+      .sort((a, b) => a.position - b.position)
+      .map(serializeReceiptFile),
     bundleId: receipt.bundleId,
     vendorId: receipt.vendorId,
     createdAt: receipt.createdAt.toISOString(),

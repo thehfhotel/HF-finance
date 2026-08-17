@@ -2,7 +2,7 @@ import { Elysia, t } from 'elysia';
 import type { ReceiptItem } from '@reimbursement/shared';
 import { auth } from '../auth';
 import { prisma } from '../db';
-import { deleteUploadedFiles, saveUploadedFile } from '../uploads';
+import { deleteUploadedFiles, saveSharedFile } from '../uploads';
 import { serializeReceipt } from '../serializers';
 import { getReceiptCategories } from '../settings';
 import { resolveVendorId } from '../vendors';
@@ -30,6 +30,16 @@ const receiptMultipartBody = t.Object({
   tax: t.Optional(t.String()),
   photo: t.Optional(t.File()),
   /**
+   * Additional attachments (CR-2026-08-17). One expense is often several files —
+   * a paper receipt shot three times, or an invoice plus its delivery note.
+   *
+   * The singular `photo`/`inboxId` above are kept and still work: existing
+   * clients send them, and the first of `photo` + `photos` becomes the cover.
+   */
+  photos: t.Optional(t.Files()),
+  /** Comma-separated inbox ids to drain into THIS receipt. */
+  inboxIds: t.Optional(t.String()),
+  /**
    * Drain an inbox item instead of uploading a photo (CR-2026-08-16).
    *
    * The file already sits in the uploads volume — the phone put it there when
@@ -56,8 +66,21 @@ interface ParsedReceiptInput {
   items?: ReceiptItem[];
   tax?: string;
   photoPath?: string;
+  /** Every freshly uploaded file, in the order the client sent them. */
+  uploadedPaths?: UploadedFile[];
   /** Set when the photo came from the share inbox; the row is consumed on save. */
   inboxId?: string;
+  /** All inbox items being drained into this receipt, in order. */
+  inboxIds?: string[];
+}
+
+/** A file this request uploaded, before it is attached to a receipt. */
+interface UploadedFile {
+  photoPath: string;
+  originalPath: string | null;
+  mimeType: string;
+  filename: string | null;
+  sizeBytes: number;
 }
 
 function parseItems(rawItems: string): ReceiptItem[] {
@@ -114,8 +137,26 @@ async function parseReceiptMultipart(
       : parseItems(body.items);
   }
 
-  if (body.photo) {
-    parsed.photoPath = await saveUploadedFile(body.photo);
+  // `photo` first so it stays the cover for existing clients, then any extras.
+  const incoming = [...(body.photo ? [body.photo] : []), ...(body.photos ?? [])];
+  if (incoming.length > 0) {
+    parsed.uploadedPaths = [];
+    for (const file of incoming) {
+      // saveSharedFile, not saveUploadedFile: it enforces the type allowlist and
+      // guarantees the stored path is <img>-renderable, rasterizing a PDF or
+      // HEIC on the way in. A file picked in the receipt form deserves exactly
+      // the same treatment as one shared from a phone — before this, a PDF
+      // attached here was stored raw and rendered as a broken image.
+      const saved = await saveSharedFile(file);
+      parsed.uploadedPaths.push({
+        photoPath: saved.photoPath,
+        originalPath: saved.originalPath,
+        mimeType: saved.mimeType,
+        filename: file.name ? file.name.slice(0, 120) : null,
+        sizeBytes: saved.sizeBytes,
+      });
+    }
+    parsed.photoPath = parsed.uploadedPaths[0]!.photoPath;
   }
 
   // Ownership cannot be checked here (no `user` in scope), so this only carries
@@ -123,6 +164,15 @@ async function parseReceiptMultipart(
   if (body.inboxId !== undefined && body.inboxId.length > 0) {
     parsed.inboxId = body.inboxId;
   }
+  const ids = [
+    ...(parsed.inboxId ? [parsed.inboxId] : []),
+    ...(body.inboxIds ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0),
+  ];
+  // De-duplicated: sending the same id in both fields must drain it once.
+  if (ids.length > 0) parsed.inboxIds = [...new Set(ids)];
 
   return parsed;
 }
@@ -168,6 +218,7 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
       const receipts = await prisma.receipt.findMany({
         where: filters,
         orderBy: { createdAt: 'desc' },
+        include: { files: true },
         take,
         skip,
       });
@@ -197,30 +248,49 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
         return status(400, { message });
       }
 
-      // Draining a shared file: adopt the already-stored photo rather than
+      // Draining shared files: adopt the already-stored photos rather than
       // making the phone upload the same bytes again. Scoped to the caller in
       // the WHERE clause, so one employee can never adopt another's file by
       // guessing an id — the lookup simply finds nothing.
-      let inboxItem = null;
-      if (parsed.inboxId !== undefined) {
-        inboxItem = await prisma.receiptInbox.findFirst({
-          where: { id: parsed.inboxId, userId: user.id },
+      let inboxItems: Awaited<ReturnType<typeof prisma.receiptInbox.findMany>> = [];
+      if (parsed.inboxIds !== undefined && parsed.inboxIds.length > 0) {
+        inboxItems = await prisma.receiptInbox.findMany({
+          where: { id: { in: parsed.inboxIds }, userId: user.id },
         });
-        if (!inboxItem) {
+        if (inboxItems.length !== parsed.inboxIds.length) {
+          // All or nothing: silently dropping one of three shared pages would
+          // produce a receipt that looks complete and is not.
           return status(404, { message: 'Inbox item not found' });
         }
+        // Preserve the order the client asked for, not the database's.
+        const order = new Map(parsed.inboxIds.map((id, i) => [id, i]));
+        inboxItems.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
       }
 
-      // An explicitly uploaded photo wins over the inbox one: if the employee
-      // re-shot the receipt in the form, that is the photo they meant.
-      const photoPath = parsed.photoPath ?? inboxItem?.photoPath ?? null;
+      // Attachment order: files picked in the form first (an explicit upload is
+      // the photo the employee most recently chose), then drained shares.
+      const attachments = [
+        ...(parsed.uploadedPaths ?? []),
+        ...inboxItems.map((item) => ({
+          photoPath: item.photoPath,
+          originalPath: item.originalPath,
+          mimeType: item.mimeType,
+          filename: item.filename,
+          sizeBytes: item.sizeBytes,
+        })),
+      ];
+
+      // The cover mirrors the first attachment. Written together with `files`
+      // and never on its own — that is the whole invariant keeping the legacy
+      // column honest for screens that still read it.
+      const photoPath = attachments[0]?.photoPath ?? null;
 
       // The vendor is resolved from the typed merchant on the way in, so there
       // is exactly one path to a vendorId and the client never posts one.
       const vendorId = await resolveVendorId(parsed.merchant);
 
-      // One transaction so a receipt can never exist while its inbox row also
-      // still does — that would show the employee the same shared photo again
+      // One transaction so a receipt can never exist while its inbox rows also
+      // still do — that would show the employee the same shared photos again
       // and invite a duplicate claim for the same expense.
       const created = await prisma.$transaction(async (tx) => {
         const receipt = await tx.receipt.create({
@@ -239,28 +309,41 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
             items: parsed.items,
             tax: parsed.tax ?? '0',
             photoPath,
+            files: {
+              create: attachments.map((a, position) => ({
+                photoPath: a.photoPath,
+                originalPath: a.originalPath,
+                mimeType: a.mimeType,
+                filename: a.filename,
+                sizeBytes: a.sizeBytes,
+                position,
+              })),
+            },
           },
+          include: { files: true },
         });
 
-        if (inboxItem) {
+        if (inboxItems.length > 0) {
           // deleteMany, not delete: a concurrent drain of the same item (two
           // tabs, a double-tap) must not throw P2025 and lose the receipt that
           // was just created. Whoever gets there second simply deletes nothing.
-          await tx.receiptInbox.deleteMany({ where: { id: inboxItem.id, userId: user.id } });
+          await tx.receiptInbox.deleteMany({
+            where: { id: { in: inboxItems.map((i) => i.id) }, userId: user.id },
+          });
         }
 
         return receipt;
       });
 
-      // The receipt now owns `photoPath`. Anything the shared item held that the
-      // receipt did NOT adopt is unreachable from here on, so reclaim it:
-      // the source PDF always (a Receipt has no field for it), and the shared
-      // render too when the employee re-shot the photo in the form.
-      if (inboxItem) {
-        const orphaned = [inboxItem.originalPath];
-        if (created.photoPath !== inboxItem.photoPath) orphaned.push(inboxItem.photoPath);
-        await deleteUploadedFiles(orphaned);
-      }
+      // Anything the drained items held that the receipt did NOT adopt is now
+      // unreachable, so reclaim it. `originalPath` always qualifies: a
+      // ReceiptFile keeps it, so it is carried over above — nothing to delete
+      // here unless an attachment was dropped.
+      const adopted = new Set(created.files.map((f) => f.photoPath));
+      const orphaned = inboxItems
+        .filter((item) => !adopted.has(item.photoPath))
+        .flatMap((item) => [item.photoPath, item.originalPath]);
+      if (orphaned.length > 0) await deleteUploadedFiles(orphaned);
 
       return serializeReceipt(created);
     },
@@ -271,7 +354,10 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
   )
 
   .get('/:id', async ({ user, params, status }) => {
-    const receipt = await prisma.receipt.findUnique({ where: { id: params.id } });
+    const receipt = await prisma.receipt.findUnique({
+      where: { id: params.id },
+      include: { files: true },
+    });
     if (!receipt) {
       return status(404, { message: 'Receipt not found' });
     }
@@ -286,7 +372,10 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
   .patch(
     '/:id',
     async ({ user, params, body, status }) => {
-      const existing = await prisma.receipt.findUnique({ where: { id: params.id } });
+      const existing = await prisma.receipt.findUnique({
+        where: { id: params.id },
+        include: { files: true },
+      });
       if (!existing) {
         return status(404, { message: 'Receipt not found' });
       }
@@ -315,6 +404,7 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
           : { vendorId: await resolveVendorId(parsed.merchant) };
 
       const updated = await prisma.receipt.update({
+        include: { files: true },
         where: { id: params.id },
         data: {
           ...vendorPatch,
@@ -329,9 +419,39 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
           ...(parsed.accent !== undefined ? { accent: parsed.accent } : {}),
           ...(parsed.items !== undefined ? { items: parsed.items } : {}),
           ...(parsed.tax !== undefined ? { tax: parsed.tax } : {}),
+          // photoPath is written ONLY alongside the matching `files` rows below,
+          // never on its own — see the invariant on Receipt.photoPath.
           ...(parsed.photoPath !== undefined ? { photoPath: parsed.photoPath } : {}),
+          ...(parsed.uploadedPaths !== undefined && parsed.uploadedPaths.length > 0
+            ? {
+                files: {
+                  // Appended after whatever is already attached. An edit that
+                  // adds a page must not silently drop the pages already there.
+                  create: parsed.uploadedPaths.map((a, i) => ({
+                    photoPath: a.photoPath,
+                    originalPath: a.originalPath,
+                    mimeType: a.mimeType,
+                    filename: a.filename,
+                    sizeBytes: a.sizeBytes,
+                    position: existing.files.length + i,
+                  })),
+                },
+              }
+            : {}),
         },
       });
+
+      // A newly uploaded photo becomes the cover, so the mirror has to follow.
+      // Re-read rather than trust `updated`: the create above appended rows and
+      // position 0 may be an older file.
+      const cover = updated.files.slice().sort((a, b) => a.position - b.position)[0];
+      if (cover && updated.photoPath !== cover.photoPath) {
+        await prisma.receipt.update({
+          where: { id: params.id },
+          data: { photoPath: cover.photoPath },
+        });
+        updated.photoPath = cover.photoPath;
+      }
 
       return serializeReceipt(updated);
     },
@@ -342,7 +462,10 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
   )
 
   .delete('/:id', async ({ user, params, status, set }) => {
-    const existing = await prisma.receipt.findUnique({ where: { id: params.id } });
+    const existing = await prisma.receipt.findUnique({
+      where: { id: params.id },
+      include: { files: true },
+    });
     if (!existing) {
       return status(404, { message: 'Receipt not found' });
     }
@@ -354,10 +477,13 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
     }
 
     await prisma.receipt.delete({ where: { id: params.id } });
-    // Reclaim the bytes. Safe by the guard above: a receipt can only be deleted
-    // while unbundled, and each upload has its own UUID filename, so nothing
-    // else points at this file.
-    await deleteUploadedFiles([existing.photoPath]);
+    // Reclaim EVERY attachment, not just the cover — a three-page receipt would
+    // otherwise leave two files behind forever. `photoPath` is included as a
+    // belt-and-braces for any legacy row whose backfill never ran.
+    await deleteUploadedFiles([
+      ...existing.files.flatMap((f) => [f.photoPath, f.originalPath]),
+      existing.photoPath,
+    ]);
     set.status = 204;
     return null;
   });
