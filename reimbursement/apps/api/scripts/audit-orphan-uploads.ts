@@ -26,10 +26,21 @@
  *   - A file younger than MIN_AGE_HOURS is never touched, so an upload that is
  *     mid-flight (row not yet committed) cannot be swept out from under itself.
  *
- * USAGE (on evergreen, from the deploy dir)
+ * USAGE (on evergreen)
  *
- *   docker compose exec api bun run scripts/audit-orphan-uploads.ts
- *   docker compose exec api bun run scripts/audit-orphan-uploads.ts --delete
+ *   docker exec -w /app/apps/api reimbursement-v2-api \
+ *     bun run scripts/audit-orphan-uploads.ts
+ *   docker exec -w /app/apps/api reimbursement-v2-api \
+ *     bun run scripts/audit-orphan-uploads.ts --delete
+ *
+ * `-w /app/apps/api` is REQUIRED and easy to miss: the image's WORKDIR is /app,
+ * but the uploads directory is resolved from process.cwd(). Run it from /app and
+ * it inspects a non-existent /app/uploads, reports every file as fine, and
+ * reclaims nothing while looking like it worked.
+ *
+ * First run against production, 2026-08-17: 1,558 files referenced and kept,
+ * 17 orphans + 33 orphaned thumbnails removed, 3.6 MB freed. The bulk were
+ * Notion-import leftovers ~103 days old.
  */
 
 import { readdir, stat, rm } from 'node:fs/promises';
