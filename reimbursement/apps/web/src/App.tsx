@@ -14,6 +14,8 @@ import {
   isKioskResponse,
 } from './lib/api';
 import type { BundleStats } from './lib/api';
+import { setPropertyHint } from './lib/property-hint';
+import { HfBar } from './components/HfBar';
 import { IOSDevice } from './components/IOSDevice';
 import { Icon } from './components/icons';
 import { TweaksPanel } from './components/TweaksPanel';
@@ -227,6 +229,12 @@ export function App() {
         try {
           const response = await api.auth.cfLogin();
           if (cancelled) return;
+          // Which desk this verified identity is standing at, for the estate
+          // band alone. Written on BOTH shapes and on the absent case, so a
+          // hint from a previous sign-in on this browser profile can never
+          // outlive it — the HF Ville reception PC runs a second Chrome profile
+          // for HF's mailbox, and a stale hint would scope the wrong desk.
+          setPropertyHint(response.propertyHint);
           if (isKioskResponse(response)) {
             // A shared terminal — a place, not a person, so there is no session
             // to restore. Land on the login screen in kiosk mode, which arms the
@@ -241,6 +249,9 @@ export function App() {
           await refetch();
         } catch (error) {
           if (cancelled) return;
+          // An identity we could not verify names no desk. Clearing beats
+          // leaving the last one in place: fail open to the full switcher.
+          setPropertyHint(null);
           setCfError(cfLoginErrorMessage(error));
           setRoute({ name: 'login' });
         }
@@ -405,15 +416,9 @@ export function App() {
           overflow: 'auto',
         }}
       >
-        {/* HF One shell band, portal-only mode — real mobile flow, not the
-            dev-only IOSDevice preview (this branch never uses that frame). */}
-        <script
-          defer
-          src="https://erp.thehfhotel.org/shell/hf-bar.js"
-          data-app="Reimbursement"
-          data-module="finance"
-          data-portal-only="1"
-        />
+        {/* HF One shell band — real mobile flow, not the dev-only
+            IOSDevice preview. */}
+        <HfBar />
         {inner}
       </div>
     );
@@ -485,15 +490,9 @@ export function App() {
               overflow: 'hidden',
             }}
           >
-            {/* HF One shell band, portal-only mode — real mobile flow, not
-                the dev-only IOSDevice preview. */}
-            <script
-              defer
-              src="https://erp.thehfhotel.org/shell/hf-bar.js"
-              data-app="Reimbursement"
-              data-module="finance"
-              data-portal-only="1"
-            />
+            {/* HF One shell band — real mobile flow, not the dev-only
+                IOSDevice preview. */}
+            <HfBar />
             {adminMobileShell}
           </div>
         )}
@@ -568,15 +567,9 @@ export function App() {
               overflow: 'hidden',
             }}
           >
-            {/* HF One shell band, portal-only mode — real mobile flow, not
-                the dev-only IOSDevice preview. */}
-            <script
-              defer
-              src="https://erp.thehfhotel.org/shell/hf-bar.js"
-              data-app="Reimbursement"
-              data-module="finance"
-              data-portal-only="1"
-            />
+            {/* HF One shell band — real mobile flow, not the dev-only
+                IOSDevice preview. */}
+            <HfBar />
             {adminKbizMobileShell}
           </div>
         )}
@@ -791,15 +784,9 @@ export function App() {
             overflow: 'hidden',
           }}
         >
-          {/* HF One shell band, portal-only mode — real mobile flow, not the
-              dev-only IOSDevice preview above. */}
-          <script
-            defer
-            src="https://erp.thehfhotel.org/shell/hf-bar.js"
-            data-app="Reimbursement"
-            data-module="finance"
-            data-portal-only="1"
-          />
+          {/* HF One shell band — real mobile flow, not the dev-only
+              IOSDevice preview. */}
+          <HfBar />
           {mobileShell}
         </div>
       )}

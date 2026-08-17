@@ -8,6 +8,8 @@ import { APPROVALS_HTML } from "./views/approvals";
 import { WORKSHEET_HTML } from "./views/worksheet";
 import { STATUS_HTML } from "./views/status";
 import { ADMIN_MODAL_HTML, adminNavHtml } from "./views/admin";
+import { HF_BAR_PLACEHOLDER, hfBarScriptTag } from "./views/hf-bar";
+import { ACCESS_EMAIL_HEADER, propertyHintFromHeaders } from "./property-hint";
 import { addAccount, deleteAccount, listAccounts, updateAccount } from "./store";
 import { loadRegistered, registeredByNumber, registeredSet } from "./registered";
 import { getRequest, listRequests, submitRequest, submitSyncRequest, updateRequest } from "./queue";
@@ -80,18 +82,38 @@ function secureCookieSuffix(headers: Record<string, string | undefined>): string
   return proto === "https" ? "; Secure" : "";
 }
 
-function renderHTML(template: string, currentPath: string, isAdmin: boolean): Response {
+function renderHTML(
+  template: string,
+  currentPath: string,
+  isAdmin: boolean,
+  headers: Record<string, string | undefined>,
+): Response {
   const body = template
     .replace("<!--ADMIN_NAV-->", adminNavHtml(currentPath, isAdmin))
-    .replace("<!--ADMIN_MODAL-->", ADMIN_MODAL_HTML);
+    .replace("<!--ADMIN_MODAL-->", ADMIN_MODAL_HTML)
+    // A replacer function, so nothing in the tag is read as a `$` substitution.
+    .replace(HF_BAR_PLACEHOLDER, () => hfBarScriptTag(propertyHintFromHeaders(headers)));
   return new Response(body, {
     headers: {
       "content-type": "text/html; charset=utf-8",
       // The HTML embeds inline JS that posts to /api/queue/transfer with
       // a `period` field added in fc94153. Browsers cache HTML aggressively
-      // by default; "no-cache" forces revalidation each load so an old tab
-      // can't ship a submission missing the snapshot field.
-      "cache-control": "no-cache, must-revalidate",
+      // by default, so this must never be served from a cache.
+      //
+      // Stronger than the previous "no-cache, must-revalidate" because these
+      // bytes are now PER IDENTITY: the estate band's `data-property` comes
+      // from the caller's Access identity, and the admin nav from their
+      // session cookie. One payroll instance serves both properties, so a
+      // shell reused across identities would scope the wrong desk — worse
+      // than never scoping at all. "no-cache" still permits a shared cache to
+      // STORE the response; "private, no-store" permits neither.
+      "cache-control": "private, no-store",
+      // Names the identity on both sides of Cloudflare: the origin varies on
+      // the header the edge injects, while anything upstream of the edge
+      // (nginx, the browser) only ever sees the cookies that produced it —
+      // CF_Authorization, and `admin_session` for the nav. Belt and braces
+      // behind no-store, for any cache that ignores it.
+      vary: `${ACCESS_EMAIL_HEADER}, Cookie`,
     },
   });
 }
@@ -124,14 +146,14 @@ function adminGuard(headers: Record<string, string | undefined>, set: { status?:
 
 const app = new Elysia()
   .get("/", ({ headers, redirect }) =>
-    isAdminUnlocked(headers) ? renderHTML(MAIN_HTML, "/", true) : redirect("/worksheet", 302)
+    isAdminUnlocked(headers) ? renderHTML(MAIN_HTML, "/", true, headers) : redirect("/worksheet", 302)
   )
-  .get("/worksheet", ({ headers }) => renderHTML(WORKSHEET_HTML, "/worksheet", isAdminUnlocked(headers)))
-  .get("/accounts", ({ headers }) => renderHTML(ACCOUNTS_HTML, "/accounts", isAdminUnlocked(headers)))
+  .get("/worksheet", ({ headers }) => renderHTML(WORKSHEET_HTML, "/worksheet", isAdminUnlocked(headers), headers))
+  .get("/accounts", ({ headers }) => renderHTML(ACCOUNTS_HTML, "/accounts", isAdminUnlocked(headers), headers))
   .get("/approvals", ({ headers, redirect }) =>
-    isAdminUnlocked(headers) ? renderHTML(APPROVALS_HTML, "/approvals", true) : redirect("/worksheet", 302)
+    isAdminUnlocked(headers) ? renderHTML(APPROVALS_HTML, "/approvals", true, headers) : redirect("/worksheet", 302)
   )
-  .get("/status", ({ headers }) => renderHTML(STATUS_HTML, "/status", isAdminUnlocked(headers)))
+  .get("/status", ({ headers }) => renderHTML(STATUS_HTML, "/status", isAdminUnlocked(headers), headers))
   .get("/health", () => "ok")
 
   // Sanitised status feed for the /status page — no per-row PII, no xlsx

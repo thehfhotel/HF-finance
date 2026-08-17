@@ -3,6 +3,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { prisma } from '../db';
 import type { User } from '../generated/prisma';
 import { signAuthToken } from '../jwt';
+import { type PropertyHint, propertyHintForEmail } from '../property_hint';
 import { serializeUser } from '../serializers';
 
 /**
@@ -173,9 +174,17 @@ function initialsFor(name: string): string {
  * share-target route refuses it, because a shared file with no person attached
  * has no inbox to land in.
  */
+/**
+ * `propertyHint` rides along on the two admitted shapes: it is the property
+ * this verified identity is STANDING AT, for the estate top bar's cosmetic
+ * `data-property` (see `../property_hint.ts`). Optional and purely additive —
+ * it decides nothing here, and every caller that ignores it behaves exactly as
+ * before. Derived from the verified email independently of `KIOSK_EMAILS`
+ * above, which answers a different question and names both reception desks.
+ */
 export type CfIdentity =
-  | { kind: 'user'; user: User }
-  | { kind: 'kiosk'; kioskId: string }
+  | { kind: 'user'; user: User; propertyHint?: PropertyHint }
+  | { kind: 'kiosk'; kioskId: string; propertyHint?: PropertyHint }
   | { kind: 'unconfigured'; missing: string[] }
   | { kind: 'unauthenticated' }
   | { kind: 'unknown-identity' };
@@ -216,8 +225,14 @@ export async function resolveCfIdentity(assertion: string | undefined): Promise<
   // has to win — otherwise that terminal keeps signing itself in as a person.
   // Ordering it this way also means switching a terminal to kiosk mode is a
   // pure env change, with no row to migrate and nothing to undo.
+  // Where this identity is standing, for the top bar alone. Resolved from the
+  // verified email, NOT from the kiosk id below it: `KIOSK_EMAILS` names both
+  // reception desks on purpose, and HF's mailbox also runs on the HF Ville PC,
+  // so deriving the place from it would scope the ville desk to "hf".
+  const propertyHint = propertyHintForEmail(rawEmail);
+
   const kioskId = KIOSK_EMAILS.get(rawEmail.trim().toLowerCase());
-  if (kioskId) return { kind: 'kiosk', kioskId };
+  if (kioskId) return { kind: 'kiosk', kioskId, propertyHint };
 
   // Cloudflare forwards the IdP's display name when it has one; HF-ID's own
   // fallback (`พนักงาน <badge>`) is used when it doesn't, and the next card or
@@ -227,7 +242,17 @@ export async function resolveCfIdentity(assertion: string | undefined): Promise<
   const user = await resolveUserByCfEmail(rawEmail, cfName);
   if (!user) return { kind: 'unknown-identity' };
 
-  return { kind: 'user', user };
+  return { kind: 'user', user, propertyHint };
+}
+
+/**
+ * `{ propertyHint }` when there is one, `{}` when there is not — so the key is
+ * ABSENT from the JSON rather than present-and-null. The SPA copies the value
+ * straight onto the bar's `data-property` attribute, and the bar defines only
+ * two states: attribute present with a known property, or attribute absent.
+ */
+function hintField(hint: PropertyHint | undefined): { propertyHint?: PropertyHint } {
+  return hint ? { propertyHint: hint } : {};
 }
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -252,13 +277,15 @@ export const authCfRoutes = new Elysia().group('/auth', (group) =>
       case 'kiosk':
         // Not an error: a place has no session. The SPA reads this as "show the
         // card-tap screen" so an employee can attach themselves to the terminal.
-        return { kiosk: true as const, kioskId: identity.kioskId };
+        // `propertyHint` is omitted entirely when there is none, so the SPA
+        // never has to tell "no hint" from an empty one.
+        return { kiosk: true as const, kioskId: identity.kioskId, ...hintField(identity.propertyHint) };
       case 'user': {
         const token = await signAuthToken({
           userId: identity.user.id,
           badge: identity.user.badge ?? undefined,
         });
-        return { token, user: serializeUser(identity.user) };
+        return { token, user: serializeUser(identity.user), ...hintField(identity.propertyHint) };
       }
     }
   }),

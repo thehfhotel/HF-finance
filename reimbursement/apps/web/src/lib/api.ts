@@ -66,6 +66,7 @@ export type {
   VendorSearchResponse,
   VendorSuggestion,
 } from '@reimbursement/shared';
+import type { PropertyHint } from './property-hint';
 
 // ─── Auth token storage ──────────────────────────────────────────
 // The JWT is the source of truth for authentication. It is persisted in
@@ -319,6 +320,8 @@ export interface CardLoginResult {
 export interface CfLoginResponse {
   token: string;
   user: User;
+  /** @see PropertyHint — absent unless the verified identity names one desk. */
+  propertyHint?: PropertyHint;
 }
 
 export interface StatSlice {
@@ -398,6 +401,8 @@ export interface BundleStats {
 export interface CfKioskResponse {
   kiosk: true;
   kioskId: string;
+  /** @see PropertyHint — absent unless the verified identity names one desk. */
+  propertyHint?: PropertyHint;
 }
 
 export type CfLoginResult = CfLoginResponse | CfKioskResponse;
