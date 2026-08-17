@@ -157,6 +157,36 @@ export class ShareTooLargeError extends Error {
  * all — in which case we fall back to the filename extension rather than
  * rejecting a perfectly good photo.
  */
+/**
+ * Identify a file from its own first bytes.
+ *
+ * The declared type and the filename both come from the client and both have
+ * been wrong in practice: the desktop form round-tripped a PDF through a data
+ * URL, lost the type, and handed the server 500 KB of PDF named `receipt.jpg`
+ * with `image/jpeg` on it. Everything downstream believed it, stored the PDF
+ * verbatim under a .jpg name, and every <img> pointed at it rendered nothing.
+ *
+ * Magic bytes cannot be got wrong by a client bug, so they win when they
+ * disagree. Returns null when the signature is not one we recognise, in which
+ * case the declared type is used as before.
+ */
+export function sniffMime(bytes: Uint8Array): string | null {
+  const ascii = (from: number, len: number): string =>
+    String.fromCharCode(...bytes.slice(from, from + len));
+
+  if (ascii(0, 4) === '%PDF') return 'application/pdf';
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+  if (bytes[0] === 0x89 && ascii(1, 3) === 'PNG') return 'image/png';
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 4) === 'WEBP') return 'image/webp';
+  // ISO-BMFF: the brand at offset 8 distinguishes HEIC/HEIF from other MP4s.
+  if (ascii(4, 4) === 'ftyp') {
+    const brand = ascii(8, 4);
+    if (brand === 'heic' || brand === 'heix' || brand === 'hevc') return 'image/heic';
+    if (brand === 'mif1' || brand === 'msf1' || brand === 'heim') return 'image/heif';
+  }
+  return null;
+}
+
 export function normalizeSharedMime(rawType: string | undefined, filename: string): string | null {
   const declared = (rawType ?? '').split(';')[0]!.trim().toLowerCase();
   if (declared && declared in SHARED_MIME_EXTENSIONS) return declared;
@@ -234,8 +264,18 @@ export async function saveSharedFile(file: File): Promise<SavedShare> {
   if (sizeBytes > MAX_SHARED_FILE_BYTES) throw new ShareTooLargeError(sizeBytes);
   if (sizeBytes === 0) throw new UnsupportedShareTypeError('empty');
 
-  const mimeType = normalizeSharedMime(file.type, file.name);
+  // The bytes decide. A client that mislabels a PDF as image/jpeg — which the
+  // desktop form did — must not be able to get PDF bytes stored under a .jpg
+  // name, because nothing downstream would ever render them.
+  const head = new Uint8Array((await file.arrayBuffer()).slice(0, 16));
+  const sniffed = sniffMime(head);
+  const declared = normalizeSharedMime(file.type, file.name);
+  const mimeType = sniffed ?? declared;
+
   if (mimeType === null) throw new UnsupportedShareTypeError(file.type || extname(file.name));
+  if (sniffed !== null && declared !== null && sniffed !== declared) {
+    console.warn(`[share] client said ${declared} but bytes are ${sniffed} (${file.name}) — trusting the bytes`);
+  }
 
   const storedPath = await persist(file, SHARED_MIME_EXTENSIONS[mimeType]!);
 

@@ -4,6 +4,7 @@ import {
   ShareTooLargeError,
   UnsupportedShareTypeError,
   normalizeSharedMime,
+  sniffMime,
   fileFromRawBody,
   saveSharedFile,
 } from '../src/uploads';
@@ -157,5 +158,66 @@ describe('fileFromRawBody', () => {
     ['form-urlencoded', 'application/x-www-form-urlencoded'],
   ])('returns null for %s', (_label, type) => {
     expect(fileFromRawBody(bytes(), type, undefined)).toBeNull();
+  });
+});
+
+/**
+ * Magic-byte sniffing.
+ *
+ * Added after a real incident: the desktop form round-tripped a PDF through a
+ * data URL, lost the type, and uploaded 500 KB of PDF named `receipt.jpg` with
+ * `image/jpeg` on it. The server believed the label, stored the PDF verbatim
+ * under a .jpg name, and the receipt rendered nothing. The client is fixed, but
+ * the bytes are the only thing a client bug cannot lie about.
+ */
+describe('sniffMime', () => {
+  const bytesOf = (...parts: (string | number[])[]): Uint8Array =>
+    new Uint8Array(
+      parts.flatMap((p) => (typeof p === 'string' ? [...p].map((c) => c.charCodeAt(0)) : p)),
+    );
+
+  test('detects a PDF', () => {
+    expect(sniffMime(bytesOf('%PDF-1.4'))).toBe('application/pdf');
+  });
+
+  test('detects a JPEG', () => {
+    expect(sniffMime(bytesOf([0xff, 0xd8, 0xff, 0xe0]))).toBe('image/jpeg');
+  });
+
+  test('detects a PNG', () => {
+    expect(sniffMime(bytesOf([0x89], 'PNG', [0x0d, 0x0a]))).toBe('image/png');
+  });
+
+  test('detects a WebP', () => {
+    expect(sniffMime(bytesOf('RIFF', [0, 0, 0, 0], 'WEBP'))).toBe('image/webp');
+  });
+
+  test('detects HEIC by its ISO-BMFF brand', () => {
+    expect(sniffMime(bytesOf([0, 0, 0, 0x18], 'ftyp', 'heic'))).toBe('image/heic');
+  });
+
+  test('returns null for an unrecognised signature, leaving the declared type in charge', () => {
+    expect(sniffMime(bytesOf('NOTATHING'))).toBeNull();
+  });
+
+  test('is not fooled by an empty buffer', () => {
+    expect(sniffMime(new Uint8Array(0))).toBeNull();
+  });
+});
+
+describe('saveSharedFile trusts bytes over labels', () => {
+  // The exact shape of the incident: PDF content, JPEG label, .jpg name.
+  test('a PDF mislabelled as image/jpeg is treated as a PDF', async () => {
+    const pdfBytes = new TextEncoder().encode('%PDF-1.4\n%mock pdf body');
+    const lying = new File([pdfBytes], 'receipt.jpg', { type: 'image/jpeg' });
+    const saved = await saveSharedFile(lying);
+    // Stored as a PDF, so rasterization is attempted and the truth is recorded.
+    expect(saved.mimeType).toBe('application/pdf');
+    // Cleanup: remove whatever it wrote.
+    const { rm } = await import('node:fs/promises');
+    const { resolve } = await import('node:path');
+    for (const p of [saved.photoPath, saved.originalPath].filter(Boolean)) {
+      await rm(resolve(process.cwd(), 'uploads', p!.split('/').pop()!), { force: true });
+    }
   });
 });
