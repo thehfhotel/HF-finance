@@ -659,27 +659,10 @@ export function App() {
     (route.name === 'home' || route.name === 'my-requests' || route.name === 'record');
 
   if (platform === 'desktop') {
-    // The share inbox needs its own branch, like the admin screens above: the
-    // two shells below only distinguish 'my-requests', so every other route
-    // falls into DesktopApprover and a sidebar click that merely changed
-    // `route` would do visibly nothing. That is exactly the bug this fixes.
-    if (route.name === 'share-inbox') {
-      return (
-        <>
-          <ShareInbox
-            theme={theme}
-            nav={setRoute}
-            shareError={route.shareError ?? null}
-            onCountChange={setShareInboxCount}
-          />
-          {IS_DEV && <TweaksPanel tweaks={tweaks} onChange={setTweak} onJump={onJump} />}
-        </>
-      );
-    }
 
     return (
       <>
-        {role === 'approver' && route.name !== 'my-requests' ? (
+        {role === 'approver' && route.name !== 'my-requests' && route.name !== 'share-inbox' ? (
           <DesktopApprover
             theme={theme}
             state={state}
@@ -706,8 +689,14 @@ export function App() {
             onBackToInbox={() => setRoute({ name: 'approver-home' })}
             onLogout={handleLogout}
             sidebarCounts={sidebarCounts}
-            initialView={route.name === 'my-requests' ? route.view : undefined}
-            onOpenShareInbox={() => setRoute({ name: 'share-inbox' })}
+            initialView={
+              route.name === 'share-inbox'
+                ? 'share-inbox'
+                : route.name === 'my-requests'
+                  ? route.view
+                  : undefined
+            }
+            onShareInboxCountChange={setShareInboxCount}
             onNavigateApprover={(key) => {
               if (key === 'employees') return setRoute({ name: 'admin-employees' });
               if (key === 'admin-settings') return setRoute({ name: 'admin-settings' });
@@ -724,7 +713,8 @@ export function App() {
             currentUser={currentUser}
             onLogout={handleLogout}
             sidebarCounts={sidebarCounts}
-            onOpenShareInbox={() => setRoute({ name: 'share-inbox' })}
+            initialView={route.name === 'share-inbox' ? 'share-inbox' : undefined}
+            onShareInboxCountChange={setShareInboxCount}
           />
         )}
         {IS_DEV && <TweaksPanel tweaks={tweaks} onChange={setTweak} onJump={onJump} />}

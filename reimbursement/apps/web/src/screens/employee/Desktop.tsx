@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { AppState, BundleWithDetails, Receipt, Theme, User } from '../../lib/types';
+import type { AppState, BundleWithDetails, InboxItem, Receipt, Theme, User } from '../../lib/types';
 import { fmt, fmt0, fmtN, formatThaiDate } from '../../lib/format';
 import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../../lib/theme';
 import { api, receiptFormFromFields } from '../../lib/api';
@@ -34,7 +34,7 @@ function sanitizeAmountInput(raw: string): string {
 // Pulled from `@reimbursement/shared` to stay in sync with the rest of the app.
 import { useReceiptCategories } from '../../lib/useReceiptCategories';
 
-type View = 'drafts' | 'bundle-detail' | 'bundle-list';
+type View = 'drafts' | 'bundle-detail' | 'bundle-list' | 'share-inbox';
 type BundleFilter = 'pending' | 'approved' | 'paid' | 'rejected';
 
 interface DesktopEmployeeProps {
@@ -47,26 +47,39 @@ interface DesktopEmployeeProps {
   /** Approvers see the approval box and พนักงาน in the shared sidebar; this
    *  carries those clicks back to the approver console. */
   onNavigateApprover?: (key: SidebarKey) => void;
-  /** Open the share inbox (files sent in from a phone). Its own callback
-   *  rather than a SidebarKey on onNavigateApprover, because a plain
-   *  employee's shell is never given that prop. */
-  onOpenShareInbox?: () => void;
+  /** Keeps the shared sidebar count honest as items are drained or discarded. */
+  onShareInboxCountChange?: (count: number) => void;
   /** Which pane the click that brought us here actually meant. */
-  initialView?: 'drafts' | 'pending' | 'approved' | 'paid' | 'rejected';
+  initialView?: 'drafts' | 'pending' | 'approved' | 'paid' | 'rejected' | 'share-inbox';
   /** Shared across every screen so the menu's numbers never change shape. */
   sidebarCounts?: SidebarCounts;
 }
 
-export function DesktopEmployee({ theme, state, setState, currentUser, onBackToInbox, onLogout, onNavigateApprover, onOpenShareInbox, initialView, sidebarCounts }: DesktopEmployeeProps): JSX.Element {
+export function DesktopEmployee({ theme, state, setState, currentUser, onBackToInbox, onLogout, onNavigateApprover, onShareInboxCountChange, initialView, sidebarCounts }: DesktopEmployeeProps): JSX.Element {
   // onBackToInbox is only supplied for approvers, so it doubles as the role flag.
   const isApprover = onBackToInbox !== undefined;
   const [view, setView] = useState<View>(
-    initialView && initialView !== 'drafts' ? 'bundle-list' : 'drafts',
+    initialView === 'share-inbox'
+      ? 'share-inbox'
+      : initialView && initialView !== 'drafts'
+        ? 'bundle-list'
+        : 'drafts',
   );
   const [listFilter, setListFilter] = useState<BundleFilter>(
-    initialView && initialView !== 'drafts' ? initialView : 'pending',
+    initialView && initialView !== 'drafts' && initialView !== 'share-inbox'
+      ? initialView
+      : 'pending',
   );
   const [detailOrigin, setDetailOrigin] = useState<Exclude<View, 'bundle-detail'>>('drafts');
+  /**
+   * Files shared in from a phone. Loaded here rather than in the pane so the
+   * sidebar count and the pane never disagree, and so draining one can drop it
+   * from the list without a refetch.
+   */
+  const [inboxItems, setInboxItems] = useState<InboxItem[] | null>(null);
+  /** The item the create modal is currently draining, if any. */
+  const [drainingItem, setDrainingItem] = useState<InboxItem | null>(null);
+  const [discardingItem, setDiscardingItem] = useState<InboxItem | null>(null);
   const [selectedBundleId, setSelectedBundleId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bundleName, setBundleName] = useState<string>('');
@@ -120,6 +133,29 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
       next.add(id);
     }
     setSelected(next);
+  };
+
+  const loadInbox = async (): Promise<void> => {
+    try {
+      setInboxItems(await api.inbox.list());
+    } catch {
+      // Non-fatal: the pane shows an empty queue rather than blocking the
+      // whole requestor console on one optional list.
+      setInboxItems([]);
+    }
+  };
+
+  // Fetched when the pane opens rather than on mount: most sessions never look
+  // at the inbox, and this console already pays for receipts + bundles + stats
+  // before first paint.
+  useEffect(() => {
+    if (view === 'share-inbox' && inboxItems === null) void loadInbox();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
+  const openShareInboxPane = (): void => {
+    setView('share-inbox');
+    setSelectedBundleId(null);
   };
 
   const goToDrafts = (): void => {
@@ -200,6 +236,10 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
           tax: editTarget?.tax ?? '0',
         },
         photoFile,
+        // Draining a shared file: the bytes are already in the uploads volume,
+        // so the server adopts them by id and deletes the queue row in the same
+        // transaction. Re-uploading would be a second copy of what it has.
+        drainingItem?.id,
       );
       if (editTarget) {
         const updated = await api.receipts.update(editTarget.id, form);
@@ -211,10 +251,17 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
       } else {
         const created = await api.receipts.create(form);
         setState((s) => ({ ...s, receipts: [created, ...s.receipts] }));
-        showCreateToast('บันทึกใบเสร็จแล้ว');
+        if (drainingItem) {
+          // The server already deleted the queue row; mirror that locally so
+          // the pane and the sidebar count both drop without a refetch.
+          setInboxItems((items) => (items ?? []).filter((i) => i.id !== drainingItem.id));
+          onShareInboxCountChange?.(Math.max((inboxItems?.length ?? 1) - 1, 0));
+        }
+        showCreateToast(drainingItem ? 'สร้างใบเสร็จจากไฟล์ที่แชร์แล้ว' : 'บันทึกใบเสร็จแล้ว');
       }
       setCreateOpen(false);
       setEditTarget(null);
+      setDrainingItem(null);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
     } finally {
@@ -224,7 +271,25 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
 
   const openCreateModal = (): void => {
     setEditTarget(null);
+    setDrainingItem(null);
     setCreateOpen(true);
+  };
+  /** Turn a shared file into a receipt: same modal, photo already attached. */
+  const openDrainModal = (item: InboxItem): void => {
+    setEditTarget(null);
+    setDrainingItem(item);
+    setCreateOpen(true);
+  };
+  const discardInboxItem = async (item: InboxItem): Promise<void> => {
+    setDiscardingItem(null);
+    const next = (inboxItems ?? []).filter((i) => i.id !== item.id);
+    setInboxItems(next);
+    onShareInboxCountChange?.(next.length);
+    try {
+      await api.inbox.discard(item.id);
+    } catch {
+      void loadInbox();
+    }
   };
   const openEditModal = (receipt: Receipt): void => {
     setEditTarget(receipt);
@@ -232,6 +297,7 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
   };
   const closeCreateModal = (): void => {
     if (savingReceipt) return;
+    setDrainingItem(null);
     setCreateOpen(false);
     setEditTarget(null);
   };
@@ -269,13 +335,20 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
       theme={theme}
       currentUser={currentUser ?? null}
       isApprover={isApprover}
-      active={view === 'drafts' ? 'my-drafts' : (`my-${listFilter}` as SidebarKey)}
+      active={
+        view === 'share-inbox'
+          ? 'share-inbox'
+          : view === 'drafts'
+            ? 'my-drafts'
+            : (`my-${listFilter}` as SidebarKey)
+      }
       counts={sidebarCounts}
       onSelect={(key) => {
-        // Before the `my-` branch on purpose — see the SidebarKey comment. It
-        // also needs its own callback rather than falling through to
-        // onNavigateApprover, which a plain employee's shell never receives.
-        if (key === 'share-inbox') return onOpenShareInbox?.();
+        // The share inbox is a pane of THIS console, so it switches view in
+        // place like every other คำขอของฉัน row — no route change, no
+        // dead-end screen outside the shell. Before the `my-` branch on
+        // purpose: `my-`-prefixed keys are read as bundle filters below.
+        if (key === 'share-inbox') return openShareInboxPane();
         if (key === 'my-drafts') return goToDrafts();
         if (key.startsWith('my-')) return openBundleList(key.slice(3) as BundleFilter);
         // Everything else lives on the approver console.
@@ -287,7 +360,14 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
 
   // ── Main pane ───────────────────────────────────────────────────────
   const mainContent =
-    view === 'bundle-detail' && selectedBundle ? (
+    view === 'share-inbox' ? (
+      <ShareInboxPane
+        theme={theme}
+        items={inboxItems}
+        onDrain={openDrainModal}
+        onDiscard={setDiscardingItem}
+      />
+    ) : view === 'bundle-detail' && selectedBundle ? (
       <BundleDetailPane
         theme={theme}
         bundle={selectedBundle}
@@ -367,9 +447,21 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
         <CreateReceiptModal
           theme={theme}
           initial={editTarget}
+          presetPhotoPath={drainingItem?.photoPath ?? null}
           saving={savingReceipt}
           onClose={closeCreateModal}
           onSave={handleSaveReceipt}
+        />
+      )}
+      {discardingItem !== null && (
+        <ConfirmDialog
+          theme={theme}
+          title="ลบไฟล์นี้?"
+          message="ไฟล์จะหายไปจากกล่องขาเข้า และจะไม่ถูกสร้างเป็นใบเสร็จ"
+          confirmLabel="ลบ"
+          danger
+          onConfirm={() => void discardInboxItem(discardingItem)}
+          onCancel={() => setDiscardingItem(null)}
         />
       )}
       {deleteTargetId !== null && (
@@ -411,6 +503,232 @@ interface DraftsPaneProps {
   onCameraClick: () => void;
   onDeleteReceipt: (id: string) => void;
   onEditReceipt: (receipt: Receipt) => void;
+}
+
+// ── Share inbox pane ──────────────────────────────────────────────────
+//
+// Files shared in from a phone, waiting to become receipts. A PANE of this
+// console rather than its own screen: the sidebar's กล่องขาเข้า row lives in
+// the คำขอของฉัน section, which this console owns, and the receipt form the
+// employee needs next is already here. Rendered outside DesktopShell it would
+// also be shrink-wrapped by index.html's phone-mockup backdrop — the trap
+// DesktopShell's header comment describes.
+
+interface ShareInboxPaneProps {
+  theme: Theme;
+  items: InboxItem[] | null;
+  onDrain: (item: InboxItem) => void;
+  onDiscard: (item: InboxItem) => void;
+}
+
+function ShareInboxPane({ theme, items, onDrain, onDiscard }: ShareInboxPaneProps): JSX.Element {
+  return (
+    <div style={{ display: 'flex', height: '100%', background: theme.paper }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: '40px 40px 56px' }}>
+        <div style={{ maxWidth: 1040, margin: '0 auto' }}>
+          <div style={{ marginBottom: 18 }}>
+            <div
+              style={{
+                fontFamily: FONT_UI,
+                fontSize: 11,
+                color: theme.inkSoft,
+                letterSpacing: 1.4,
+                textTransform: 'uppercase',
+                fontWeight: 500,
+              }}
+            >
+              ไฟล์ที่ส่งเข้ามาจากมือถือ
+            </div>
+            <h1
+              style={{
+                margin: '4px 0 0',
+                fontFamily: FONT_DISPLAY,
+                fontWeight: 400,
+                fontSize: 32,
+                lineHeight: 1.1,
+                letterSpacing: -0.5,
+                color: theme.ink,
+              }}
+            >
+              กล่องขาเข้า · {items?.length ?? 0}
+            </h1>
+            <p
+              style={{
+                margin: '10px 0 0',
+                fontFamily: FONT_UI,
+                fontSize: 13,
+                color: theme.inkSoft,
+                lineHeight: 1.6,
+              }}
+            >
+              คลิกไฟล์เพื่อกรอกจำนวนเงินและหมวดหมู่ ให้กลายเป็นใบเสร็จ
+            </p>
+          </div>
+
+          {items === null ? (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))',
+                gap: 18,
+              }}
+            >
+              {[0, 1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    height: 250,
+                    borderRadius: 14,
+                    background: theme.surface2,
+                    border: `0.5px solid ${theme.hairline}`,
+                  }}
+                />
+              ))}
+            </div>
+          ) : items.length === 0 ? (
+            <div style={{ paddingTop: 60 }}>
+              <EmptyState
+                theme={theme}
+                icon={Icon.inbox}
+                title="ยังไม่มีไฟล์ที่ส่งเข้ามา"
+                subtext="แชร์รูปหรือ PDF จากมือถือมาที่แอปนี้ แล้วไฟล์จะมารออยู่ตรงนี้"
+              />
+            </div>
+          ) : (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))',
+                gap: 18,
+              }}
+            >
+              {items.map((item) => (
+                <ShareInboxTile
+                  key={item.id}
+                  theme={theme}
+                  item={item}
+                  onOpen={() => onDrain(item)}
+                  onDiscard={() => onDiscard(item)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ShareInboxTile({
+  theme,
+  item,
+  onOpen,
+  onDiscard,
+}: {
+  theme: Theme;
+  item: InboxItem;
+  onOpen: () => void;
+  onDiscard: () => void;
+}): JSX.Element {
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        onClick={onOpen}
+        style={{
+          display: 'block',
+          width: '100%',
+          padding: 0,
+          border: `0.5px solid ${theme.hairline}`,
+          borderRadius: 14,
+          overflow: 'hidden',
+          background: theme.surface,
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <div
+          style={{
+            height: 190,
+            background: theme.surface2,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {item.previewable ? (
+            <img
+              src={`${item.photoPath}?w=320`}
+              alt={item.filename ?? 'ไฟล์ที่แชร์เข้ามา'}
+              loading="lazy"
+              decoding="async"
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
+          ) : (
+            <div style={{ textAlign: 'center', color: theme.inkSofter }}>
+              {Icon.document(theme.inkSofter)}
+              <div style={{ fontFamily: FONT_UI, fontSize: 11, marginTop: 4 }}>
+                {item.mimeType === 'application/pdf' ? 'PDF' : 'ไฟล์'}
+              </div>
+            </div>
+          )}
+        </div>
+        <div style={{ padding: '11px 13px 13px' }}>
+          <div
+            style={{
+              fontFamily: FONT_UI,
+              fontSize: 13,
+              color: theme.ink,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {item.filename ?? 'ไฟล์ที่แชร์เข้ามา'}
+          </div>
+          <div style={{ fontFamily: FONT_UI, fontSize: 11, color: theme.inkSofter, marginTop: 3 }}>
+            {relativeThaiTime(item.createdAt)}
+          </div>
+        </div>
+      </button>
+      <button
+        onClick={onDiscard}
+        aria-label="ลบไฟล์นี้"
+        title="ลบไฟล์นี้"
+        style={{
+          position: 'absolute',
+          top: 8,
+          right: 8,
+          width: 30,
+          height: 30,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: 15,
+          border: 'none',
+          background: 'rgba(0,0,0,0.45)',
+          color: '#fff',
+          cursor: 'pointer',
+        }}
+      >
+        {Icon.close('#fff')}
+      </button>
+    </div>
+  );
+}
+
+/** "2 นาทีที่แล้ว" — inbox items are minutes-to-days old and drained fast. */
+function relativeThaiTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const minutes = Math.floor((Date.now() - then) / 60000);
+  if (minutes < 1) return 'เมื่อสักครู่';
+  if (minutes < 60) return `${minutes} นาทีที่แล้ว`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ชั่วโมงที่แล้ว`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'เมื่อวาน';
+  if (days < 7) return `${days} วันที่แล้ว`;
+  return new Date(iso).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
 }
 
 function DraftsPane({
@@ -1653,12 +1971,18 @@ interface CreateReceiptModalProps {
   theme: Theme;
   /** When set, the modal edits this receipt instead of creating a new one. */
   initial?: Receipt | null;
+  /**
+   * Public path of a photo the server already holds — a file shared in from a
+   * phone. Creating with this set needs no file picker and no upload: the save
+   * path sends the inbox id and the server adopts the stored bytes.
+   */
+  presetPhotoPath?: string | null;
   saving?: boolean;
   onClose: () => void;
   onSave: (input: NewReceiptInput) => void;
 }
 
-function CreateReceiptModal({ theme, initial, saving, onClose, onSave }: CreateReceiptModalProps): JSX.Element {
+function CreateReceiptModal({ theme, initial, presetPhotoPath, saving, onClose, onSave }: CreateReceiptModalProps): JSX.Element {
   const modalToday = new Date().toISOString().slice(0, 10);
   const [photo, setPhoto] = useState<string | null>(null);
   const [amount, setAmount] = useState<string>(initial ? String(initial.amount) : '');
@@ -1672,11 +1996,13 @@ function CreateReceiptModal({ theme, initial, saving, onClose, onSave }: CreateR
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isEdit = initial != null;
-  // Preview: freshly picked photo wins; otherwise show the stored one on edit.
-  const photoPreview = photo ?? (isEdit ? initial?.photoPath ?? null : null);
+  // Preview precedence: a freshly picked photo wins over everything, then the
+  // shared file being drained, then the stored photo when editing.
+  const photoPreview = photo ?? presetPhotoPath ?? (isEdit ? initial?.photoPath ?? null : null);
   const parsedAmount = parseFloat(amount);
   const hasValidAmount = !Number.isNaN(parsedAmount) && parsedAmount > 0;
-  const canSave = (isEdit || !!photo) && hasValidAmount && !saving;
+  // A drained file counts as a photo — it IS one, already on the server.
+  const canSave = (isEdit || !!photo || !!presetPhotoPath) && hasValidAmount && !saving;
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent): void => {
@@ -1697,7 +2023,7 @@ function CreateReceiptModal({ theme, initial, saving, onClose, onSave }: CreateR
 
   const handleSave = (): void => {
     if (!canSave) return;
-    if (!isEdit && !photo) return;
+    if (!isEdit && !photo && !presetPhotoPath) return;
     onSave({
       photo,
       amount: parsedAmount,
