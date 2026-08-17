@@ -28,15 +28,15 @@
  *
  * USAGE (on evergreen)
  *
- *   docker exec -w /app/apps/api reimbursement-v2-api \
- *     bun run scripts/audit-orphan-uploads.ts
- *   docker exec -w /app/apps/api reimbursement-v2-api \
- *     bun run scripts/audit-orphan-uploads.ts --delete
+ *   docker exec reimbursement-v2-api bun run apps/api/scripts/audit-orphan-uploads.ts
+ *   docker exec reimbursement-v2-api bun run apps/api/scripts/audit-orphan-uploads.ts --delete
  *
- * `-w /app/apps/api` is REQUIRED and easy to miss: the image's WORKDIR is /app,
- * but the uploads directory is resolved from process.cwd(). Run it from /app and
- * it inspects a non-existent /app/uploads, reports every file as fine, and
- * reclaims nothing while looking like it worked.
+ * The working directory does not matter: the uploads volume is located relative
+ * to this file, not to process.cwd(). An earlier version used cwd and, run from
+ * the image's WORKDIR (/app), inspected a non-existent /app/uploads — reporting
+ * every file as fine and reclaiming nothing WHILE APPEARING TO SUCCEED. A
+ * cleanup tool that silently no-ops is worse than one that crashes, so it now
+ * refuses to run if the directory it resolved does not exist.
  *
  * First run against production, 2026-08-17: 1,558 files referenced and kept,
  * 17 orphans + 33 orphaned thumbnails removed, 3.6 MB freed. The bulk were
@@ -44,10 +44,16 @@
  */
 
 import { readdir, stat, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { prisma } from '../src/db';
 
-const UPLOADS_DIR = resolve(process.cwd(), 'uploads');
+/**
+ * Anchored to THIS FILE (scripts/ → apps/api/uploads), never to process.cwd().
+ * The server can rely on cwd because its entrypoint sets it; an operator running
+ * `docker exec` cannot, and getting it wrong produced a silent no-op.
+ */
+const UPLOADS_DIR = resolve(import.meta.dir, '..', 'uploads');
 const THUMBS_DIR = join(UPLOADS_DIR, '.thumbs');
 const PUBLIC_PREFIX = '/uploads/';
 
@@ -86,6 +92,17 @@ function human(bytes: number): string {
 }
 
 async function main(): Promise<void> {
+  // ── Guard: the uploads directory must actually be there ───────────────────
+  // Without this, a wrong path yields "0 orphans" — indistinguishable from a
+  // clean volume, which is exactly how a broken cleanup tool hides.
+  if (!existsSync(UPLOADS_DIR)) {
+    console.error(
+      `✖ uploads directory not found at ${UPLOADS_DIR}\n` +
+        `   Refusing to run: an empty listing would report "0 orphans" and look like success.`,
+    );
+    process.exit(1);
+  }
+
   // ── Guard: refuse to run if the schema has a path column we do not know ────
   const pathColumns = await prisma.$queryRaw<{ table_name: string; column_name: string }[]>`
     SELECT table_name, column_name
