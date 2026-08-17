@@ -2,7 +2,7 @@ import { Elysia, t } from 'elysia';
 import type { ReceiptItem } from '@reimbursement/shared';
 import { auth } from '../auth';
 import { prisma } from '../db';
-import { saveUploadedFile } from '../uploads';
+import { deleteUploadedFiles, saveUploadedFile } from '../uploads';
 import { serializeReceipt } from '../serializers';
 import { getReceiptCategories } from '../settings';
 import { resolveVendorId } from '../vendors';
@@ -252,6 +252,16 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
         return receipt;
       });
 
+      // The receipt now owns `photoPath`. Anything the shared item held that the
+      // receipt did NOT adopt is unreachable from here on, so reclaim it:
+      // the source PDF always (a Receipt has no field for it), and the shared
+      // render too when the employee re-shot the photo in the form.
+      if (inboxItem) {
+        const orphaned = [inboxItem.originalPath];
+        if (created.photoPath !== inboxItem.photoPath) orphaned.push(inboxItem.photoPath);
+        await deleteUploadedFiles(orphaned);
+      }
+
       return serializeReceipt(created);
     },
     {
@@ -344,6 +354,10 @@ export const receiptRoutes = new Elysia({ prefix: '/receipts' })
     }
 
     await prisma.receipt.delete({ where: { id: params.id } });
+    // Reclaim the bytes. Safe by the guard above: a receipt can only be deleted
+    // while unbundled, and each upload has its own UUID filename, so nothing
+    // else points at this file.
+    await deleteUploadedFiles([existing.photoPath]);
     set.status = 204;
     return null;
   });

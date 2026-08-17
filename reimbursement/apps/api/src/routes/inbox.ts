@@ -6,6 +6,7 @@ import {
   MAX_SHARED_FILE_BYTES,
   ShareTooLargeError,
   UnsupportedShareTypeError,
+  deleteUploadedFiles,
   fileFromRawBody,
   saveSharedFile,
 } from '../uploads';
@@ -49,17 +50,29 @@ export const inboxRoutes = new Elysia({ prefix: '/inbox' })
    * Discard an item without making a receipt of it.
    *
    * `userId` is in the WHERE clause rather than checked after the read, so one
-   * employee cannot delete another's item by guessing an id. The uploaded file
-   * is deliberately left on disk: the uploads volume is already append-only in
-   * practice (receipts reference files forever), and unlinking here would be
-   * the one code path that deletes user data on a DELETE that the employee may
-   * well have meant as "not now".
+   * employee cannot delete another's item by guessing an id.
+   *
+   * The bytes are deleted too, not just the row. A discarded share is
+   * unreferenced by construction — a DRAINED item is removed inside the receipt
+   * create transaction instead, never through here, so anything this endpoint
+   * deletes has no receipt pointing at it. The files are read BEFORE the delete
+   * and unlinked only if a row was actually removed, so a concurrent drain (two
+   * tabs, a double tap) deletes nothing: it loses the race, count is 0, and the
+   * receipt that won keeps its photo.
    */
   .delete('/:id', async ({ user, params, status }) => {
+    const item = await prisma.receiptInbox.findFirst({
+      where: { id: params.id, userId: user.id },
+    });
+    if (!item) return status(404, { message: 'Inbox item not found' });
+
     const { count } = await prisma.receiptInbox.deleteMany({
       where: { id: params.id, userId: user.id },
     });
     if (count === 0) return status(404, { message: 'Inbox item not found' });
+
+    // Both the displayable render and the original document (a shared PDF).
+    await deleteUploadedFiles([item.photoPath, item.originalPath]);
     return { ok: true };
   });
 

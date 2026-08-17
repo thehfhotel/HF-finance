@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { join, extname, resolve } from 'node:path';
 
 const UPLOADS_DIR = join(process.cwd(), 'uploads');
@@ -47,6 +47,67 @@ export async function saveUploadedFile(file: File): Promise<string> {
  */
 export async function saveUploadedBytes(data: Blob, extension: string): Promise<string> {
   return persist(data, extension.toLowerCase());
+}
+
+// ─── Deletion ────────────────────────────────────────────────────────────────
+
+/**
+ * Widths the API caches thumbnails at. Must match `THUMB_WIDTHS` in index.ts —
+ * a width missing here leaks one cached .webp per deleted image, which is
+ * exactly the disk the caller is trying to reclaim.
+ */
+const THUMB_WIDTHS = [96, 320, 800];
+
+/**
+ * Same allowlist index.ts enforces when SERVING. Applied again on delete, so a
+ * stored path that somehow contained `..` or an absolute path can never make
+ * this function unlink outside the uploads directory. Every path we generate
+ * passes trivially; this is here for the one that someday doesn't.
+ */
+const SAFE_FILENAME = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Delete uploaded files and their cached thumbnails, best effort.
+ *
+ * Call this ONLY for files nothing references any more. The app's delete paths
+ * are each guarded so that holds: an inbox item is discarded only while
+ * undrained (a drained one is removed inside the create transaction instead),
+ * and a receipt can only be deleted while unbundled. Filenames are per-upload
+ * UUIDs, so two rows never share bytes.
+ *
+ * Never throws and never blocks the caller's response: reclaiming disk is
+ * housekeeping, and failing a delete the user already performed — because a
+ * file was missing, or the volume was briefly read-only — would be the worse
+ * outcome. Failures are logged instead.
+ */
+export async function deleteUploadedFiles(paths: (string | null | undefined)[]): Promise<void> {
+  for (const path of paths) {
+    if (!path) continue;
+
+    const filename = path.startsWith(`${PUBLIC_PREFIX}/`)
+      ? path.slice(PUBLIC_PREFIX.length + 1)
+      : null;
+    if (filename === null || !SAFE_FILENAME.test(filename)) {
+      console.error(`[uploads] refusing to delete unexpected path: ${path}`);
+      continue;
+    }
+
+    const targets = [
+      resolve(UPLOADS_DIR, filename),
+      // Cached thumbnails, laid out by index.ts as .thumbs/w<width>/<file>.webp
+      ...THUMB_WIDTHS.map((w) => resolve(UPLOADS_DIR, '.thumbs', `w${w}`, `${filename}.webp`)),
+    ];
+
+    for (const target of targets) {
+      try {
+        // force: a thumbnail that was never generated is the normal case, not
+        // an error worth logging on every delete.
+        await rm(target, { force: true });
+      } catch (error) {
+        console.error(`[uploads] could not delete ${target}:`, error);
+      }
+    }
+  }
 }
 
 // ─── Shared files (iPhone share sheet / Android Web Share Target) ────────────
