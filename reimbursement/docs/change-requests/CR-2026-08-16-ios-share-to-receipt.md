@@ -472,10 +472,28 @@ deploy could have found an entry point that was never wired.
   requires `CF_ACCESS_AUD`, so a dev host without Cloudflare in front always
   takes the fail-closed branch. Its redirect behaviour was verified; its
   happy path needs a real device against production.
-- **Uploaded files are never deleted**, including on discard. Consistent with
-  how receipt photos already behave, but it means a discarded share leaves bytes
-  on the uploads volume. A sweeper for unreferenced files is worth having and is
-  not in this change.
+- ~~Uploaded files are never deleted~~ **CLOSED 2026-08-17** (owner: "delete
+  files to save space when it's delete on our app"). `deleteUploadedFiles` in
+  `uploads.ts` reclaims a file AND its cached thumbnails at all three widths —
+  the thumbnails were most of the leaked disk, since one image can have three
+  cached renders. Wired into every path where bytes become unreachable:
+  discarding an inbox item (render + source document), deleting a receipt, and
+  the drain itself. That last one is the non-obvious case: a `Receipt` has no
+  field for `originalPath`, so a shared PDF's source document is unreachable the
+  moment it becomes a receipt, and re-shooting the photo in the form orphans the
+  shared render too. Each site is guarded so the bytes are provably unreferenced
+  (an inbox item is discarded only while undrained; a receipt only while
+  unbundled; upload filenames are per-file UUIDs so no two rows share bytes).
+  Deletion is best-effort and never fails the request — reclaiming disk is
+  housekeeping, and failing a delete the user already performed is worse.
+  Verified end to end: upload → 10 files, discard → back to 8 with both
+  thumbnails gone; upload → drain → adopted render kept and source PDF
+  reclaimed; delete the receipt → back to baseline. Path containment is unit
+  tested (traversal, absolute paths, wrong prefix all refuse and touch nothing).
+  **Judgement call worth revisiting:** the drain deletes the source PDF. It is
+  unreachable from the app afterwards, so keeping it is pure disk cost — but it
+  is also the more faithful document. Reversible by dropping one line if the
+  original should be preserved instead.
 - **No rate limit on `/api/inbox/quick`** beyond nginx's 25 MB body cap. The
   Cloudflare service token bounds who can reach it at all, so this is a
   second-order concern — but a token holder can fill the volume.
