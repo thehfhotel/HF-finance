@@ -11,7 +11,7 @@ import { DesktopShell } from '../../components/DesktopShell';
 import { Card, GhostButton, Money, PrimaryButton, StatusPill } from '../../components/primitives';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Icon } from '../../components/icons';
-import { ReceiptPhoto, ReceiptThumb } from '../../components/Receipts';
+import { ReceiptPhoto, ReceiptThumb, receiptPages } from '../../components/Receipts';
 import { EmptyState } from '../../components/EmptyState';
 import { Toast, useToast } from '../../components/Toast';
 import { MerchantAutocomplete } from './_shared';
@@ -1631,6 +1631,41 @@ function BundleComposer({
 }
 
 // ── Photo lightbox ────────────────────────────────────────────────────
+/** Prev/next control for paging a multi-page receipt in a lightbox. */
+function LightboxArrow({
+  dir,
+  disabled,
+  onClick,
+}: {
+  dir: 'prev' | 'next';
+  disabled: boolean;
+  onClick: () => void;
+}): JSX.Element {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={dir === 'prev' ? 'หน้าก่อนหน้า' : 'หน้าถัดไป'}
+      style={{
+        width: 44,
+        height: 44,
+        flexShrink: 0,
+        borderRadius: 22,
+        border: 'none',
+        background: disabled ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)',
+        color: '#fff',
+        cursor: disabled ? 'default' : 'pointer',
+        display: 'grid',
+        placeItems: 'center',
+        opacity: disabled ? 0.35 : 1,
+        transform: dir === 'prev' ? 'scaleX(-1)' : 'none',
+      }}
+    >
+      {Icon.chevron('#fff')}
+    </button>
+  );
+}
+
 interface PhotoLightboxProps {
   theme: Theme;
   receipt: Receipt;
@@ -1638,6 +1673,21 @@ interface PhotoLightboxProps {
 }
 
 function PhotoLightbox({ receipt, onClose }: PhotoLightboxProps) {
+  const pages = receiptPages(receipt);
+  const [page, setPage] = useState(0);
+  const current = pages[Math.min(page, pages.length - 1)] ?? null;
+
+  // Arrow keys page through, which is how anyone reads a multi-page document.
+  useEffect(() => {
+    if (pages.length < 2) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'ArrowRight') setPage((p) => Math.min(p + 1, pages.length - 1));
+      if (e.key === 'ArrowLeft') setPage((p) => Math.max(p - 1, 0));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pages.length]);
+
   return (
     <div
       onClick={onClose}
@@ -1661,22 +1711,43 @@ function PhotoLightbox({ receipt, onClose }: PhotoLightboxProps) {
           gap: 18,
         }}
       >
-        {receipt.photoPath ? (
-          <img
-            src={receipt.photoPath}
-            alt={receipt.merchant}
-            style={{
-              maxWidth: '80vw',
-              maxHeight: '78vh',
-              objectFit: 'contain',
-              borderRadius: 8,
-              display: 'block',
-              boxShadow: '0 8px 40px rgba(0,0,0,0.6)',
-            }}
-            draggable={false}
-          />
+        {current ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            {pages.length > 1 && (
+              <LightboxArrow
+                dir="prev"
+                disabled={page === 0}
+                onClick={() => setPage((p) => Math.max(p - 1, 0))}
+              />
+            )}
+            <img
+              src={current}
+              alt={`${receipt.merchant} — หน้า ${page + 1}`}
+              style={{
+                maxWidth: '80vw',
+                maxHeight: '78vh',
+                objectFit: 'contain',
+                borderRadius: 8,
+                display: 'block',
+                boxShadow: '0 8px 40px rgba(0,0,0,0.6)',
+              }}
+              draggable={false}
+            />
+            {pages.length > 1 && (
+              <LightboxArrow
+                dir="next"
+                disabled={page === pages.length - 1}
+                onClick={() => setPage((p) => Math.min(p + 1, pages.length - 1))}
+              />
+            )}
+          </div>
         ) : (
           <ReceiptPhoto receipt={receipt} height={460} />
+        )}
+        {pages.length > 1 && (
+          <div style={{ fontFamily: FONT_UI, fontSize: 13, color: 'rgba(255,255,255,0.75)' }}>
+            หน้า {page + 1} / {pages.length}
+          </div>
         )}
         <button
           onClick={onClose}

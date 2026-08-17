@@ -1,4 +1,5 @@
 import { fmt0, fmtN } from '../lib/format';
+import { FONT_UI } from '../lib/theme';
 import type { Receipt } from '../lib/types';
 
 /**
@@ -13,6 +14,58 @@ export function photoSrc(path: string, width?: 96 | 320 | 800): string {
   return width ? `${path}?w=${width}` : path;
 }
 
+/**
+ * Every displayable page of a receipt, in order.
+ *
+ * The ONE place that knows how to get from a receipt to its images, so no screen
+ * has to decide between `files` and `photoPath` itself. `files` is authoritative
+ * (the migration backfilled every historical row), and `photoPath` is the
+ * fallback for anything that somehow has a cover without file rows — a receipt
+ * showing no photo at all is a worse outcome than showing one.
+ */
+export function receiptPages(receipt: Receipt): string[] {
+  if (receipt.files && receipt.files.length > 0) {
+    return receipt.files.map((f) => f.photoPath);
+  }
+  return receipt.photoPath ? [receipt.photoPath] : [];
+}
+
+/**
+ * "3 หน้า" pill for a receipt with several pages.
+ *
+ * Without it a three-page receipt is indistinguishable from a one-page one at a
+ * glance, and the extra evidence simply goes unnoticed.
+ */
+export function PageCountBadge({
+  count,
+  small = false,
+}: {
+  count: number;
+  small?: boolean;
+}): JSX.Element | null {
+  if (count < 2) return null;
+  return (
+    <span
+      style={{
+        position: 'absolute',
+        top: small ? 3 : 8,
+        right: small ? 3 : 8,
+        fontFamily: FONT_UI,
+        fontSize: small ? 9 : 11,
+        fontWeight: 700,
+        lineHeight: 1,
+        color: '#fff',
+        background: 'rgba(0,0,0,0.62)',
+        padding: small ? '3px 5px' : '5px 9px',
+        borderRadius: 100,
+        pointerEvents: 'none',
+      }}
+    >
+      {small ? count : `${count} หน้า`}
+    </span>
+  );
+}
+
 interface ReceiptPhotoProps {
   receipt: Receipt;
   height?: number;
@@ -24,8 +77,10 @@ export function ReceiptPhoto({ receipt, height = 200, rotate = 0, slim = false }
   const w = slim ? 168 : 220;
   const h = height;
 
+  const pages = receiptPages(receipt);
+
   // If user uploaded a real photo, display it inside the same paper-style frame.
-  if (receipt.photoPath) {
+  if (pages.length > 0) {
     return (
       <div
         style={{
@@ -41,7 +96,7 @@ export function ReceiptPhoto({ receipt, height = 200, rotate = 0, slim = false }
         }}
       >
         <img
-          src={photoSrc(receipt.photoPath, 320)}
+          src={photoSrc(pages[0]!, 320)}
           alt={receipt.merchant}
           loading="lazy"
           decoding="async"
@@ -49,6 +104,7 @@ export function ReceiptPhoto({ receipt, height = 200, rotate = 0, slim = false }
           height={h}
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
         />
+        <PageCountBadge count={pages.length} />
       </div>
     );
   }
@@ -179,6 +235,7 @@ interface ReceiptThumbProps {
 }
 
 export function ReceiptThumb({ receipt, size = 56 }: ReceiptThumbProps) {
+  const pages = receiptPages(receipt);
   return (
     <div
       style={{
@@ -192,16 +249,19 @@ export function ReceiptThumb({ receipt, size = 56 }: ReceiptThumbProps) {
         boxShadow: 'inset 0 0 0 0.5px rgba(0,0,0,0.1)',
       }}
     >
-      {receipt.photoPath ? (
-        <img
-          src={photoSrc(receipt.photoPath, 96)}
-          alt={receipt.merchant}
-          loading="lazy"
-          decoding="async"
-          width={size}
-          height={size}
-          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-        />
+      {pages.length > 0 ? (
+        <>
+          <img
+            src={photoSrc(pages[0]!, 96)}
+            alt={receipt.merchant}
+            loading="lazy"
+            decoding="async"
+            width={size}
+            height={size}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+          <PageCountBadge count={pages.length} small />
+        </>
       ) : (
         <div
           style={{
