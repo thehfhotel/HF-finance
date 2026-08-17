@@ -227,8 +227,12 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
     setCreateError(null);
     setSavingReceipt(true);
     try {
-      // `photo` is a data URL only when the user picked a (new) file.
-      const photoFile = input.photo ? await dataUrlToFile(input.photo, 'receipt.jpg') : undefined;
+      // Upload the File the browser gave us. dataUrlToFile is the fallback for
+      // any path that still only has a preview string — it renames and can
+      // mislabel, so it is never the first choice.
+      const photoFile =
+        input.coverFile ??
+        (input.photo ? await dataUrlToFile(input.photo, 'receipt.jpg') : undefined);
       const form = receiptFormFromFields(
         {
           merchant: input.merchant.trim() || NEW_RECEIPT_MERCHANT_FALLBACK,
@@ -2156,8 +2160,11 @@ function BundleStatusBlock({ theme, bundle, total }: BundleStatusBlockProps) {
 
 // ── Create / edit receipt modal ──────────────────────────────────────
 interface NewReceiptInput {
-  /** Data URL of a newly picked photo; null when unchanged (edit) or absent. */
+  /** Data URL of a newly picked photo; null when unchanged (edit) or absent.
+   *  PREVIEW ONLY — never upload this, see `coverFile`. */
   photo: string | null;
+  /** The cover exactly as picked, with its real name and type. */
+  coverFile: File | null;
   /**
    * Attachments beyond the cover, kept as Files rather than data URLs — they
    * are never previewed, so round-tripping megabytes through base64 would buy
@@ -2197,6 +2204,16 @@ function CreateReceiptModal({ theme, initial, presetPhotoPath, presetPhotoCount 
   const [extraFiles, setExtraFiles] = useState<File[]>([]);
   /** True when the picked cover is a PDF, which an <img> cannot preview. */
   const [coverIsPdf, setCoverIsPdf] = useState(false);
+  /**
+   * The cover as the browser handed it over.
+   *
+   * Kept alongside the data-URL preview because the round trip LOSES things:
+   * `dataUrlToFile` renamed every cover `receipt.jpg` and fell back to
+   * `image/jpeg` when the blob had no type, so a picked PDF reached the server
+   * labelled as a JPEG and was stored verbatim under a .jpg name — an
+   * unrenderable receipt. The preview can be lossy; the upload cannot.
+   */
+  const [coverFile, setCoverFile] = useState<File | null>(null);
   const [amount, setAmount] = useState<string>(initial ? String(initial.amount) : '');
   const [merchant, setMerchant] = useState<string>(initial?.merchant ?? '');
   const categories = useReceiptCategories();
@@ -2225,7 +2242,8 @@ function CreateReceiptModal({ theme, initial, presetPhotoPath, presetPhotoCount 
   }, [onClose]);
 
   const handleFile = (file: File): void => {
-    setCoverIsPdf(file.type === 'application/pdf');
+    setCoverFile(file);
+    setCoverIsPdf(file.type === 'application/pdf' || /\.pdf$/i.test(file.name));
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = typeof reader.result === 'string' ? reader.result : null;
@@ -2251,6 +2269,7 @@ function CreateReceiptModal({ theme, initial, presetPhotoPath, presetPhotoCount 
     if (!isEdit && !photo && !presetPhotoPath) return;
     onSave({
       photo,
+      coverFile,
       extraFiles,
       amount: parsedAmount,
       merchant,
