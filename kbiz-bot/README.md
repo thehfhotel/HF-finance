@@ -90,10 +90,13 @@ and patches the result back into the same file. Item `type`:
   the bot converts it to PDF with a throwaway Chromium instance
   (`lib/html-to-pdf.ts`, not the persistent KBIZ session) and attaches it; a
   failed or oversized (>3MB) conversion is a warning, never a
-  transfer-blocker. Outcomes map straight onto the ADR's three-way split:
-  `success` → `done`, `confirmed-failed` → `failed` (safe to retry),
-  `unconfirmed` → `needs-review` (never auto-retried; a human resolves it in
-  reimbursement).
+  transfer-blocker. Outcomes map straight onto the ADR's four-way split:
+  `success` → `done`; `confirmed-failed` → `failed` (the bank rejected it,
+  nothing moved, safe to retry); `push-expired` → `failed` (the bank's own
+  expiry modal — the ~6 min phone-approval window closed with no tap, nothing
+  moved, safe to retry; added 2026-08-19, see "One live push at a time"
+  below); `unconfirmed` → `needs-review` (never auto-retried; a human resolves
+  it in reimbursement).
 
   Rendering that voucher's Thai text into a PDF needs Thai fonts in the
   headless-Chromium image — the `Dockerfile` installs `fonts-thai-tlwg` for
@@ -150,9 +153,43 @@ again once the lock clears. Running `transfer-other -- --confirm` or
 lock's expiry instead of arming; `transfer-other` in PREVIEW mode is
 untouched, since it never clicks Next.
 
+**The tap cooldown (`TAP_COOLDOWN_MS`, 90 s, `src/lib/arm-gate.ts`).**
+Once a push resolves, the *next* push waits 90 s before arming — long enough
+for the operator to leave the K BIZ app after tapping the previous one.
+2026-08-19: the discriminating variable across every ad-hoc transfer plus a
+user-verified manual back-to-back reproduction is whether K BIZ was
+**foreground** on the operator's phone at the moment of arming, not elapsed
+time — a push armed while the app is already open in the foreground can raise
+**no banner at all**. The value is unchanged from the constant it replaces
+(`INTER_TRANSFER_GAP_MS`, formerly declared — and never spent — in
+`process-queue.ts`); what changed is that it now actually runs, and that it
+runs **cross-poll** as well as in-batch: the released arm lock's own
+`resolution`/`releasedAt` (surfaced by `parseArmLock`, previously discarded)
+let the gate see a tap from *one poll ago*, which `prev` — reset every batch
+— cannot. See `decideArm`'s doc comment in `arm-gate.ts` for the full table.
+
+**Arming is verified, not claimed.** After the Next click, `post-next.ts`'s
+`verifyArmed` polls for the bank's own "notification sent" panel for up to
+`ARM_VERIFY_TIMEOUT_MS` (12 s) before the TAP-NEEDED Slack ping and the arm
+lock's real-window refinement fire — a JS-inert click used to be
+indistinguishable in the logs from "the operator didn't tap". If the panel
+never appears, the flow reports `unconfirmed` with `pushMayBeLive: true`
+rather than pretending a push exists; the conservative lock (already on disk
+before the click) covers the gap, so this cannot fail open.
+
+**The duplicate-transaction popup.** On an exact duplicate (same payee, same
+amount) KBIZ raises a web confirmation dialog *before* sending the push. The
+bot auto-confirms it ONLY when a queue/archive scan finds **no prior terminal
+attempt** on the same reimbursement bundle — KBIZ's own duplicate check keys
+on a transaction that actually went through, so a popup plus an earlier
+attempt on this bundle means that earlier attempt paid, and confirming again
+would double-pay. A refusal aborts pre-arm (no push exists yet) with a `HELD:`
+error naming what blocked it. See `decideDuplicateConfirm` in
+`src/lib/transfer-other-queue.ts`.
+
 See `src/lib/arm-gate.ts` for the full decision table and
-`../reimbursement/docs/adr/0001-kbiz-transfer-automation.md` (Amendment 6)
-for the two incidents this closes.
+`../reimbursement/docs/adr/0001-kbiz-transfer-automation.md` (Amendments 6–7)
+for the incidents this closes.
 
 ## Session model
 

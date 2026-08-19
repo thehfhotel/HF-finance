@@ -14,9 +14,14 @@ driver for KBIZ (KBank Business Online), running on evergreen as a
   (`browser-data/`). KBIZ punishes concurrent logins — never run two scripts
   at once, never log in from elsewhere while the bot works. Login auto-recovers
   with user/pass (no phone tap needed for login).
-- **Ambiguity is never auto-resolved.** Outcomes are three-way: success /
-  confirmed-failed (retryable) / unconfirmed (needs-review; a human checks the
-  K BIZ app). A timeout or generic error page is NEVER "failed, safe to retry".
+- **Ambiguity is never auto-resolved.** Outcomes are four-way: success /
+  confirmed-failed (retryable — the bank explicitly rejected it, nothing
+  moved) / push-expired (retryable — the bank's own expiry modal, the ~6 min
+  phone-approval window closed with no tap; added 2026-08-19 because this used
+  to fall through into `unconfirmed` with misleading English prose for a
+  transaction the bank had already proven moved ฿0) / unconfirmed
+  (needs-review; a human checks the K BIZ app before anything pays again). A
+  timeout or generic error page is NEVER "failed, safe to retry".
 - **Full account numbers never leave this container.** The payee book
   (`transfer-other.config.json`, gitignored, mounted read-only from
   `/home/deploy/kbiz-bot/` in prod) holds them; everything published to the
@@ -81,10 +86,16 @@ directory** — so the bot must always be launched from `kbiz-bot/`.
 `node --import tsx kbiz-bot/src/process-queue.ts` from the repo root fails; the
 npm scripts and the Dockerfile's `WORKDIR /app/kbiz-bot` both get this right.
 
-**CI does not run `tsc`** (`deploy.yml`'s `test` job is `bun test` only), so
-"the contract is a compile error now" is only true for whoever runs
-`npm run typecheck`. The drift check that actually runs is in
-`test/shared-contract.test.ts`, which reads the shared source as text.
+**CI DOES run `tsc`** (corrected 2026-08-19 — this paragraph used to claim the
+opposite, which was stale even before this fix landed). `deploy.yml`'s `test`
+job runs `bun test` at the repo root AND, as a separate step, `bun run
+typecheck` inside `kbiz-bot/` (`deploy.yml:138-140`) — so "the contract is a
+compile error now" is true in CI itself, on every push and every PR, not only
+for whoever happens to run `npm run typecheck` locally. `test/shared-contract
+.test.ts` is a second, independent drift check that reads the shared source as
+text rather than importing it — it catches a contract change even for someone
+running only `bun test` with no `tsc` at all, which is exactly the situation
+root `bun test` is in before `kbiz-bot/node_modules` exists.
 
 ## Facts pinned against the live site (probed + live-verified 2026-08-12)
 
