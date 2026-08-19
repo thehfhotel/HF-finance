@@ -676,7 +676,7 @@ export async function runTransferOtherFlow(
 // popup was correctly recognised upstream but then this hint could never
 // scope into it, and clickDialogButton always returned `false`. Mirrors
 // DUPLICATE_POPUP_RE's own bilingual pattern.
-const DUPLICATE_DIALOG_HINT = /ทำรายการนี้ไปแล้ว|already (?:made|performed|done) this transaction/i;
+export const DUPLICATE_DIALOG_HINT = /ทำรายการนี้ไปแล้ว|already (?:made|performed|done) this transaction/i;
 
 /**
  * Tri-state, replacing a plain boolean (MONEY REVIEW FINDING, 2026-08-19
@@ -697,16 +697,39 @@ const DUPLICATE_DIALOG_HINT = /ทำรายการนี้ไปแล้�
  * release the estate-wide arm lock while a push may be live, the one
  * direction that lock exists to prevent.
  */
-type ClickDialogResult = "clicked" | "not-found" | "click-failed";
+export type ClickDialogResult = "clicked" | "not-found" | "click-failed";
+
+/** Literal-escape a button name for the exact-innerText RegExp below. */
+function escapeForRegExp(text: string): string {
+  return text.replace(/[.*+?^$()|[\]{}\\]/g, "\\$&");
+}
 
 /**
  * Best-effort: click a button/link matched EXACTLY on its OWN accessible
- * name, scoped to whichever visible dialog contains `hint`. Never observed
- * live (the duplicate popup is 0-of-9 in production), so this stays
- * deliberately generic rather than pinned to a selector nobody has verified
- * against the real DOM — errors are swallowed, and the tri-state return
- * (see `ClickDialogResult`) tells the caller whether a click was ever
- * dispatched.
+ * name (or, per the real DOM, its own textContent — whitespace-tolerant,
+ * see the ^\s*…\s*$ regex below), scoped to
+ * whichever visible dialog contains `hint`. Errors are swallowed, and the
+ * tri-state return (see `ClickDialogResult`) tells the caller whether a
+ * click was ever dispatched.
+ *
+ * REAL DOM (operator devtools capture, 2026-08-19 — the duplicate popup is
+ * still 0-of-9 in production arms, this capture is the only ground truth;
+ * pinned in test/fixtures/kbiz-duplicate-popup.dom.html and verified by
+ * src/probe-duplicate-popup-dom.ts):
+ *   .mfp-wrap > .mfp-container > .mfp-content > #popup-duplicate.white-popup-block
+ *     h3 "แจ้งเตือน" / p.desc "ท่านหรือบริษัทมีการทำรายการนี้ไปแล้ว …"
+ *     .action > a.btn.popup-modal-close > span "ยกเลิก"
+ *              a.btn.btn-gradient      > span "ยืนยัน"
+ * Three traps that made the first shipped version inert (probe went 4/6 RED
+ * against the capture before this fix):
+ *   1. The container is Magnific Popup (.mfp-content/.white-popup-block) —
+ *      none of .modal / [role='dialog'] / .popup / .layer exist on it.
+ *   2. The action anchors carry NO href — no href means no implicit ARIA
+ *      role, so getByRole("button") AND getByRole("link") both find nothing.
+ *   3. #popup-duplicate exists TWICE (visible active copy in .mfp-content +
+ *      hidden .mfp-hide source template), and an unrelated hidden dialog
+ *      (#confrimDraft) has its own exact-text "ยืนยัน" anchor — so both the
+ *      container and the anchor lookup must stay :visible-scoped.
  *
  * `exact: true` (money review finding 5, 2026-08-19): a substring match on
  * "ยืนยัน" hits "ยืนยันการทำรายการ" in 7 of 9 production dumps, and — now that
@@ -715,15 +738,25 @@ type ClickDialogResult = "clicked" | "not-found" | "click-failed";
  * The user's own screenshot shows the real buttons are labelled EXACTLY
  * "ยกเลิก" / "ยืนยัน", so nothing is lost by requiring an exact match.
  */
-async function clickDialogButton(page: Page, hint: string | RegExp, buttonNames: string[]): Promise<ClickDialogResult> {
+export async function clickDialogButton(page: Page, hint: string | RegExp, buttonNames: string[]): Promise<ClickDialogResult> {
   // Set the instant a click is dispatched — BEFORE the awaited `.click()` —
   // so a throw from inside `.click()` itself still reports "click-failed",
   // not "not-found". This flag, not the button lookup, is what the catch
   // block below consults.
   let clicked = false;
   try {
+    // .white-popup-block IS the captured KBIZ dialog (it sits on
+    // #popup-duplicate itself — see doc comment). Deliberately NOT its
+    // ancestor .mfp-content: Playwright resolves a CSS union in DOM order,
+    // so the ancestor would always win and widen the scope to the whole
+    // Magnific slot, where a second stacked dialog's own "ยืนยัน" anchor
+    // could be clicked first (money review, 2026-08-19, probe case E).
+    // Selector order confers NO priority; only the union's membership and
+    // the hasText filter narrow the scope.
     const dialog = page
-      .locator(".modal:visible, .swal2-popup:visible, [role='dialog']:visible, .popup:visible, .layer:visible")
+      .locator(
+        ".white-popup-block:visible, .modal:visible, .swal2-popup:visible, [role='dialog']:visible, .popup:visible, .layer:visible",
+      )
       .filter({ hasText: hint })
       .first();
     if (!(await dialog.count().catch(() => 0))) return "not-found";
@@ -734,12 +767,30 @@ async function clickDialogButton(page: Page, hint: string | RegExp, buttonNames:
         await btn.click({ timeout: 5_000 });
         return "clicked";
       }
-      // Some KBIZ dialogs render actions as <a>, not <button> — same scope,
-      // same accessible-name match.
+      // Some KBIZ dialogs render actions as <a href=…> — same scope, same
+      // accessible-name match.
       const link = dialog.getByRole("link", { name, exact: true }).first();
       if (await link.isVisible().catch(() => false)) {
         clicked = true;
         await link.click({ timeout: 5_000 });
+        return "clicked";
+      }
+      // The captured duplicate popup's anchors have NO href (trap 2 above):
+      // role-less <a class="btn"><span>ยืนยัน</span></a>. Match the anchor's
+      // own textContent EXACTLY, whitespace-tolerant via ^\s*…\s*$ — the
+      // anchors keep money review finding 5 intact ("ยืนยัน" must not
+      // substring-match the page's own "ยืนยันการทำรายการ"). Candidates are
+      // :visible-scoped: with a bare `.first()` a display:none decoy earlier
+      // in DOM order would MASK the real button (isVisible false → next
+      // name, never next candidate) and turn a clickable dialog into
+      // "not-found" (money review finding 2, 2026-08-19, probe case D).
+      const bare = dialog
+        .locator("a:visible, button:visible")
+        .filter({ hasText: new RegExp(`^\\s*${escapeForRegExp(name)}\\s*$`) })
+        .first();
+      if (await bare.isVisible().catch(() => false)) {
+        clicked = true;
+        await bare.click({ timeout: 5_000 });
         return "clicked";
       }
     }

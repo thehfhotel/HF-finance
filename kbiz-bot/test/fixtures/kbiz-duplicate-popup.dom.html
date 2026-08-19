@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<!--
+  KBIZ exact-duplicate confirmation popup — REAL DOM structure, captured live
+  by the operator on 2026-08-19 via devtools copy(document.body.outerHTML)
+  while the popup was open (second ฿1 transfer, same payee + same amount,
+  ~2.5h after the first). Reduced to the structurally relevant nodes and
+  SCRUBBED: no account numbers, no names, no session data.
+
+  Facts this fixture pins (each one broke the first shipped selector):
+   1. Container is Magnific Popup: .mfp-wrap > .mfp-container > .mfp-content
+      > #popup-duplicate.white-popup-block. There is NO .modal, NO
+      [role='dialog'], NO .popup, NO .layer anywhere on the dialog.
+   2. Action "buttons" are <a class="btn ..."> WITHOUT href, text inside a
+      nested <span>. No href => no implicit ARIA role => getByRole('button')
+      AND getByRole('link') both find nothing.
+   3. The SAME #popup-duplicate exists twice: the visible active copy in
+      .mfp-content and the hidden source template inside <alert-popup>
+      (.mfp-hide). Duplicate ids are real; only :visible scoping is safe.
+   4. A hidden decoy anchor with the exact text "ยืนยัน" exists elsewhere
+      (#confrimDraft) and a visible header contains "ยืนยันการทำรายการ" —
+      exact-match + visible-dialog scoping must survive both.
+   5. ADDED adversarial cases from the money review (2026-08-19): a second
+      visible .white-popup-block WITHOUT the hint text stacked earlier in
+      the same .mfp-content (#popup-other — a .mfp-content-scoped lookup
+      clicks its "ยืนยัน" first), and a display:none exact-text "ยืนยัน"
+      anchor placed before the real one inside #popup-duplicate (a
+      non-:visible candidate lookup + .first() masks the real button).
+  Verified by src/probe-duplicate-popup-dom.ts (playwright, NOT in root CI).
+-->
+<html lang="th"><head><meta charset="utf-8"><title>fixture</title>
+<style>.mfp-hide{display:none!important}</style>
+</head>
+<body class="business-type">
+<div class="mfp-bg popup-content-style-alert mfp-ready"></div>
+<div class="mfp-wrap mfp-auto-cursor popup-content-style-alert mfp-ready" tabindex="-1" style="overflow: hidden auto;">
+  <div class="mfp-container mfp-s-ready mfp-inline-holder">
+    <div class="mfp-content">
+      <!-- ADVERSARIAL (money review 2026-08-19, probe case E): a second
+           VISIBLE dialog stacked in the same Magnific slot, EARLIER in DOM
+           order, with its own exact-text "ยืนยัน" anchor but WITHOUT the
+           duplicate-popup hint text. A container scope that resolves to the
+           ancestor .mfp-content would click this one first. -->
+      <div id="popup-other" class="white-popup-block">
+        <div class="content content-alert a-center">
+          <h3>บันทึกเป็นแบบร่าง</h3>
+          <p class="desc">ยืนยันที่จะบันทึกแบบร่าง</p>
+          <div class="action">
+            <a class="btn btn-blue f-left" onclick="window.__clicked='WRONG-DIALOG-cancel'"><span>ยกเลิก</span></a>
+            <a class="btn btn-gradient f-right" onclick="window.__clicked='WRONG-DIALOG-confirm'"><span>ยืนยัน</span></a>
+          </div>
+        </div>
+      </div>
+      <div id="popup-duplicate" class="white-popup-block">
+        <div class="content content-alert a-center">
+          <h3>แจ้งเตือน</h3>
+          <p class="desc">ท่านหรือบริษัทมีการทำรายการนี้ไปแล้ว กรุณายืนยันที่จะทำรายการนี้อีกครั้งหรือไม่</p>
+          <div class="action">
+            <!-- ADVERSARIAL (money review 2026-08-19, probe case D): hidden
+                 exact-text anchor BEFORE the real one, inside the real
+                 dialog. Non-:visible candidate lookup + .first() would pick
+                 it, see isVisible()===false, and mask the clickable button
+                 into "not-found". -->
+            <a class="btn" style="display:none" onclick="window.__clicked='MASKED-confirm'"><span>ยืนยัน</span></a>
+            <a class="btn btn-small-fix-wrapped btn-blue f-left popup-modal-close" onclick="window.__clicked='cancel'"><span>ยกเลิก</span></a>
+            <a class="btn btn-small-fix-wrapped btn-gradient f-right" onclick="window.__clicked='confirm'"><span>ยืนยัน</span></a>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="mfp-preloader">Loading...</div>
+  </div>
+</div>
+
+<!-- visible page behind the modal: the step banner whose text substring-collides with "ยืนยัน" -->
+<div class="menu-step"><ul>
+  <li class="active"><span class="num">1</span><span class="hidden-menu-step">ทำรายการ</span></li>
+  <li><span class="num">2</span><span class="hidden-menu-step">ยืนยันการทำรายการ</span></li>
+  <li><span class="num last">3</span><span class="hidden-menu-step">ขั้นตอนสำเร็จ</span></li>
+</ul></div>
+
+<!-- hidden source template: SAME id, same content (Magnific keeps the original around) -->
+<alert-popup>
+  <div id="popup-duplicate" class="mfp-hide white-popup-block">
+    <div class="content content-alert a-center">
+      <h3>แจ้งเตือน</h3>
+      <p class="desc">ท่านหรือบริษัทมีการทำรายการนี้ไปแล้ว กรุณายืนยันที่จะทำรายการนี้อีกครั้งหรือไม่</p>
+      <div class="action">
+        <a class="btn btn-small-fix-wrapped btn-blue f-left popup-modal-close" onclick="window.__clicked='cancel-hidden'"><span>ยกเลิก</span></a>
+        <a class="btn btn-small-fix-wrapped btn-gradient f-right" onclick="window.__clicked='confirm-hidden'"><span>ยืนยัน</span></a>
+      </div>
+    </div>
+  </div>
+</alert-popup>
+
+<!-- hidden decoy with the exact text "ยืนยัน" in an UNRELATED dialog -->
+<app-confirm-save-draft>
+  <div id="confrimDraft" class="mfp-hide white-popup-block">
+    <div class="content content-alert a-center">
+      <h3>บันทึกเป็นแบบร่าง</h3>
+      <p class="desc">ยืนยันที่จะบันทึกแบบร่าง</p>
+      <div class="action">
+        <a id="modal-close-draft" class="popup-modal-close btn btn-blue f-left" onclick="window.__clicked='draft-cancel'">ยกเลิก</a>
+        <a class="btn btn-gradient f-right" onclick="window.__clicked='draft-confirm'">ยืนยัน</a>
+      </div>
+    </div>
+  </div>
+</app-confirm-save-draft>
+</body></html>
