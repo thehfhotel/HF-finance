@@ -415,11 +415,16 @@ is app-foreground state, not the gap since the previous tap:
   went **silent for a 105 s hole that contains the exact arming instant**
   (`15:41:12`→`15:42:59`, arm at `15:41:23.9`) — consistent with some other
   app (most plausibly K BIZ, opened to wait) being foreground instead.
-- **All six successes**, plus a **user-verified manual pair under 1 minute
-  apart** (2026-08-19), armed with K BIZ backgrounded or closed. The sub-1-min
-  pair **refutes a bank-side time cooldown outright**: if elapsed time were
-  the mechanism, that pair should have failed exactly like the three
-  incidents did.
+- **All six successes** armed with K BIZ backgrounded or closed. In the
+  operator's manual reproduction (2026-08-19, corrected same day: two test
+  sessions ~2.5 h apart, each = one completed transfer + one identical
+  initiation that was deliberately never completed), the **second push armed
+  under 1 minute after the previous tap and surfaced normally on the phone**
+  with K BIZ backgrounded — it was left untapped by choice, so it never
+  became a completed transfer. Surfacing is the datum: it **refutes
+  bank-side time suppression of the second push outright** — if elapsed time
+  were the mechanism, that push should have stayed invisible exactly like
+  the three incidents' pushes did.
 - **The balance ledger and the bank's own screens** prove all three
   "unconfirmed" runs moved exactly ฿0 — nothing was silently double-spent
   while this was undiagnosed, but the operator was told the ambiguous English
