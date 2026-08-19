@@ -32,6 +32,19 @@ folded into the same fix: it appears before the phone push on an exact
 same-payee/same-amount duplicate, and it needs explicit, fail-closed handling
 or the bot stalls on it silently, indistinguishable from the original bug.
 
+**Follow-up, same day:** the operator captured the popup's real DOM live
+(devtools `copy(document.body.outerHTML)`). It proved the first shipped
+selector set inert — the dialog is Magnific Popup (`.mfp-content` >
+`#popup-duplicate.white-popup-block`, no `.modal`/`[role=dialog]`), and the
+action "buttons" are href-less `<a class="btn">` with the label in a nested
+`<span>`, so both `getByRole("button")` and `getByRole("link")` matched
+nothing. The structure is pinned in
+`kbiz-bot/test/fixtures/kbiz-duplicate-popup.dom.html` (scrubbed) and
+`kbiz-bot/src/probe-duplicate-popup-dom.ts` drives the real
+`clickDialogButton` against it (4/6 RED pre-fix → 6/6 GREEN). The capture
+also confirmed the trigger holds across hours within a day: the ฿1 pair that
+raised it was ~2.5 h apart, same payee, same amount.
+
 ## What changed
 
 - **New fourth outcome, `push-expired`** (`success | confirmed-failed |

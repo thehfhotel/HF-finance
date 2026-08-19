@@ -12,6 +12,7 @@
     "transfer-other-probe": "node --import tsx --env-file=.env src/transfer-other-probe.ts",
     "process-queue": "node --import tsx --env-file=.env src/process-queue.ts",
     "install-browser": "bunx playwright install chromium",
+    "probe-duplicate-popup": "bun run src/probe-duplicate-popup-dom.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test"
   },
