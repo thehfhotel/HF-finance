@@ -2,11 +2,17 @@
 // contract, it imports reimbursement's (`@reimbursement/shared`, mapped in
 // tsconfig at `../reimbursement/packages/shared/src/index.ts`).
 //
-// This file is the runtime half of that guarantee, and it carries the WHOLE
-// weight in CI: .github/workflows/deploy.yml's `test` job runs `bun test` and
-// nothing else — no `tsc` — so every type-level assertion in
-// src/lib/shared-contract.ts is invisible to the pipeline. What follows must
-// therefore fail on its own for the drift that matters:
+// This file is the TEXT half of that guarantee, and it runs under `bun test`
+// alone — no node_modules, no type information — which matters because the
+// type-level assertions in src/lib/shared-contract.ts also run in CI
+// (.github/workflows/deploy.yml's `test` job runs `bun run typecheck` for
+// kbiz-bot at :138-140, gating both pipelines' deploys) but this file is what
+// still catches the drift if that step is ever skipped or misconfigured.
+// (2026-08-19: this file used to claim CI never runs `tsc` — corrected
+// alongside shared-contract.ts's header in the same commit that added
+// `CONTRACT_OUTCOMES`, so a false "nothing checks this" note could not sit
+// next to the fix for the exact gap it was wrong about.) What follows must
+// fail on its own for the drift that matters:
 //
 //   1. the shared module stops resolving (the mapping tsc, tsx and bun read);
 //   2. what the bot PRODUCES stops matching the contract's own vocabulary;
@@ -27,7 +33,7 @@ import {
   type KbizDestination,
   type KbizFavorite,
 } from "@reimbursement/shared";
-import { CONTRACT_DESTINATION_KINDS, CONTRACT_FAVORITE_KEYS } from "../src/lib/shared-contract";
+import { CONTRACT_DESTINATION_KINDS, CONTRACT_FAVORITE_KEYS, CONTRACT_OUTCOMES } from "../src/lib/shared-contract";
 import { FAVORITES_FILE, toFavorite } from "../src/lib/favorites-core";
 import { parseDestination } from "../src/lib/transfer-other-queue";
 
@@ -96,6 +102,19 @@ function interfaceFieldNames(src: string, name: string): string[] {
 function unionKindLiterals(src: string, name: string): string[] {
   const body = untilSemicolonAfter(stripComments(src), `export type ${name} =`);
   return [...body.matchAll(/\bkind\s*\??\s*:\s*['"]([^'"]+)['"]/g)].map((m) => m[1]!);
+}
+
+/**
+ * The string literals of `result.outcome`'s inline union.
+ *
+ * `outcome:` occurs exactly once in code in the shared source (index.ts:549)
+ * — the other two mentions ("`success` — slip/reference captured…" etc.) are
+ * doc-comment prose above the field, which `stripComments` removes first.
+ * Verified 2026-08-19.
+ */
+function outcomeLiterals(src: string): string[] {
+  const body = untilSemicolonAfter(stripComments(src), "outcome:");
+  return [...body.matchAll(/'([^']+)'/g)].map((m) => m[1]!);
 }
 
 describe("the shared KBIZ contract is imported, not re-declared", () => {
@@ -179,6 +198,14 @@ describe("the contract's declarations still match what the bot hard-codes", () =
     );
   });
 
+  it("declares result.outcome with exactly CONTRACT_OUTCOMES", () => {
+    // The reimbursement-side twin of this check lives in
+    // apps/api/test/kbiz-poller.test.ts, comparing the same contract text
+    // against kbiz-poller.ts's HANDLED_OUTCOMES — so a new outcome added here
+    // without teaching the poller fails on THAT side too.
+    expect(outcomeLiterals(src).sort()).toEqual([...CONTRACT_OUTCOMES].sort());
+  });
+
   it("keeps the favorites filename the bot publishes under", () => {
     // The one contract value that is a string, so it can be read back directly.
     expect(src).toContain(`export const KBIZ_FAVORITES_FILE = '${KBIZ_FAVORITES_FILE}';`);
@@ -204,6 +231,18 @@ describe("the contract's declarations still match what the bot hard-codes", () =
       "export type KbizDestination =\n  | { kind: 'promptpay'; promptPayId: string }\n",
     );
     expect(unionKindLiterals(extended, "KbizDestination")).toContain("promptpay");
+  });
+
+  it("fails on a new contract outcome", () => {
+    // Mirrors the trap this whole file exists to catch (2026-08-19,
+    // inv:contract D1): a member added to the union without teaching
+    // outcomeLiterals/CONTRACT_OUTCOMES about it must show up as a diff, not
+    // silently agree with itself.
+    const extended = src.replace(
+      "'success' | 'confirmed-failed' | 'unconfirmed' | 'push-expired'",
+      "'success' | 'confirmed-failed' | 'unconfirmed' | 'push-expired' | 'reversed'",
+    );
+    expect(outcomeLiterals(extended)).toContain("reversed");
   });
 
   it("says so out loud if the declaration is gone entirely", () => {

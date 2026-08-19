@@ -14,6 +14,18 @@ import {
   withdrawQueuedIntent,
   type KbizIntentState,
 } from './kbiz';
+// classifyOutcome/HANDLED_OUTCOMES/KbizOutcome live in their OWN
+// dependency-free module and are re-exported here unchanged — spec-review
+// finding 1 (2026-08-19 fix round): this file imports `./db`, which imports
+// `@prisma/adapter-pg`, a real runtime dependency that does not exist until
+// `apps/api/node_modules` is installed. Root `bun test` (the actual gate for
+// BOTH deploy pipelines) discovers `apps/api/test/kbiz-poller.test.ts` with
+// no workspace install first — a test importing these three names straight
+// from THIS file broke that gate while passing on any laptop where
+// node_modules already happens to exist. See kbiz-outcomes.ts's own header
+// for the full incident note.
+import { classifyOutcome } from './kbiz-outcomes';
+export { classifyOutcome, HANDLED_OUTCOMES, type KbizOutcome } from './kbiz-outcomes';
 import { sumReceiptAmounts } from './money';
 import { notifyPortal, notifySlack } from './notify';
 import { saveUploadedBytes } from './uploads';
@@ -49,8 +61,6 @@ import { saveUploadedBytes } from './uploads';
 /** Queue states that mean the bot has stopped working on an intent. */
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['done', 'failed', 'needs-review']);
 
-type KbizOutcome = 'success' | 'confirmed-failed' | 'unconfirmed';
-
 /**
  * Is this queue file ours to act on?
  *
@@ -70,22 +80,6 @@ function isOurTerminalIntent(value: unknown): value is KbizPaymentIntent {
     typeof intent.status === 'string' &&
     TERMINAL_STATUSES.has(intent.status)
   );
-}
-
-/**
- * What actually happened, erring towards "a human should look at this".
- *
- * The bot classifies its own attempts; when it did not (a crash before it could
- * write `result`), only the contract's `failed` — defined as "finished, nothing
- * moved" — is treated as safely retryable. Every other unclassified terminal
- * state is ambiguous by definition, and ambiguous means human.
- */
-function classifyOutcome(intent: KbizPaymentIntent): KbizOutcome {
-  const outcome = intent.result?.outcome;
-  if (outcome === 'success' || outcome === 'confirmed-failed' || outcome === 'unconfirmed') {
-    return outcome;
-  }
-  return intent.status === 'failed' ? 'confirmed-failed' : 'unconfirmed';
 }
 
 /**
@@ -153,7 +147,10 @@ async function reconcile(fileName: string, intent: KbizPaymentIntent): Promise<v
   // non-failure SHOUTS before it is filed away.
   if (!bundle || bundle.status !== 'PAYING') {
     const orphanOutcome = classifyOutcome(intent);
-    if (orphanOutcome !== 'confirmed-failed') {
+    // A bank-voided attempt (push-expired) moved nothing either, same as
+    // confirmed-failed — so it must not page managers about a "possible
+    // double pay" that provably never happened.
+    if (orphanOutcome !== 'confirmed-failed' && orphanOutcome !== 'push-expired') {
       const label = bundle ? `${bundle.name} (${bundle.status})` : `bundle ${intent.bundleId ?? '?'}`;
       const reference = intent.result?.reference?.trim();
       notifyPortal({
@@ -278,6 +275,60 @@ async function reconcile(fileName: string, intent: KbizPaymentIntent): Promise<v
       `❌ จ่ายผ่าน KBIZ ไม่สำเร็จ — ${bundle.name} (${formatBaht(
         sumReceiptAmounts(bundle.receipts),
       )})${error ? `\n${error}` : ''}\nคำขอกลับสู่สถานะอนุมัติแล้ว ลองจ่ายใหม่ได้`,
+    );
+    return;
+  }
+
+  if (outcome === 'push-expired') {
+    // The bank's own ~6 min tap window closed with no phone confirmation:
+    // provably nothing moved (2026-08-19 diagnosis, all three incidents'
+    // balance ledgers), so — same as confirmed-failed — the bundle goes back
+    // to APPROVED and can simply be paid again. Deliberately the SAME
+    // transaction shape as confirmed-failed above (release, CAS via
+    // `ownedBy`, archive, "closed by hand" guard); only the copy and the
+    // audit type differ, because the two are different bank verdicts that
+    // both resolve to "safe to retry, no force needed" (§1.11 of the fix
+    // spec). No `transferProofPath` — the bundle was never paid.
+    const applied = await prisma.$transaction(async (tx) => {
+      const released = await tx.bundle.updateMany({
+        where: ownedBy(bundle.id, intent),
+        data: {
+          status: 'APPROVED',
+          paymentIntentId: null,
+          paymentError: error ?? 'ธนาคารยกเลิกรายการเพราะไม่ได้กดยืนยันในแอปทันเวลา — เงินยังไม่ถูกโอน จ่ายใหม่ได้',
+          payingSince: null,
+        },
+      });
+      if (released.count === 0) return false;
+
+      await tx.auditEvent.create({
+        data: {
+          type: 'payment-expired',
+          bundleId: bundle.id,
+          actorId: bundle.approvedById ?? bundle.userId,
+          metadata: { via: 'kbiz-bot', intentId: intent.id, error },
+        },
+      });
+      return true;
+    });
+
+    await archiveQueueFile(fileName);
+    if (!applied) {
+      console.log(`[kbiz] ${bundle.id} was closed by hand before ${intent.id} landed — archived, nothing changed`);
+      return;
+    }
+
+    notifyPortal({
+      title: 'การโอนถูกยกเลิก — ไม่ได้กดยืนยันทันเวลา',
+      body: `${bundle.name} — เงินยังไม่ถูกโอน จ่ายใหม่ได้ ครั้งนี้ให้ปิดแอป K BIZ ไว้ก่อนแล้วเปิดเมื่อมีแจ้งเตือน`,
+      path: '/',
+      tag: `kbiz-expired-${bundle.id}`,
+      audience: 'managers',
+    });
+    notifySlack(
+      `⏰ KBIZ ยกเลิกการโอน (ไม่ได้กดยืนยันทันเวลา) — ${bundle.name} (${formatBaht(
+        sumReceiptAmounts(bundle.receipts),
+      )})${error ? `\n${error}` : ''}\nเงินยังไม่ถูกโอน คำขอกลับสู่สถานะอนุมัติแล้ว จ่ายใหม่ได้ — ครั้งนี้ให้ปิดแอป K BIZ ไว้ก่อน`,
     );
     return;
   }

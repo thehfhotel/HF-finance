@@ -545,9 +545,20 @@ export interface KbizPaymentIntent {
      * `confirmed-failed` — KBIZ errored before arming; nothing moved, retryable.
      * `unconfirmed`      — timed out/crashed mid-flight; the transfer may or may
      *                      not have landed. Never auto-retried, never auto-paid.
+     * `push-expired`     — the bank voided it: no phone confirmation inside its
+     *                      ~6 min window. Nothing moved; the bundle returns to
+     *                      APPROVED and may be paid again.
      */
-    outcome: 'success' | 'confirmed-failed' | 'unconfirmed';
-    /** KBIZ transaction reference, on success. Becomes `Bundle.transferRef`. */
+    outcome: 'success' | 'confirmed-failed' | 'unconfirmed' | 'push-expired';
+    /**
+     * KBIZ transaction reference. Becomes `Bundle.transferRef` on `success`.
+     * SPEC REVIEW FINDING 8 (2026-08-19): also populated on a non-success
+     * outcome when the bot's final page scraped one anyway (e.g. the
+     * push-expired→unconfirmed downgrade, kbiz-bot's finalize-transfer.ts
+     * §1.8) — a scraped reference on a failure page is itself evidence the
+     * approver should see, kept here as structured data rather than only
+     * inside the Thai `error` prose.
+     */
     reference?: string;
     /**
      * Captured e-slip, **basename only** (e.g. `"<id>.png"`), living in the

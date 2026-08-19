@@ -111,12 +111,20 @@ describe("the written file is what parseArmLock understands", () => {
     expect(parseArmLock(text, mtimeMs, t0 + CONSERVATIVE_TOTAL_MS)).toEqual({ live: false, source: "expired" });
   });
 
-  it("a released lock reads back as not live even inside the window", () => {
+  it("a released lock reads back as not live even inside the window — with releasedAt/resolution/intentId surfaced", () => {
+    // 2026-08-19: these three used to be thrown away by parseArmLock's
+    // "released" branch — the exact data the cross-poll gate needs.
     const t0 = Date.parse("2026-08-14T01:00:00.000Z");
     const armed = armedLock("pi_a", t0);
     writeArmLock(releasedLock(armed, "success", t0 + 8_000), dir);
     const { text, mtimeMs } = readArmLockRaw(dir);
-    expect(parseArmLock(text, mtimeMs, t0 + 9_000)).toEqual({ live: false, source: "released" });
+    expect(parseArmLock(text, mtimeMs, t0 + 9_000)).toEqual({
+      live: false,
+      source: "released",
+      releasedAt: t0 + 8_000,
+      resolution: "success",
+      intentId: "pi_a",
+    });
   });
 });
 

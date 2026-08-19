@@ -1,6 +1,7 @@
 import { basename, resolve } from "node:path";
 import type { KbizDestination, KbizPaymentIntent } from "@reimbursement/shared";
 import type { Payee } from "../flows/transfer-other-flow";
+import type { TransferFailureOutcome } from "./approval-wait";
 import { resolveRecipient, toPayee, type TransferConfig } from "./transfer-config";
 
 /**
@@ -284,10 +285,13 @@ export function requestOrderCompare(
 /**
  * The Slack heads-up posted BEFORE the bot starts a second (or later) money
  * transfer in one batch, ahead of the deliberate pause. Phone-side truth from
- * the 2026-08-12/13 incidents (Winut): the second push, armed seconds after
- * the first tap, never surfaced on the phone at all — no banner, nothing to
- * find. The pause plus this warning is the countermeasure: give the K BIZ
- * app time to be backgrounded so the next push can raise a real notification.
+ * the 2026-08-12/13/18 incidents (Winut, confirmed 2026-08-19): the
+ * discriminator is not elapsed time but whether K BIZ was FOREGROUND on the
+ * one approving phone at the moment of arming — a push armed while the app
+ * is already open and waiting can raise NO banner at all. The pause plus this
+ * warning is the countermeasure: give the operator time to background/close
+ * the app BEFORE the next push exists, not just tell them a push is coming.
+ * S2 in kbiz-fix-spec.md §3.1 — "leave it closed" is pinned by test.
  */
 export function pauseBeforeArmMessage(args: {
   dest: string;
@@ -300,8 +304,8 @@ export function pauseBeforeArmMessage(args: {
   const money = args.amount !== undefined ? `฿${args.amount.toFixed(2)} → ${args.dest}` : args.dest;
   return (
     `:double_vertical_bar: Pausing ${args.gapSeconds}s before transfer${seq} ` +
-    `(${money}) — close or background the K BIZ app NOW ` +
-    `so the next approval push can raise a banner.`
+    `(${money}) — close or background the K BIZ app NOW and leave it closed ` +
+    `until the TAP NEEDED ping, so the next approval push can raise a banner.`
   );
 }
 
@@ -344,6 +348,16 @@ export function transferOtherPositions(
  * ":hourglass: Running…" claim message, which fires ~30–60 s before the push
  * exists and says nothing about tapping. Destination arrives already masked
  * (describeDestination) — never pass a full account number in.
+ *
+ * The old batch-size gate (only warn when the total in the batch exceeded
+ * one) is GONE (kbiz-fix-spec.md §0.5 / IMPL-C worksheet). 2026-08-18 run B
+ * was a batch of one, so that gate stripped the ping of the one sentence
+ * describing the operator's actual situation — and the sentence itself was
+ * wrong: the diagnosis-confirmed trigger (user testimony, 2026-08-19) is the
+ * K BIZ app being FOREGROUND at arming, not the transfer being second in a
+ * batch. A lone transfer approved seconds after the operator's own last tap
+ * on an unrelated request is just as exposed as a batch item, so every ping
+ * now carries the warning.
  */
 export function tapNeededMessage(args: {
   id: string;
@@ -354,10 +368,10 @@ export function tapNeededMessage(args: {
   const seq = args.position ? ` ${args.position.position}/${args.position.total}` : "";
   return (
     `:iphone: *TAP NEEDED NOW* — approve \`${args.id}\` in the K BIZ app ` +
-    `(transfer${seq}, ฿${args.amount.toFixed(2)} → ${args.dest}). The push expires in ~6 min` +
-    (args.position && args.position.total > 1
-      ? `; back-to-back pushes may show NO banner — open the app yourself.`
-      : `.`)
+    `(transfer${seq}, ฿${args.amount.toFixed(2)} → ${args.dest}). The push expires in ~6 min. ` +
+    `Keep K BIZ CLOSED until this ping: a push armed while the app is already OPEN in the ` +
+    `foreground can raise NO banner at all (2026-08-12/13/18). If you see nothing, close K BIZ ` +
+    `completely, reopen it, and look under อนุมัติรายการ.`
   );
 }
 
@@ -366,11 +380,19 @@ export type TransferOtherQueuePatch = {
   result: NonNullable<TransferOtherQueueRequest["result"]>;
 };
 
-/** What runTransferOtherFlow (or a pre-flight check before it ever runs) reported. */
+/**
+ * What runTransferOtherFlow (or a pre-flight check before it ever runs)
+ * reported. `outcome` widened to the full `TransferFailureOutcome` (Seam A,
+ * kbiz-fix-spec.md §1.1/§1.6) — the narrow `"confirmed-failed" | "unconfirmed"`
+ * redeclaration this used to carry is DELETED on purpose: it was a second,
+ * unsynchronized copy of the same vocabulary approval-wait.ts already owns,
+ * and it is exactly the kind of narrow local type that would have silently
+ * rejected `push-expired` at the queue boundary instead of at compile time.
+ */
 export interface FlowOutcomeInput {
   success: boolean;
   /** Only meaningful when `success` is false; absent = failed before the phone push was armed. */
-  outcome?: "confirmed-failed" | "unconfirmed";
+  outcome?: TransferFailureOutcome;
   error?: string;
   reference?: string;
   finalUrl?: string;
@@ -379,15 +401,35 @@ export interface FlowOutcomeInput {
 
 /**
  * Map a flow outcome to the queue-file patch the bot writes back. Pure so the
- * three-way success / confirmed-failed / unconfirmed split (money-safety
- * decision 3 in docs/adr/0001-kbiz-transfer-automation.md) can be unit-tested
- * without a browser.
+ * four-way success / confirmed-failed / push-expired / unconfirmed split
+ * (money-safety decision 3 in docs/adr/0001-kbiz-transfer-automation.md,
+ * amended 2026-08-19 for the fourth member) can be unit-tested without a
+ * browser.
+ *
+ * An exhaustive switch on purpose (inv:contract's 22-branch audit found
+ * exactly one compile gate in the whole vocabulary before this — this is the
+ * second): a future outcome member that isn't taught here is now a TS error,
+ * not a silent fall-through to "confirmed-failed" (a RETRYABLE verdict).
  *
  * A failure with no `outcome` at all — payee resolution, the ceiling check,
  * anything that failed before Next was ever clicked — is filed the same as
- * `confirmed-failed`: nothing moved, safe to retry. Only a genuine
- * `unconfirmed` (timed out / crashed after the phone push was armed) is
+ * `confirmed-failed`: nothing moved, safe to retry. `unconfirmed` (timed out
+ * / crashed after the phone push was armed, or armed-but-unverified) is
  * routed to `needs-review`, which reimbursement never auto-retries.
+ *
+ * `push-expired` gets `failed` — the SAME bundle path as `confirmed-failed`
+ * (queue `failed` → reimbursement returns the bundle to APPROVED, no `force`
+ * needed) — because the bank's own expiry modal, corroborated by the
+ * EXPIRY_CONFIRM_MS grace and the absence of a live-push block
+ * (approval-wait.ts), means the window closed with no tap seen: nothing
+ * moved, safe to retry, exactly like a bank rejection. It is deliberately NOT
+ * `needs-review`: unlike a genuine timeout, the bank has already resolved
+ * this one, and the operator deserves that honest Thai copy (Q1) rather than
+ * "may or may not have gone through". It gets its OWN `result.outcome` (not
+ * reused as `confirmed-failed`) so the audit trail, the poller's Slack/portal
+ * copy and any future money-path reasoning can tell "the bank actively
+ * rejected this" apart from "the bank's window elapsed unconfirmed" — see
+ * kbiz-fix-spec.md §2.1 for why reusing either existing member was rejected.
  */
 export function mapFlowOutcomeToPatch(flow: FlowOutcomeInput, finishedAt: string = new Date().toISOString()): TransferOtherQueuePatch {
   if (flow.success) {
@@ -396,14 +438,322 @@ export function mapFlowOutcomeToPatch(flow: FlowOutcomeInput, finishedAt: string
       result: { outcome: "success", reference: flow.reference, slipFile: flow.slipFile, finalUrl: flow.finalUrl, finishedAt },
     };
   }
-  if (flow.outcome === "unconfirmed") {
-    return {
-      status: "needs-review",
-      result: { outcome: "unconfirmed", error: flow.error, slipFile: flow.slipFile, finalUrl: flow.finalUrl, finishedAt },
-    };
+  // SPEC REVIEW FINDING 8 (2026-08-19): `reference` used to be carried only
+  // on the success arm above — every failure branch here now keeps it too
+  // (it is on FlowOutcomeInput precisely so IMPL-D's failure-arm reference,
+  // e.g. on the push-expired→unconfirmed downgrade, reaches the queue file
+  // and the poller as structured data, not only inside the Thai `error`
+  // prose).
+  switch (flow.outcome) {
+    case "unconfirmed":
+      return {
+        status: "needs-review",
+        result: {
+          outcome: "unconfirmed",
+          error: flow.error,
+          reference: flow.reference,
+          slipFile: flow.slipFile,
+          finalUrl: flow.finalUrl,
+          finishedAt,
+        },
+      };
+    case "push-expired":
+      return {
+        status: "failed",
+        result: {
+          outcome: "push-expired",
+          error: flow.error,
+          reference: flow.reference,
+          slipFile: flow.slipFile,
+          finalUrl: flow.finalUrl,
+          finishedAt,
+        },
+      };
+    case "confirmed-failed":
+    case undefined:
+      return {
+        status: "failed",
+        result: {
+          outcome: "confirmed-failed",
+          error: flow.error,
+          reference: flow.reference,
+          slipFile: flow.slipFile,
+          finalUrl: flow.finalUrl,
+          finishedAt,
+        },
+      };
+    default: {
+      // Compile-time exhaustiveness: if TransferOutcome ever grows a fifth
+      // member without a corresponding case above, `flow.outcome` stops being
+      // assignable to `never` here and `bun run typecheck` fails — the same
+      // guard kbiz-poller.ts's HANDLED_OUTCOMES gives the other repo (Seam C).
+      const _never: never = flow.outcome;
+      throw new Error(`unhandled flow outcome ${String(_never)}`);
+    }
   }
-  return {
-    status: "failed",
-    result: { outcome: "confirmed-failed", error: flow.error, slipFile: flow.slipFile, finalUrl: flow.finalUrl, finishedAt },
-  };
+}
+
+/**
+ * KBIZ's exact-duplicate confirmation dialog (same payee + same amount as an
+ * earlier transaction), seen 0 of 9 production arms but user-verified
+ * 2026-08-19 to precede the push. "no-prior-attempt" / "prior-attempt" decide
+ * decideDuplicateConfirm's verdict; "unknown-bundle" / "scan-failed" are the
+ * two ways the bot cannot even ASK the question and so must fail closed.
+ */
+export type DuplicateReason = "no-prior-attempt" | "prior-attempt" | "unknown-bundle" | "scan-failed";
+
+/** One other attempt already on record, as read off the queue/archive (any status — see readPriorAttempts). */
+export interface PriorAttempt {
+  id: string;
+  bundleId?: string;
+  status?: string;
+  outcome?: string;
+  /**
+   * Normalized, already-masked description of the payment destination (see
+   * `destinationSignature`) — used ONLY to compare "is this the same money as
+   * a DIFFERENT bundle" (money review finding 2). Never a full account
+   * number.
+   */
+  destinationKey?: string;
+  amount?: number;
+  /**
+   * Epoch ms of the sibling intent's own `createdAt`, when parseable — bounds
+   * the cross-bundle same-money check below (SAME_MONEY_WINDOW_MS). Absent ⇒
+   * age cannot be proven, so decideDuplicateConfirm treats it as still inside
+   * the window (fail-closed, same direction as every other "cannot tell"
+   * branch in this function).
+   */
+  createdAt?: number;
+}
+
+/**
+ * How far back the cross-bundle same-destination-+-same-amount check (money
+ * review finding 2) looks before a prior attempt stops blocking KBIZ's
+ * duplicate popup. 2026-08-19, second fix round (money review finding 6):
+ * the check originally scanned the FULL archive with no bound at all, which
+ * fail-closed but meant a recurring same-payee/same-amount payment (e.g.
+ * monthly rent) would be HELD on every single occurrence, forever, and the
+ * per-item scan cost grew with the archive's lifetime size.
+ *
+ * 14 days, not a shorter or a KBIZ-observed number: there is no live
+ * evidence of the bank's own duplicate-detection window (the popup is 0 of 9
+ * production arms — see decideDuplicateConfirm's own doc comment), so this
+ * is a deliberately generous operator-side default, not a tuned one. It
+ * comfortably covers the realistic "approver gets a bundle stuck at
+ * unconfirmed, resolves it in K BIZ over a day or two, then re-files the
+ * same receipt" recovery cycle this guard exists to catch, while still
+ * expiring well before the next month's recurring payment falls due.
+ * Revise only against real evidence, the same rule TAP_COOLDOWN_MS is held
+ * to (ADR 0001 Amendment 7 item 4) — do not shorten this to "feel" less
+ * strict.
+ */
+export const SAME_MONEY_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
+/**
+ * A resilient, ALWAYS-MASKED one-line signature of a queue item's payment
+ * destination, for the cross-bundle duplicate check below. Deliberately more
+ * lenient than `parseDestination`: it must also work on an ARCHIVED intent,
+ * where reimbursement's `redactArchivedAccountNo` (apps/api/src/kbiz.ts) has
+ * already replaced a "custom" destination's `accountNo` with `accountLast4`
+ * — `parseDestination`'s `required("accountNo")` would THROW on exactly that
+ * shape. Never throws; returns `undefined` when nothing usable is present
+ * (an unparseable destination is simply not comparable, not a scan failure).
+ */
+export function destinationSignature(raw: Record<string, unknown>): string | undefined {
+  const d = raw.destination;
+  if (d && typeof d === "object") {
+    const dest = d as Record<string, unknown>;
+    const kind = typeof dest.kind === "string" ? dest.kind : "";
+    const bank = typeof dest.bank === "string" ? dest.bank.trim().toLowerCase() : "";
+    if (kind === "custom") {
+      const fromFull = typeof dest.accountNo === "string" ? dest.accountNo.replace(/\D+/g, "").slice(-4) : "";
+      const fromLast4 = typeof dest.accountLast4 === "string" ? dest.accountLast4.replace(/\D+/g, "") : "";
+      const last4 = fromFull || fromLast4;
+      return last4 ? `custom:${bank}:${last4}` : undefined;
+    }
+    if (kind === "favorite") {
+      const last4 = typeof dest.accountLast4 === "string" ? dest.accountLast4.replace(/\D+/g, "") : "";
+      const nickname = typeof dest.nickname === "string" ? dest.nickname.trim() : "";
+      return last4 || nickname ? `favorite:${bank}:${nickname}:${last4}` : undefined;
+    }
+    if (kind === "handle") {
+      const handle = typeof dest.handle === "string" ? dest.handle.trim() : "";
+      return handle ? `handle:${handle}` : undefined;
+    }
+  }
+  const payee = raw.payee;
+  if (payee && typeof payee === "object") {
+    const handle = (payee as Record<string, unknown>).handle;
+    if (typeof handle === "string" && handle.trim()) return `handle:${handle.trim()}`;
+  }
+  return undefined;
+}
+
+/** `\`id\` (outcome)` / `\`id\` (status)` / `\`id\`` — the detail string named in Q6/S4. */
+function describePriorAttempt(a: PriorAttempt): string {
+  return `\`${a.id}\`${a.outcome ? ` (${a.outcome})` : a.status ? ` (${a.status})` : ""}`;
+}
+
+/**
+ * Pure. May the bot press ยืนยัน on KBIZ's duplicate popup?
+ *
+ * ONLY when the archive scan succeeded, this bundle has NO prior attempt on
+ * record, AND no OTHER bundle has a prior attempt at the same destination +
+ * amount — strict on purpose, regardless of what the prior attempt's own
+ * recorded outcome was (see the "confirmed-failed still refuses" test).
+ *
+ * Rationale (inv:evidence GAP 2, kbiz-fix-spec.md §2.2): KBIZ's duplicate
+ * check keys on a transaction that ACTUALLY WENT THROUGH, not on a prior
+ * attempt existing — which is why the popup never fired in 3/3 exact-amount
+ * retry arms whose predecessors moved ฿0 (a `confirmed-failed` or
+ * `push-expired` predecessor). So "popup + an earlier attempt that could be
+ * this same money" is the bank telling us the earlier attempt PAID, no
+ * matter what our own queue record says it did — trusting our own record
+ * over the bank's live popup here is exactly the double-pay path.
+ *
+ * MONEY REVIEW FINDING 2 (2026-08-19): the bundle-only check above is
+ * defeated whenever the SAME money is represented by a DIFFERENT bundle — an
+ * approver who gives up on a stuck `unconfirmed` bundle and re-files the same
+ * receipt gets a brand-new bundle id, and the original bundle-scoped guard
+ * would auto-confirm the popup with `reason:"no-prior-attempt"` even though
+ * the bank is telling us THIS EXACT payee+amount already paid. So a second,
+ * independent check: any prior attempt at the same masked destination + the
+ * same amount, under ANY bundle, AND within the last SAME_MONEY_WINDOW_MS
+ * (money review finding 6 — unbounded would HELD a recurring same-payee/
+ * same-amount payment, e.g. monthly rent, forever), blocks too.
+ * `destinationKey`/`amount` are optional on the caller's own request — when
+ * either is missing (a scan that could not compute one, or an old-shaped
+ * record) this check is simply skipped, never treated as a match; the
+ * bundle-scoped check above still applies in full. A candidate match with no
+ * parseable `createdAt`, OR a caller that omits `now` entirely, is treated as
+ * still inside the window — the window exists to relieve friction, never to
+ * open a gap a missing timestamp (or a caller that forgot to pass `now`)
+ * could walk through.
+ *
+ * "Popup + genuinely nothing on record either way" is the benign case this
+ * auto-confirm exists for: two different bundles/receipts that happen to
+ * share a payee and an amount but have no actual attempt history together —
+ * including the SAME payee+amount more than SAME_MONEY_WINDOW_MS apart.
+ *
+ * `priorAttempts` is filtered again HERE (defense in depth) rather than
+ * trusted pre-filtered from the caller — this is the one function whose
+ * wrong answer double-pays, so it does not lean on the caller's fs scan
+ * having filtered correctly.
+ */
+export function decideDuplicateConfirm(args: {
+  bundleId: string | undefined;
+  scanOk: boolean;
+  priorAttempts: ReadonlyArray<PriorAttempt>;
+  destinationKey?: string;
+  amount?: number;
+  /**
+   * Epoch ms "now" — bounds the cross-bundle same-money check against
+   * `SAME_MONEY_WINDOW_MS`. Optional and fail-closed: omitted ⇒ the window
+   * is not applied at all, i.e. every same-destination-+-amount match blocks
+   * regardless of age (the pre-2026-08-19-second-round behavior).
+   */
+  now?: number;
+}): { confirm: boolean; reason: DuplicateReason; detail?: string } {
+  if (!args.bundleId) return { confirm: false, reason: "unknown-bundle" };
+  if (!args.scanOk) return { confirm: false, reason: "scan-failed" };
+
+  const sameBundle = args.priorAttempts.find((a) => a.bundleId === args.bundleId);
+  if (sameBundle) return { confirm: false, reason: "prior-attempt", detail: describePriorAttempt(sameBundle) };
+
+  if (args.destinationKey !== undefined && args.amount !== undefined) {
+    const sameMoney = args.priorAttempts.find(
+      (a) =>
+        a.destinationKey !== undefined &&
+        a.destinationKey === args.destinationKey &&
+        a.amount === args.amount &&
+        (a.createdAt === undefined || args.now === undefined || args.now - a.createdAt < SAME_MONEY_WINDOW_MS),
+    );
+    if (sameMoney) {
+      return {
+        confirm: false,
+        reason: "prior-attempt",
+        detail: `${describePriorAttempt(sameMoney)} — same destination + amount, bundle ${sameMoney.bundleId ?? "?"}`,
+      };
+    }
+  }
+
+  return { confirm: true, reason: "no-prior-attempt" };
+}
+
+/**
+ * `result.error` text for a REFUSED duplicate popup (Q6, kbiz-fix-spec.md
+ * §3.2) — reimbursement stores this verbatim as `bundle.paymentError` and
+ * renders it to the approver, so it MUST start with "HELD: " (the word that
+ * has to survive a skim-read next to a Retry button — same rule
+ * deferredErrorText in arm-gate.ts lives by) and must never carry a full
+ * account number.
+ *
+ * SPEC REVIEW FINDING 3 (2026-08-19): branches on `reason` instead of always
+ * assuming a `prior-attempt` refusal with a named detail. `detail` is
+ * `undefined` for `scan-failed` (any `readdir(QUEUE_DIR)` failure) and
+ * `unknown-bundle` (EVERY manual `transfer-other -- --confirm` run — that CLI
+ * passes no `duplicatePolicy` at all) — both reachable, neither exercised by
+ * the original test suite. The old code substituted a placeholder string
+ * ("(no detail — see the queue archive)") for a MISSING detail, asserting "a
+ * prior attempt is on record" when the truth is "the bot could not even
+ * check" — a different, more honest sentence for each case instead.
+ */
+export function duplicateHeldText(reason: DuplicateReason, detail?: string): string {
+  if (reason === "prior-attempt") {
+    return (
+      `HELD: ธนาคารแจ้งว่ารายการนี้ (ผู้รับและจำนวนเงินเดียวกัน) ถูกทำไปแล้ว ` +
+      `และคำขอนี้เคยถูกส่งไปก่อนหน้านี้ (${detail}) — บอทจึงไม่กดยืนยัน และไม่มีการโอนในครั้งนี้ ` +
+      `ให้เปิดแอป K BIZ ดู "ประวัติทำรายการ" ว่าครั้งก่อนโอนออกไปจริงหรือไม่ ` +
+      `ถ้าโอนแล้วให้กด "ยืนยันว่าโอนแล้ว (แนบสลิป)" ห้ามกดจ่ายซ้ำก่อนตรวจ`
+    );
+  }
+  const why =
+    reason === "scan-failed"
+      ? "บอทตรวจประวัติคำขอนี้ในคิวไม่ได้"
+      : "คำขอนี้ไม่มีหมายเลข bundle ให้ตรวจประวัติ";
+  return (
+    `HELD: KBIZ แจ้งว่ารายการนี้ (ผู้รับและจำนวนเงินเดียวกัน) ถูกทำไปแล้ว แต่${why} ` +
+    `จึงไม่กดยืนยัน และไม่มีการโอนในครั้งนี้ ให้เปิดแอป K BIZ ดู "ประวัติทำรายการ" ว่ามีรายการนี้จริงหรือไม่ ` +
+    `ถ้าโอนแล้วให้กด "ยืนยันว่าโอนแล้ว (แนบสลิป)" ห้ามกดจ่ายซ้ำก่อนตรวจ`
+  );
+}
+
+/**
+ * The Slack line for KBIZ's duplicate popup, confirmed or refused (S3/S4,
+ * kbiz-fix-spec.md §3.1). `id`/`bundleId` are never account numbers; `detail`
+ * (refused case) is duplicateHeldText's own detail string, already scrubbed.
+ *
+ * SPEC REVIEW FINDING 3 (2026-08-19): the refused branch used to interpolate
+ * `${args.detail}` unguarded — on `scan-failed`/`unknown-bundle` (`detail`
+ * undefined) that rendered a literal "undefined is already on record for
+ * bundle …" into Slack. Branches on `reason` the same way duplicateHeldText
+ * does now.
+ */
+export function duplicatePopupMessage(args: {
+  id: string;
+  bundleId?: string;
+  confirmed: boolean;
+  reason: DuplicateReason;
+  detail?: string;
+}): string {
+  if (args.confirmed) {
+    return (
+      `:warning: KBIZ flagged \`${args.id}\` as a DUPLICATE (same payee + same amount as an ` +
+      `earlier transaction) and asked for a second confirmation. Bundle ${args.bundleId} has no ` +
+      `earlier attempt on record, so the bot pressed ยืนยัน — the push is being armed now. If this ` +
+      `was not intended, do NOT tap it; let it expire.`
+    );
+  }
+  const because =
+    args.reason === "prior-attempt"
+      ? `${args.detail} is already on record for bundle ${args.bundleId}`
+      : args.reason === "scan-failed"
+        ? `it could not scan the queue archive to check`
+        : `this request carries no bundle id to check against`;
+  return (
+    `:no_entry: KBIZ flagged \`${args.id}\` as a DUPLICATE (same payee + same amount as an earlier ` +
+    `transaction). The bot did NOT confirm — ${because}. Nothing was submitted. KBIZ only flags a ` +
+    `transaction that ACTUALLY WENT THROUGH, so open K BIZ → ประวัติทำรายการ and check whether that ` +
+    `earlier attempt paid before touching this again.`
+  );
 }
