@@ -6,3 +6,4 @@ sample-output.xlsx
 .DS_Store
 .env
 storageState.json
+/uploads/
