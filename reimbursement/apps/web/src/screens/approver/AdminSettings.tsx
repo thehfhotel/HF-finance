@@ -23,6 +23,7 @@ import { DesktopShell } from '../../components/DesktopShell';
 import { AppBar } from '../../components/AppBar';
 import { Avatar, Card, GhostButton, PrimaryButton } from '../../components/primitives';
 import { Icon } from '../../components/icons';
+import type { JSX } from "react";
 
 interface AdminSettingsProps {
   theme: Theme;

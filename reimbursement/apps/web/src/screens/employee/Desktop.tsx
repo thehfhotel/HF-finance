@@ -33,6 +33,7 @@ function sanitizeAmountInput(raw: string): string {
 
 // Pulled from `@reimbursement/shared` to stay in sync with the rest of the app.
 import { useReceiptCategories } from '../../lib/useReceiptCategories';
+import type { JSX } from "react";
 
 type View = 'drafts' | 'bundle-detail' | 'bundle-list' | 'share-inbox';
 type BundleFilter = 'pending' | 'approved' | 'paid' | 'rejected';

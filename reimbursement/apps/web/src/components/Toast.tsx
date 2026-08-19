@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Theme } from '../lib/types';
 import { FONT_UI } from '../lib/theme';
+import type { JSX } from "react";
 
 // ── Types ─────────────────────────────────────────────────────────────
 

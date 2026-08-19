@@ -1,6 +1,7 @@
 import { fmt0, fmtN } from '../lib/format';
 import { FONT_UI } from '../lib/theme';
 import type { Receipt } from '../lib/types';
+import type { JSX } from "react";
 
 /**
  * Ask the API for a thumbnail instead of the original camera photo.

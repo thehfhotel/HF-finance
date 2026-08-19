@@ -59,7 +59,7 @@ export interface OverviewBodyProps {
   onOpenInboxRoute?: () => void;
   padding?: string;
   /** The phone's scroll container, for the two-tap pin. */
-  scrollRef?: RefObject<HTMLDivElement>;
+  scrollRef?: RefObject<HTMLDivElement | null>;
 }
 
 export function OverviewBody({

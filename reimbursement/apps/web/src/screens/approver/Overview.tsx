@@ -41,7 +41,7 @@ interface OverviewProps {
   onOpenInboxRoute?: () => void;
   phone?: boolean;
   /** The phone's scroll container, for the sticky bar and the two-tap pin. */
-  scrollRef?: RefObject<HTMLDivElement>;
+  scrollRef?: RefObject<HTMLDivElement | null>;
 }
 
 export function ApproverOverview(props: OverviewProps) {

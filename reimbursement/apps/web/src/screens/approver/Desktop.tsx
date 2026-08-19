@@ -22,6 +22,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { Toast, useToast } from '../../components/Toast';
 import { KbizDestinationPicker } from '../../components/KbizDestinationPicker';
 import type { KbizChosenDestination } from '../../components/KbizDestinationPicker';
+import type { JSX } from "react";
 
 const TABLE_GRID_COLUMNS = '1.2fr 1fr 1fr 100px';
 const DETAIL_MAX_WIDTH = 840;

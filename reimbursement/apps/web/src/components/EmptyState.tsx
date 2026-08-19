@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { Theme } from '../lib/types';
 import { FONT_DISPLAY, FONT_UI } from '../lib/theme';
+import type { JSX } from "react";
 
 interface EmptyStateAction {
   label: string;
