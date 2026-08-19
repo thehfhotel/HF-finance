@@ -31,7 +31,7 @@ interface ReviewProps {
   setState: (updater: (s: AppState) => AppState) => void;
 }
 
-type ConfirmKind = 'approve' | 'reject' | 'pay-kbiz' | 'retry' | 'force-retry';
+type ConfirmKind = 'approve' | 'reject' | 'pay-kbiz' | 'force-retry';
 
 /** How often to re-fetch the bundle while it's 'paying' — the panel promises
  *  to update itself once the transfer settles, so it has to poll. */
@@ -167,10 +167,13 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
     }
   };
 
-  // `force` is only sent from the stuck-payment actions, where the approver has
-  // just been told to check K BIZ first: it overrules an intent kbiz-bot still
-  // owns. Without it the API releases only what the queue proves never armed.
-  const handlePaymentRetry = async (force = false) => {
+  // 2026-08-19: `force` is no longer optional — there is exactly one release-
+  // to-APPROVED dialog left (the blunt, danger 'force-retry' one), and both
+  // triggers for it (the PAYING+error retry button and the stuck-payment
+  // override) always pass `true`. See bundles.ts's payment-retry docblock:
+  // PAYING + paymentError is the poller's `unconfirmed` verdict, the one
+  // state a live pay button pointed at money that may already have moved.
+  const handlePaymentRetry = async (force: boolean) => {
     if (submitting) return;
     setError(null);
     setSubmitting(true);
@@ -249,9 +252,10 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
               lineHeight: 1.5,
             }}
           >
-            <span style={{ fontWeight: 600, marginRight: 6 }}>กำลังโอนผ่าน KBIZ — รอยืนยันบนมือถือ</span>
+            <span style={{ fontWeight: 600, marginRight: 6 }}>กำลังโอนผ่าน KBIZ — รอกดยืนยันบนมือถือ</span>
             <span style={{ display: 'block', color: theme.inkSoft, marginTop: 2 }}>
-              หน้าจะอัปเดตให้อัตโนมัติเมื่อโอนสำเร็จ — ลองรีเฟรชอีกครั้งภายหลังหากรอนาน
+              ปิดแอป K BIZ ไว้ก่อน แล้วเปิดเมื่อมีการแจ้งเตือนเข้ามา — ถ้าเปิดแอปค้างรออยู่ การแจ้งเตือนอาจไม่ขึ้นเลย
+              ถ้าไม่มีแจ้งเตือน ให้ปิดแอปแล้วเปิดใหม่ แล้วดูที่ "อนุมัติรายการ"
             </span>
           </div>
         )}
@@ -270,7 +274,7 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
             }}
           >
             <span style={{ fontWeight: 600, color: theme.danger, marginRight: 6 }}>
-              โอนผ่าน KBIZ ไม่สำเร็จ / ไม่ทราบผล:
+              ไม่ทราบผลการโอน — ต้องตรวจสอบก่อน:
             </span>
             {b.paymentError}
           </div>
@@ -294,7 +298,7 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
             }}
           >
             <span style={{ fontWeight: 600, color: theme.danger, marginRight: 6 }}>
-              โอนผ่าน KBIZ ครั้งก่อนไม่สำเร็จ:
+              การโอนครั้งก่อนไม่สำเร็จ — เงินยังไม่ออกจากบัญชี:
             </span>
             {b.paymentError}
           </div>
@@ -509,7 +513,7 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
           <PrimaryButton theme={theme} onClick={() => nav({ name: 'approver-pay', id: b.id })}>
             ยืนยันว่าโอนแล้ว (แนบสลิป)
           </PrimaryButton>
-          <GhostButton theme={theme} full onClick={() => setConfirmKind('retry')}>
+          <GhostButton theme={theme} full onClick={() => setConfirmKind('force-retry')}>
             ยังไม่ได้โอน — ลองใหม่
           </GhostButton>
         </div>
@@ -681,23 +685,11 @@ export function Review({ theme, state, nav, bundleId, setState }: ReviewProps) {
         />
       )}
 
-      {confirmKind === 'retry' && (
-        <ConfirmDialog
-          theme={theme}
-          title="ลองโอนใหม่?"
-          message="ตรวจสอบในแอป K BIZ แล้วว่ารายการก่อนหน้าไม่สำเร็จ"
-          confirmLabel="ลองใหม่"
-          loading={submitting}
-          onConfirm={() => void handlePaymentRetry()}
-          onCancel={() => setConfirmKind(null)}
-        />
-      )}
-
       {confirmKind === 'force-retry' && (
         <ConfirmDialog
           theme={theme}
           title="ปล่อยกลับไปสถานะอนุมัติ?"
-          message="ยืนยันว่าเปิดแอป K BIZ ดูแล้วและยังไม่มีการโอนออกจริง — ถ้าโอนไปแล้วให้เลือก “โอนไปแล้ว — แนบสลิปเอง” แทน ไม่อย่างนั้นอาจโอนซ้ำ"
+          message='ยืนยันว่าเปิดแอป K BIZ ดู "ประวัติทำรายการ" แล้ว และยังไม่มีเงินออกจากบัญชีจริง — ถ้าโอนไปแล้วให้กด "ยืนยันว่าโอนแล้ว (แนบสลิป)" แทน ไม่อย่างนั้นอาจโอนซ้ำ'
           confirmLabel="ยังไม่ได้โอน"
           danger
           loading={submitting}

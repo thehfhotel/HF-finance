@@ -99,6 +99,18 @@ const DEFAULT_PAGE_SIZE = 50;
 /** Ceiling so a stray ?limit=100000 cannot resurrect the original problem. */
 const MAX_PAGE_SIZE = 200;
 
+/**
+ * `/:id/payment-retry` on a PAYING bundle that already carries a
+ * `paymentError` — the poller's `unconfirmed` verdict, by construction (see
+ * the route below). Releasing that without `force` is exactly the hole
+ * closed 2026-08-19: before this gate, a non-null `paymentError` skipped the
+ * whole queue-proof block and went straight to release, so the one outcome
+ * that can double-pay needed no override and audited itself as `forced:
+ * false`.
+ */
+const RETRY_AMBIGUOUS_409 =
+  'ผลการโอนครั้งก่อนยังไม่ทราบผล — เปิดแอป K BIZ ดู "ประวัติทำรายการ" ก่อน แล้วยืนยันอีกครั้ง (ถ้าโอนไปแล้ว การกดจ่ายใหม่จะกลายเป็นโอนซ้ำ)';
+
 export const bundleRoutes = new Elysia({ prefix: '/bundles' })
   .use(auth)
 
@@ -950,8 +962,18 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
    *
    * Three ways in, all of them still requiring `PAYING`:
    *
-   *  1. **`paymentError` set** — the bot came back ambiguous and a human has
-   *     checked K BIZ. Unchanged.
+   *  1. **`paymentError` set, with `force`** — 2026-08-19: this now REQUIRES
+   *     `force`; it used to be the one branch below that didn't. PAYING +
+   *     `paymentError` is the poller's `unconfirmed` verdict by construction
+   *     (it is the only writer of `paymentError` that leaves the bundle at
+   *     PAYING — `confirmed-failed` and `push-expired` both resolve forward
+   *     to APPROVED and never reach this endpoint at all), which means the
+   *     bank genuinely never said what happened. Before this gate, a non-null
+   *     `paymentError` skipped the whole queue-proof block below and released
+   *     straight to APPROVED with no override — the one outcome capable of a
+   *     double pay was the one this endpoint policed least. The approver must
+   *     now assert (by forcing) that they have checked K BIZ's "ประวัติทำรายการ"
+   *     and nothing moved.
    *  2. **No error, but nothing was ever armed** — the queue itself proves it:
    *     no intent file at all (this app died between the atomic claim and the
    *     write), or one still sitting at `status: 'approved'` (kbiz-bot never
@@ -991,7 +1013,22 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
       let intentState: Awaited<ReturnType<typeof readIntentState>> | null = null;
       let provablyIdle = false;
 
-      if (bundle.paymentError === null) {
+      // PAYING + a non-null paymentError IS the poller's `unconfirmed` verdict,
+      // by construction: it is the only writer of paymentError that leaves the
+      // bundle at PAYING (kbiz-poller.ts's unconfirmed branch), which is what
+      // schema.prisma's own BundleStatus comment says PAYING + error means.
+      // confirmed-failed and push-expired both resolve forward to APPROVED, so
+      // they never reach this endpoint at all. 2026-08-19: before this line,
+      // `paymentError !== null` SKIPPED the whole proof block below and went
+      // straight to release — the one outcome that can double-pay was the one
+      // that needed no force and audited itself as `forced: false`.
+      const ambiguous = bundle.paymentError !== null;
+
+      if (ambiguous) {
+        if (!force) {
+          return status(409, { message: RETRY_AMBIGUOUS_409 });
+        }
+      } else {
         intentState = await readIntentState(bundle.paymentIntentId);
 
         // Nothing armed → release. Anything else needs the human to say so.
@@ -1036,8 +1073,10 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
             releasedIntentId: bundle.paymentIntentId,
             paymentError: bundle.paymentError,
             intentState,
-            // True only when the human overruled an intent the bot still owned.
-            forced: bundle.paymentError === null && !provablyIdle,
+            ambiguous,
+            // True only when force actually overrode something: an ambiguous
+            // (unconfirmed) verdict, or an intent the bot still owned.
+            forced: force && (ambiguous || !provablyIdle),
           },
         },
       });
