@@ -4,7 +4,21 @@ import { gotoAuthenticated, isUnauthenticatedUrl } from "../lib/session";
 import { captureSlip, ensureSlipsDir, SLIPS_DIR, type SlipCapture } from "../lib/capture-slip";
 import { finalizeTransfer } from "../lib/finalize-transfer";
 import { aliasesForBank, matchFavoriteRows } from "../lib/scrape-favorites";
-import { APPROVAL_TIMEOUT_MS, waitForApproval, type ApprovalView, type TransferOutcome } from "../lib/approval-wait";
+import {
+  APPROVAL_TIMEOUT_MS,
+  waitForApproval,
+  type ApprovalView,
+  type TransferOutcome,
+  type TransferFailureOutcome,
+} from "../lib/approval-wait";
+import { verifyArmed } from "../lib/post-next";
+// Runtime import (not type-only): duplicateHeldText builds the Q6 held-text
+// this module returns on a refused duplicate popup, and the string is pinned
+// in ONE place (transfer-other-queue.ts, IMPL-C) so it can be unit-tested
+// without a browser — this module has no test of its own (see the file
+// footer). DuplicateReason stays type-only: process-queue.ts (IMPL-C) is the
+// only writer of a `duplicatePolicy`, this module only ever reads one.
+import { duplicateHeldText, type DuplicateReason } from "../lib/transfer-other-queue";
 
 // isUnauthenticatedUrl is re-exported unchanged from session.ts (which now
 // itself re-exports it from approval-wait.ts, per A3) — this import is kept
@@ -86,21 +100,48 @@ export interface TransferOtherInput {
   /** false = preview (stop BEFORE Next). true = click Next (arm the phone push). */
   confirm: boolean;
   /**
-   * Fired the moment Next is clicked (the push is armed and the bank's ~6-min
-   * countdown is running). This is the approver's "tap your phone NOW" signal:
-   * in a back-to-back batch the K BIZ app shows no banner for a push that
-   * arrives seconds after the previous tap (incidents 2026-08-12 + 2026-08-13,
-   * both second-of-pair, both expired unseen), so an out-of-band ping is the
-   * only reliable cue. Fire-and-forget; a notification failure never touches
-   * the transfer.
+   * Fired ONLY after post-next.ts's `verifyArmed` has SEEN the bank's own
+   * "notification sent" / countdown block on the page — never on the bare
+   * `next.click()` any more. Before 2026-08-19 this fired on the click
+   * itself, so the TAP-NEEDED Slack ping, the `armedAt` stamp and the
+   * 6.5-min lock refinement all asserted "a push exists" with zero
+   * post-condition: a JS-inert click, or KBIZ's exact-duplicate popup
+   * (§ below), both looked in the logs exactly like "the operator never got
+   * pinged" (diagnosis finding 7). Between the click and this firing, the
+   * flow's pre-click lock (arm-lock.ts, written conservatively BEFORE the
+   * click) still covers the estate at its full 10.5-min window — strictly
+   * MORE conservative than firing on the click, so moving this later cannot
+   * fail open; it can only narrow the window the estate holds a lock for.
+   * `armedAt` is the CLICK time, not the verification time, so the lock
+   * refinement and the 6.5-min wait budget still measure the real window.
+   * Fire-and-forget; a notification failure never touches the transfer.
    */
-  onArmed?: () => void | Promise<void>;
+  onArmed?: (armedAt: number) => void | Promise<void>;
+  /**
+   * What to do if KBIZ raises its exact-duplicate confirmation popup (same
+   * payee + same amount as an earlier transaction, user-verified
+   * 2026-08-19). Decided by the caller — process-queue.ts is the only place
+   * with filesystem access to the queue archive that can tell "no prior
+   * attempt on this bundle" from "this bundle already paid". Absent ⇒ the
+   * flow refuses to confirm (fail closed: see `decideDuplicateConfirm`'s own
+   * doc comment for why "no policy" and "a policy saying no" must behave
+   * identically here).
+   */
+  duplicatePolicy?: { confirm: boolean; reason: DuplicateReason; detail?: string };
+  /**
+   * Fired exactly once, the moment the duplicate popup is recognised —
+   * BEFORE either button is clicked, because a refusal below reports
+   * `armedAt: undefined` / "nothing submitted", which is only true because
+   * the popup precedes any push (user-verified 2026-08-19). Never throws.
+   */
+  onDuplicatePopup?: (info: { confirmed: boolean; reason: DuplicateReason; detail?: string }) => void | Promise<void>;
 }
 
 // Single source of truth is approval-wait.ts; re-exported here so B (and
 // anything importing the flow's public surface) keeps importing the type
 // from this file.
 export type { TransferOutcome };
+export type { TransferFailureOutcome };
 
 export type TransferOtherResult =
   | {
@@ -117,9 +158,23 @@ export type TransferOtherResult =
     }
   | {
       success: false;
-      outcome?: TransferOutcome;
+      /**
+       * A success is never a failure outcome (TransferFailureOutcome =
+       * Exclude<TransferOutcome, "success">) — absent ⇒ failed before Next
+       * was ever clicked (payee resolution, the ceiling check, KBIZ's
+       * duplicate popup refused pre-arm), never a push-related ambiguity.
+       */
+      outcome?: TransferFailureOutcome;
       error: string;
       shot?: string;
+      /**
+       * The bank's own scraped transaction reference, when the final page
+       * carried one — kept on every non-success branch now, not only
+       * success (finalize-transfer.ts §1.8): a reference is proof money
+       * moved regardless of what classifyFrame decided about the page
+       * around it.
+       */
+      reference?: string;
       /** Epoch ms of the Next click. Absent ⇒ no push was ever armed. */
       armedAt?: number;
       /** From ApprovalWaitResult. Absent ⇒ no push was armed ⇒ treat as false. */
@@ -427,13 +482,166 @@ export async function runTransferOtherFlow(
     return { success: false, error: (e as Error).message };
   }
 
-  // CONFIRM: clicking Next sends the phone push.
+  // CONFIRM: clicking Next sends the phone push — but from 2026-08-19 on,
+  // "sends" is a claim this flow VERIFIES, not one it assumes. `clickedAt`
+  // is deliberately not named `armedAt` here: that name is earned below,
+  // only once verifyArmed (or the wait loop itself) has actually seen the
+  // bank's own acknowledgement. See onArmed's doc comment above for the
+  // full incident history this replaces.
   console.log("→ Click Next — KBIZ sends the approval push to your phone");
   await next.click();
-  const armedAt = Date.now();
-  if (input.onArmed) void Promise.resolve().then(input.onArmed).catch(() => {});
+  const clickedAt = Date.now();
   await page.waitForTimeout(2_500);
   await page.screenshot({ path: `${SLIPS_DIR}/_waiting-${input.slug}.png`, fullPage: true }).catch(() => {});
+
+  let post = await verifyArmed(playwrightApprovalView(page));
+
+  if (post.state === "duplicate-popup") {
+    // KBIZ's exact-duplicate confirmation dialog. User-verified 2026-08-19
+    // to PRECEDE any push — that is the only reason a refusal below may
+    // report `armedAt: undefined` ("nothing submitted") truthfully. Never
+    // observed in 9/9 production arms; policy comes entirely from the
+    // caller (process-queue.ts), the only place with fs access to the queue
+    // archive that can tell "no prior attempt on this bundle" from "this
+    // bundle already paid" (decideDuplicateConfirm, IMPL-C).
+    await page.screenshot({ path: `${SLIPS_DIR}/_duplicate-${input.slug}.png`, fullPage: true }).catch(() => {});
+    // Absent policy behaves exactly like a policy that says no — "no
+    // information about whether this bundle already paid" must never be
+    // read as permission to confirm.
+    const policy = input.duplicatePolicy ?? { confirm: false, reason: "unknown-bundle" as DuplicateReason };
+    await Promise.resolve()
+      .then(() => input.onDuplicatePopup?.({ confirmed: policy.confirm, reason: policy.reason, detail: policy.detail }))
+      .catch(() => {});
+
+    if (!policy.confirm) {
+      // Best-effort dismissal so the wizard doesn't sit on a dead-end modal
+      // for the next queue item — never a transfer-blocker in itself.
+      await clickDialogButton(page, DUPLICATE_DIALOG_HINT, ["ยกเลิก", "Cancel"]);
+      return {
+        success: false,
+        // `reason`/`detail` passed straight through — SPEC REVIEW FINDING 3
+        // (2026-08-19): this used to substitute a placeholder string
+        // ("(no detail — see the queue archive)") whenever `policy.detail`
+        // was absent (every `scan-failed` / `unknown-bundle` refusal, i.e.
+        // EVERY manual `transfer-other -- --confirm` run, which passes no
+        // duplicatePolicy at all), asserting "a prior attempt exists" when
+        // the truth is "the bot could not even check". duplicateHeldText now
+        // branches on `reason` and never interpolates a placeholder.
+        error: duplicateHeldText(policy.reason, policy.detail),
+        shot: `${SLIPS_DIR}/_duplicate-${input.slug}.png`,
+        pushMayBeLive: false,
+        // Deliberately NO `outcome`, NO `armedAt`: nothing was submitted to
+        // the bank, so this is filed the same as any other pre-arm refusal
+        // (mapFlowOutcomeToPatch → "failed", safe to retry once the earlier
+        // attempt is checked in ประวัติทำรายการ).
+      };
+    }
+
+    // KBIZ needs a second confirmation to actually arm the push. The click
+    // is scoped to the visible dialog and matched EXACTLY on the BUTTON'S
+    // OWN accessible name (MONEY REVIEW FINDING 5, 2026-08-19: `exact:
+    // false` substring-matches "ยืนยัน" against "ยืนยันการทำรายการ" in 7 of 9
+    // production dumps, AND — now that DUPLICATE_DIALOG_HINT is bilingual,
+    // see below — "Confirm" against this same page's own "Confirm the
+    // transaction" button, kbiz-live-push.en.txt:59) here would be a live
+    // money-path bug, not a cosmetic one. The user's own screenshot shows
+    // the real buttons are labelled EXACTLY "ยกเลิก" / "ยืนยัน", so nothing is
+    // lost by requiring an exact match.
+    const confirmResult = await clickDialogButton(page, DUPLICATE_DIALOG_HINT, ["ยืนยัน", "Confirm"]);
+    if (confirmResult !== "clicked") {
+      // clickDialogButton returns "clicked" ONLY immediately after a real
+      // `.click()` call succeeds (see its own doc comment). Its OTHER two
+      // outcomes are NOT equivalent on the money path (MONEY REVIEW FINDING,
+      // 2026-08-19 second fix round — the original single-bit `false` here
+      // conflated them, which released the estate-wide lock on a click that
+      // may have already registered with the bank):
+      //  "not-found"    — never clicked anything, on a popup that
+      //                    (user-verified 2026-08-19) precedes any push BY
+      //                    CONSTRUCTION. Nothing was submitted, exactly like
+      //                    the policy-refused branch above — safe to say so
+      //                    and safe to release the lock.
+      //  "click-failed" — a click WAS dispatched and then the action threw
+      //                    (element detached by the dialog's own transition,
+      //                    the 5 s action budget elapsing post-input). We
+      //                    cannot prove the bank never saw it, so this is
+      //                    treated exactly like the "unknown" branch below:
+      //                    `pushMayBeLive: true` keeps the lock held instead
+      //                    of releasing it out from under a maybe-live push.
+      const clickFailed = confirmResult === "click-failed";
+      await page.screenshot({ path: `${SLIPS_DIR}/_unverified-${input.slug}.png`, fullPage: true }).catch(() => {});
+      return {
+        success: false,
+        error: clickFailed
+          ? `HELD: KBIZ แสดงหน้าต่างยืนยันรายการซ้ำ บอทกดปุ่ม "ยืนยัน" แล้วแต่ระบบไม่ยืนยันว่ากดสำเร็จ (อาจเป็นเพราะหน้าจอเปลี่ยนระหว่างกด) ` +
+            `จึงไม่ทราบว่ามีการส่งคำสั่งไปที่ธนาคารหรือไม่ ห้ามลองใหม่จนกว่าจะเปิดแอป K BIZ ตรวจ "ประวัติทำรายการ" ก่อน`
+          : `HELD: KBIZ แสดงหน้าต่างยืนยันรายการซ้ำ แต่บอทหาปุ่ม "ยืนยัน" ที่ปลอดภัยไม่พบ (อาจเป็นเพราะรูปแบบหน้าจอไม่ตรงกับที่ตรวจสอบไว้) ` +
+            `จึงไม่ได้กดอะไรเลย ไม่มีการโอนในครั้งนี้ ให้เปิดแอป K BIZ ดู "ประวัติทำรายการ" ก่อนลองใหม่`,
+        shot: `${SLIPS_DIR}/_unverified-${input.slug}.png`,
+        pushMayBeLive: clickFailed,
+        // "not-found": NO outcome / NO armedAt, same reasoning as the
+        // policy-refused branch — no click was ever dispatched.
+        // "click-failed": also no outcome/armedAt (we don't know a push
+        // exists, only that we cannot rule one out) — `pushMayBeLive: true`
+        // alone is what keeps the lock held; see process-queue.ts:367.
+      };
+    }
+    await page.waitForTimeout(2_500);
+    post = await verifyArmed(playwrightApprovalView(page));
+  }
+
+  if (post.state === "duplicate-popup") {
+    // The confirm click's OWN dialog re-rendered — a second confirmation
+    // stacked, a slow animate-out, or a genuine re-arm race. We can prove
+    // NEITHER that the push armed (onArmed never fires ⇒ no TAP-NEEDED ping,
+    // exactly the incident class this file exists to end) NOR that nothing
+    // did (the popup may never have actually cleared). MONEY/SPEC REVIEW
+    // FINDING 6/4 (2026-08-19): falling through to waitForApproval here used
+    // to burn the FULL 6.5-min timeout on text neither classifyFrame nor
+    // AMBIGUOUS_RE recognises, then filed `unconfirmed` and held the whole
+    // estate via UNCONFIRMED_DEFER_MS for a state the bot already
+    // recognised. Treat it exactly like "unknown" instead, reached
+    // IMMEDIATELY: fail closed, keep the lock held, let a human check K BIZ.
+    await page.screenshot({ path: `${SLIPS_DIR}/_unverified-${input.slug}.png`, fullPage: true }).catch(() => {});
+    return finalizeTransfer({
+      outcome: "unconfirmed",
+      pushMayBeLive: true,
+      armedAt: clickedAt,
+      armVerified: false,
+      captureSlip: () => captureSlip(page, input.slug),
+      finalUrl: () => page.url(),
+    });
+  }
+
+  if (post.state === "unknown") {
+    // Neither "the panel is up" nor "a terminal frame already appeared" —
+    // we clicked, so a push MAY exist; we saw no acknowledgement within the
+    // budget, so we cannot claim one does. `pushMayBeLive: true` keeps the
+    // estate-wide lock held (process-queue.ts does not release it), and
+    // `armVerified: false` steers finalize-transfer.ts to the copy that
+    // says so instead of the ordinary "the bank never answered" framing.
+    await page.screenshot({ path: `${SLIPS_DIR}/_unverified-${input.slug}.png`, fullPage: true }).catch(() => {});
+    return finalizeTransfer({
+      outcome: "unconfirmed",
+      pushMayBeLive: true,
+      armedAt: clickedAt,
+      armVerified: false,
+      captureSlip: () => captureSlip(page, input.slug),
+      finalUrl: () => page.url(),
+    });
+  }
+
+  if (post.state === "armed" && input.onArmed) {
+    // Fire-and-forget, off the money path — identical arrangement to the
+    // bare-click version this replaces, just moved past the verification.
+    void Promise.resolve()
+      .then(() => input.onArmed!(clickedAt))
+      .catch(() => {});
+  }
+  // post.state === "terminal": classifyFrame already has a verdict (most
+  // plausibly push-expired, or a same-page failure) — there is nothing to
+  // tap, so no TAP-NEEDED ping fires. Fall through; waitForApproval below
+  // classifies the SAME page on its own first read, so nothing is lost.
+
   console.log(`   armed — waiting for your phone tap (up to ${Math.floor(APPROVAL_TIMEOUT_MS / 60000)} min)…`);
 
   const waitResult = await waitForApproval(playwrightApprovalView(page), {
@@ -453,10 +661,94 @@ export async function runTransferOtherFlow(
   return finalizeTransfer({
     outcome,
     pushMayBeLive,
-    armedAt,
+    armedAt: clickedAt,
     captureSlip: () => captureSlip(page, input.slug),
     finalUrl: () => page.url(),
   });
+}
+
+// KBIZ's exact-duplicate dialog's own hint text, used ONLY to SCOPE the
+// button search below to the visible duplicate dialog specifically — never to
+// decide whether the popup is present at all (that decision already happened
+// in verifyArmed/classifyPostNext). MONEY REVIEW FINDING 8 (2026-08-19): this
+// used to be Thai-only while post-next.ts's DUPLICATE_POPUP_RE (the thing
+// that actually DETECTS the popup) is bilingual — so an English duplicate
+// popup was correctly recognised upstream but then this hint could never
+// scope into it, and clickDialogButton always returned `false`. Mirrors
+// DUPLICATE_POPUP_RE's own bilingual pattern.
+const DUPLICATE_DIALOG_HINT = /ทำรายการนี้ไปแล้ว|already (?:made|performed|done) this transaction/i;
+
+/**
+ * Tri-state, replacing a plain boolean (MONEY REVIEW FINDING, 2026-08-19
+ * second fix round): a click attempt can fail two ways that are NOT
+ * equivalent on the money path.
+ *  "clicked"      — `.click()` returned normally. The button was pressed.
+ *  "not-found"    — no dialog matched `hint`, or no button/link matched any
+ *                    `buttonNames` and became visible. NOTHING was clicked.
+ *  "click-failed" — a button/link WAS found and `.click()` was DISPATCHED,
+ *                    but the awaited action then threw (element detached by
+ *                    the dialog's own transition, the 5 s action budget
+ *                    elapsing post-input, etc.). The click may have already
+ *                    registered with the page before the throw — this is
+ *                    genuinely ambiguous, not "found no safe button".
+ * The duplicate-popup confirm caller (below) reports `pushMayBeLive: true`
+ * for "click-failed" only — collapsing it into "not-found" (as this used to
+ * return a bare `false` for both) let a click-then-throw on the ยืนยัน button
+ * release the estate-wide arm lock while a push may be live, the one
+ * direction that lock exists to prevent.
+ */
+type ClickDialogResult = "clicked" | "not-found" | "click-failed";
+
+/**
+ * Best-effort: click a button/link matched EXACTLY on its OWN accessible
+ * name, scoped to whichever visible dialog contains `hint`. Never observed
+ * live (the duplicate popup is 0-of-9 in production), so this stays
+ * deliberately generic rather than pinned to a selector nobody has verified
+ * against the real DOM — errors are swallowed, and the tri-state return
+ * (see `ClickDialogResult`) tells the caller whether a click was ever
+ * dispatched.
+ *
+ * `exact: true` (money review finding 5, 2026-08-19): a substring match on
+ * "ยืนยัน" hits "ยืนยันการทำรายการ" in 7 of 9 production dumps, and — now that
+ * `hint` is bilingual — a substring match on "Confirm" would hit this same
+ * page's own "Confirm the transaction" button (kbiz-live-push.en.txt:59).
+ * The user's own screenshot shows the real buttons are labelled EXACTLY
+ * "ยกเลิก" / "ยืนยัน", so nothing is lost by requiring an exact match.
+ */
+async function clickDialogButton(page: Page, hint: string | RegExp, buttonNames: string[]): Promise<ClickDialogResult> {
+  // Set the instant a click is dispatched — BEFORE the awaited `.click()` —
+  // so a throw from inside `.click()` itself still reports "click-failed",
+  // not "not-found". This flag, not the button lookup, is what the catch
+  // block below consults.
+  let clicked = false;
+  try {
+    const dialog = page
+      .locator(".modal:visible, .swal2-popup:visible, [role='dialog']:visible, .popup:visible, .layer:visible")
+      .filter({ hasText: hint })
+      .first();
+    if (!(await dialog.count().catch(() => 0))) return "not-found";
+    for (const name of buttonNames) {
+      const btn = dialog.getByRole("button", { name, exact: true }).first();
+      if (await btn.isVisible().catch(() => false)) {
+        clicked = true;
+        await btn.click({ timeout: 5_000 });
+        return "clicked";
+      }
+      // Some KBIZ dialogs render actions as <a>, not <button> — same scope,
+      // same accessible-name match.
+      const link = dialog.getByRole("link", { name, exact: true }).first();
+      if (await link.isVisible().catch(() => false)) {
+        clicked = true;
+        await link.click({ timeout: 5_000 });
+        return "clicked";
+      }
+    }
+  } catch {
+    // Never let a dialog-interaction failure crash the flow — but do NOT
+    // collapse "never found a button" and "dispatched a click that then
+    // threw" into the same outcome; `clicked` is what tells them apart.
+  }
+  return clicked ? "click-failed" : "not-found";
 }
 
 function playwrightApprovalView(page: Page): ApprovalView {

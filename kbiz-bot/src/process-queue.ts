@@ -10,7 +10,7 @@ import { FAVORITES_FILE, scrapeFavorites } from "./lib/scrape-favorites";
 import { loadTransferConfig } from "./lib/transfer-config";
 import { HANDLES_FILE, publishPayeeHandles } from "./lib/payee-handles";
 import { htmlToPdf } from "./lib/html-to-pdf";
-import { PUSH_LIFETIME_MS, type TransferOutcome } from "./lib/approval-wait";
+import { PUSH_LIFETIME_MS } from "./lib/approval-wait";
 import {
   armedLock,
   conservativeLock,
@@ -20,12 +20,16 @@ import {
   livePushWarning,
   parseArmLock,
   releasedLock,
+  TAP_COOLDOWN_MS,
   type ArmLock,
   type PrevMoneyItem,
 } from "./lib/arm-gate";
 import { readArmLockRaw, writeArmLock } from "./lib/arm-lock";
 import {
+  decideDuplicateConfirm,
   describeDestination,
+  destinationSignature,
+  duplicatePopupMessage,
   mapFlowOutcomeToPatch,
   parseTransferOtherRequest,
   pauseBeforeArmMessage,
@@ -35,6 +39,8 @@ import {
   slipFileBasename,
   tapNeededMessage,
   transferOtherPositions,
+  type DuplicateReason,
+  type PriorAttempt,
   type TransferOtherQueuePatch,
   type TransferOtherQueueRequest,
 } from "./lib/transfer-other-queue";
@@ -164,10 +170,98 @@ async function runListFavorites(page: Page): Promise<number> {
  */
 type QueueItemOutcome = TransferOtherQueuePatch & { armedAt?: number; pushMayBeLive?: boolean };
 
+/**
+ * Scan the hot queue AND `QUEUE_DIR/archive` for other `transfer-other`
+ * attempts already on record — against THIS bundle, or against the SAME
+ * destination + amount under any OTHER bundle. Feeds decideDuplicateConfirm's
+ * fail-closed judgement on KBIZ's exact-duplicate popup (GAP 2,
+ * kbiz-fix-spec.md §2.2): the bank's own duplicate check keys on a
+ * transaction that ACTUALLY WENT THROUGH, so a popup plus a prior attempt
+ * that could plausibly be the SAME money means the prior one paid —
+ * confirming here would be the double-pay.
+ *
+ * ok: false on a readdir failure of QUEUE_DIR itself — that IS the reason
+ * listApproved exists, so a scan we could not even start must never license a
+ * confirm. `QUEUE_DIR/archive` not existing yet is fine (a fresh estate has
+ * archived nothing) — that is a complete, empty scan of it, not a failure. A
+ * malformed sibling file is skipped, exactly like listApproved's own
+ * `catch (e)` — one bad file must not blind the scan to every other one.
+ *
+ * MONEY REVIEW FINDING 1 (2026-08-19): this used to keep only TERMINAL
+ * attempts (`done`/`failed`/`needs-review`), which drops the two statuses
+ * that most mean "may have paid" — `running` (the flow is mid-tap right now,
+ * e.g. a killed container never wrote a terminal status) and `approved`
+ * (queued but not yet claimed). A sibling stuck at `running` after a crash is
+ * exactly the "may have paid" case decideDuplicateConfirm exists to catch —
+ * dropping it here let the SAME bundle's retry auto-confirm KBIZ's popup with
+ * `reason:"no-prior-attempt"`, on a popup the bank raised BECAUSE the earlier
+ * attempt actually moved the money. There is no status filter any more: ANY
+ * sibling intent file for this bundle is a blocking prior attempt, full stop.
+ *
+ * Never logs a full account number: the hot queue's `custom` destinations
+ * carry one (the archive's copy is already redacted by reimbursement's
+ * `archiveQueueFile`, but the LIVE queue dir is not), so only ids are logged.
+ */
+async function readPriorAttempts(bundleId: string, selfId: string): Promise<{ ok: boolean; attempts: PriorAttempt[] }> {
+  const attempts: PriorAttempt[] = [];
+  const dirs = [QUEUE_DIR, join(QUEUE_DIR, "archive")];
+  for (const dir of dirs) {
+    let files: string[];
+    try {
+      files = await readdir(dir);
+    } catch (e) {
+      if (dir === QUEUE_DIR) {
+        console.warn(`⚠ could not scan ${dir} for prior attempts on bundle ${bundleId}: ${(e as Error).message}`);
+        return { ok: false, attempts: [] };
+      }
+      continue; // archive/ missing = nothing archived yet, not a scan failure
+    }
+    for (const f of files) {
+      if (!f.endsWith(".json") || f === HANDLES_FILE || f === FAVORITES_FILE) continue;
+      try {
+        const buf = await readFile(join(dir, f), "utf8");
+        const parsed = JSON.parse(buf) as Record<string, unknown>;
+        if (parsed.app !== "reimbursement" || parsed.type !== "transfer-other" || parsed.id === selfId) {
+          continue;
+        }
+        // MONEY REVIEW FINDING 1: no status filter (see the function
+        // comment) — every sibling, regardless of `status`, is kept. This
+        // scan is intentionally NOT pre-filtered to `bundleId` any more
+        // either (MONEY REVIEW FINDING 2, below): decideDuplicateConfirm now
+        // ALSO checks same-destination-+-same-amount across DIFFERENT
+        // bundles, because KBIZ's own duplicate predicate is payee+amount,
+        // not bundle — a resubmitted receipt after an `unconfirmed` original
+        // lands as a brand-new bundle and would otherwise defeat this guard
+        // entirely.
+        const status = typeof parsed.status === "string" ? parsed.status : undefined;
+        const result = parsed.result as { outcome?: string } | undefined;
+        const parsedBundleId = typeof parsed.bundleId === "string" ? parsed.bundleId : undefined;
+        // MONEY REVIEW FINDING 6: feeds SAME_MONEY_WINDOW_MS in
+        // decideDuplicateConfirm. An unparseable/absent createdAt yields
+        // `undefined`, which that function treats as "still inside the
+        // window" — fail-closed, never an accidental bypass.
+        const createdAtMs = typeof parsed.createdAt === "string" ? Date.parse(parsed.createdAt) : NaN;
+        attempts.push({
+          id: typeof parsed.id === "string" ? parsed.id : f,
+          bundleId: parsedBundleId,
+          status,
+          outcome: result?.outcome,
+          destinationKey: destinationSignature(parsed),
+          amount: typeof parsed.amount === "number" && Number.isFinite(parsed.amount) ? parsed.amount : undefined,
+          createdAt: Number.isFinite(createdAtMs) ? createdAtMs : undefined,
+        });
+      } catch (e) {
+        console.warn(`⚠ skipping malformed sibling ${f} while scanning for duplicates on bundle ${bundleId}: ${(e as Error).message}`);
+      }
+    }
+  }
+  return { ok: true, attempts };
+}
+
 async function runTransferOtherQueueItem(
   page: Page,
   req: TransferOtherQueueRequest,
-  onArmed?: () => void | Promise<void>,
+  onArmed?: (armedAt: number) => void | Promise<void>,
 ): Promise<QueueItemOutcome> {
   let config;
   try {
@@ -222,6 +316,32 @@ async function runTransferOtherQueueItem(
     });
   }
 
+  // Duplicate-popup policy, decided HERE because this is the only place with
+  // fs access to the queue archive — the flow itself is playwright-only and
+  // never touches the filesystem. Scoped to THIS bundle (kbiz-fix-spec.md
+  // §2.2 / decideDuplicateConfirm's own WHY): a scan we could not complete
+  // (readPriorAttempts' `ok: false`) never licenses a confirm either.
+  const dupScan = await readPriorAttempts(req.bundleId, req.id);
+  const duplicatePolicy = decideDuplicateConfirm({
+    bundleId: req.bundleId,
+    scanOk: dupScan.ok,
+    priorAttempts: dupScan.attempts,
+    // MONEY REVIEW FINDING 2: also refuse on a same-destination-+-amount
+    // match under a DIFFERENT bundle — see decideDuplicateConfirm's own doc
+    // comment. `req` is this item's own (already-validated) destination, so
+    // destinationSignature never has to guess at a redacted archive shape.
+    destinationKey: destinationSignature(req as unknown as Record<string, unknown>),
+    amount: req.amount,
+    // MONEY REVIEW FINDING 6: bounds that same-destination-+-amount check to
+    // SAME_MONEY_WINDOW_MS so a recurring same-payee/same-amount payment
+    // (monthly rent) is not HELD forever.
+    now: Date.now(),
+  });
+  const onDuplicatePopup = (info: { confirmed: boolean; reason: DuplicateReason; detail?: string }) =>
+    notifySlack(
+      duplicatePopupMessage({ id: req.id, bundleId: req.bundleId, confirmed: info.confirmed, reason: info.reason, detail: info.detail }),
+    );
+
   const flow = await runTransferOtherFlow(page, {
     payee,
     amount: req.amount,
@@ -232,13 +352,25 @@ async function runTransferOtherQueueItem(
     maxTransfer: config.maxTransfer,
     confirm: true,
     onArmed,
+    duplicatePolicy,
+    onDuplicatePopup,
   });
 
   // RELEASE, only when the push is PROVABLY dead: consumed (success /
-  // confirmed-failed) or the bank's window provably elapsed (timeout), or
-  // never armed at all. `pushMayBeLive` is true for exactly the two early
-  // exits — session death and KBIZ's generic error page — that leave a push
-  // tappable, and absent when Next was never clicked.
+  // confirmed-failed / push-expired) or the bank's window provably elapsed
+  // (timeout), or never armed at all. `pushMayBeLive` is true for exactly
+  // THREE cases — session death, KBIZ's generic error page, and (NEW) an
+  // unverified arm (verifyArmed returned "unknown": Next was clicked but the
+  // bank's own "notification sent" panel was never seen within
+  // ARM_VERIFY_TIMEOUT_MS, so we can prove neither that a push exists nor
+  // that it doesn't) — and absent when Next was never clicked.
+  //
+  //   push-expired   → pushMayBeLive FALSE → released, resolution
+  //                     "push-expired" (the bank's ~6-min window provably
+  //                     closed — EXPIRY_CONFIRM_MS in approval-wait.ts).
+  //   arm-unverified  → pushMayBeLive TRUE  → NOT released; the conservative
+  //                     lock already on disk stands until it expires, exactly
+  //                     like the two pre-existing "may still be live" exits.
   //
   // Note this is the flow's NORMAL return. A throw skips it deliberately (see
   // the catch in processBatch): the conservative lock stands until it expires.
@@ -270,11 +402,23 @@ async function runTransferOtherQueueItem(
       pushMayBeLive: flow.pushMayBeLive,
     };
   }
+  // Straight pass-through (Seam B, kbiz-fix-spec.md §1.6) — the flow's own
+  // `outcome` IS a TransferFailureOutcome (or absent, for a pre-arm failure),
+  // and mapFlowOutcomeToPatch's exhaustive switch is where that four-way
+  // split is actually decided. This used to launder it through a binary
+  // ternary that silently collapsed anything that wasn't literally
+  // "unconfirmed" — including a future outcome — into "confirmed-failed".
   return {
     ...mapFlowOutcomeToPatch({
       success: false,
-      outcome: flow.outcome === "unconfirmed" ? "unconfirmed" : "confirmed-failed",
+      outcome: flow.outcome,
       error: flow.error,
+      // SPEC REVIEW FINDING 8 (2026-08-19): `flow.reference` used to be
+      // dropped here — the failure arm of TransferOtherResult carries it
+      // precisely so a scraped reference (proof money moved, e.g. on the
+      // push-expired→unconfirmed downgrade) reaches reimbursement/the
+      // poller as structured data, not only inside the Thai prose.
+      reference: flow.reference,
       slipFile: flow.shot ? slipFileBasename(flow.shot) : undefined,
     }),
     armedAt: flow.armedAt,
@@ -295,13 +439,12 @@ async function processBatch(): Promise<number> {
 
   // Single Chromium session, sequential — KBIZ kills concurrent sessions.
   // Money transfers after the first in a batch get a deliberate gap before
-  // their push is armed: phone-side truth from the 2026-08-12/13 incidents is
-  // that a push armed seconds after the previous tap never surfaces AT ALL
-  // (no banner, per Winut nothing to find), so the approver must be warned
-  // and given time to background the K BIZ app first. 90s is comfortably
-  // inside KBIZ's idle-session tolerance (the approval wait itself already
-  // idles the page for up to 6.5 min).
-  const INTER_TRANSFER_GAP_MS = 90_000;
+  // their push is armed: TAP_COOLDOWN_MS (arm-gate.ts), unchanged at 90s but
+  // now ALSO the cross-poll cooldown (kbiz-fix-spec.md §1.2/§2.4) — the value
+  // is not re-tuned, only finally wired everywhere it needs to run. Its job
+  // is giving the operator time to background/close the K BIZ app AFTER the
+  // ping, not a bank-side timing requirement (a user-verified <1 min
+  // back-to-back pair succeeded with the app closed, refuting that).
   // The previous MONEY item of this batch, as the gate sees it. Reset per
   // batch on purpose: cross-batch protection is the DURABLE arm lock's job
   // (an operator's Retry lands in a fresh batch 30 s later, with `prev` back
@@ -336,7 +479,7 @@ async function processBatch(): Promise<number> {
             `:rotating_light: The KBIZ arm lock is unreadable AND has no mtime — proceeding WITHOUT the one-push-at-a-time guard for \`${req.id}\`. Check /app/data/kbiz-arm-lock.json.`,
           );
         }
-        const decision = decideArm({ prev, lock, now, gapMs: INTER_TRANSFER_GAP_MS });
+        const decision = decideArm({ prev, lock, now, gapMs: TAP_COOLDOWN_MS });
         if (decision.kind === "defer") {
           // Terminal status on purpose: a bare `break`/skip would leave the
           // item `approved` and the 30 s watch loop would re-pick it forever.
@@ -367,7 +510,7 @@ async function processBatch(): Promise<number> {
           // `prev` is deliberately NOT updated: a deferred item armed nothing.
           continue;
         }
-        gapMs = decision.gapMs; // 0, or INTER_TRANSFER_GAP_MS after a confirmed success
+        gapMs = decision.gapMs; // 0, or TAP_COOLDOWN_MS after a confirmed success
       }
 
       // The claim. listApproved() snapshots the queue up front and each
@@ -395,25 +538,35 @@ async function processBatch(): Promise<number> {
             pauseBeforeArmMessage({
               dest,
               amount: req.amount,
-              gapSeconds: gapMs / 1000,
+              gapSeconds: Math.round(gapMs / 1000),
               position: positions.get(req.id),
             }),
           );
           await new Promise((r) => setTimeout(r, gapMs));
         }
-        // Fires at the exact moment Next is clicked (push armed) — the only
-        // point a "tap your phone NOW" ping is truthful. Never throws.
+        // Never throws. SPEC REVIEW FINDING 6 (2026-08-19): this comment used
+        // to say the ping "fires at the exact moment Next is clicked (push
+        // armed)" — that stopped being true the moment IMPL-D moved onArmed
+        // to fire only AFTER verifyArmed confirms the bank's own panel (see
+        // the paragraph below); a stale claim on the money-path arm seam is
+        // exactly the kind of thing the next diagnosis would trust.
         //
         // The lock refinement is issued SYNCHRONOUSLY right after the Slack
         // fetch is kicked off, deliberately NOT behind `await notifySlack(…)`:
         // a hung webhook would otherwise delay this write past the flow's own
         // release and re-arm an already-dead lock.
-        const onArmed = () => {
+        // `armedAt` is the CLICK time (kbiz-fix-spec.md §1.6/§2.3), not the
+        // moment this callback runs — IMPL-D now fires it only AFTER
+        // verifyArmed confirms the bank's "notification sent" panel, which is
+        // deliberately LATER than the click by design. The lock's window has
+        // to reflect when the push actually started counting down at the
+        // bank, not when we happened to finish confirming it exists.
+        const onArmed = (armedAt: number) => {
           const posted = notifySlack(
             tapNeededMessage({ id: req.id, dest, amount: req.amount, position: positions.get(req.id) }),
           );
           try {
-            writeArmLock(armedLock(req.id, Date.now()));
+            writeArmLock(armedLock(req.id, armedAt));
           } catch {
             // Best-effort: the conservative lock written before the flow is
             // the safety net, and it is already on disk.
@@ -439,8 +592,14 @@ async function processBatch(): Promise<number> {
           // What the NEXT money item's gate sees. `armedAt` is the only signal
           // that separates "never armed" (a pre-flight failure — must not hold
           // the batch) from "the bank said no" (must).
+          // No cast: patch.result.outcome (the contract's four-way union,
+          // shared/index.ts:549) and PrevMoneyItem's `outcome` (approval-wait
+          // .ts's TransferOutcome) are now the SAME four literal strings, so
+          // this is a structural fit. If this stops typechecking, the two
+          // unions have genuinely diverged — that is a real bug to report,
+          // not a cast to restore (kbiz-fix-spec.md §1.6).
           prev = patch.armedAt !== undefined
-            ? { kind: "armed", id: req.id, outcome: patch.result.outcome as TransferOutcome }
+            ? { kind: "armed", id: req.id, outcome: patch.result.outcome }
             : { kind: "not-armed", id: req.id };
         } catch (e) {
           // Unknown crash: we cannot prove the phone push was never armed, so
@@ -517,7 +676,7 @@ async function processBatch(): Promise<number> {
         // names the request type in place of ฿amount → dest.
         if (gapMs > 0) {
           await notifySlack(
-            pauseBeforeArmMessage({ dest: req.type, gapSeconds: gapMs / 1000, position: positions.get(req.id) }),
+            pauseBeforeArmMessage({ dest: req.type, gapSeconds: Math.round(gapMs / 1000), position: positions.get(req.id) }),
           );
           await new Promise((r) => setTimeout(r, gapMs));
         }

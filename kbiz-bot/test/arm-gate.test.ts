@@ -20,6 +20,8 @@ import {
   livePushWarning,
   parseArmLock,
   releasedLock,
+  TAP_COOLDOWN_MS,
+  UNCONFIRMED_DEFER_MS,
   type ArmLock,
   type DeferCode,
   type LockView,
@@ -29,8 +31,11 @@ import { PUSH_LIFETIME_MS } from "../src/lib/approval-wait";
 
 const at = (rel: string) => fileURLToPath(new URL(rel, import.meta.url));
 
-/** Mirrors process-queue.ts's own constant — pinned by a structural test below. */
-const INTER_TRANSFER_GAP_MS = 90_000;
+// 2026-08-19: this used to be a local mirror of process-queue.ts's own
+// constant, pinned only by a structural grep. It is now imported directly —
+// TAP_COOLDOWN_MS is the real cooldown length, exported from arm-gate.ts and
+// spent by BOTH the in-batch row and the cross-poll released-lock rows.
+const INTER_TRANSFER_GAP_MS = TAP_COOLDOWN_MS;
 
 const T0 = Date.parse("2026-08-14T01:20:00.000Z");
 const NO_LOCK: LockView = { live: false, source: "none" };
@@ -97,6 +102,79 @@ describe("decideArm — the D2 truth table", () => {
       decideArm({ prev: { kind: "armed", id: "pi_a", outcome: "unconfirmed" }, lock: live, now: T0, gapMs: 0 }),
     ).toMatchObject({ code: "push-may-be-live" });
   });
+
+  // ── NEW rows, 2026-08-19: push-expired joins success as an "arm after the
+  // gap" outcome (§2.6 — a voided push most likely means the operator was
+  // sitting inside K BIZ, so they need the pause more than anyone), and the
+  // released lock itself now carries a previous poll's tap across the batch
+  // boundary that `prev` cannot survive (the 2026-08-18 cross-poll hole).
+
+  it("previous item armed and the bank VOIDED it (push-expired) → arms after the same gap as a success", () => {
+    expect(decide({ kind: "armed", id: "pi_a", outcome: "push-expired" })).toEqual({
+      kind: "arm",
+      gapMs: INTER_TRANSFER_GAP_MS,
+    });
+  });
+
+  it("cross-poll: a released SUCCESS 30 s ago → arms after the REMAINDER of the gap, not the full gap", () => {
+    const lock: LockView = { live: false, source: "released", releasedAt: T0 - 30_000, resolution: "success", intentId: "pi_a" };
+    expect(decideArm({ prev: { kind: "none" }, lock, now: T0, gapMs: INTER_TRANSFER_GAP_MS })).toEqual({
+      kind: "arm",
+      gapMs: 60_000,
+    });
+  });
+
+  it("cross-poll: a released SUCCESS 120 s ago (past the gap) → arms with no gap", () => {
+    const lock: LockView = { live: false, source: "released", releasedAt: T0 - 120_000, resolution: "success", intentId: "pi_a" };
+    expect(decideArm({ prev: { kind: "none" }, lock, now: T0, gapMs: INTER_TRANSFER_GAP_MS })).toEqual({
+      kind: "arm",
+      gapMs: 0,
+    });
+  });
+
+  it("cross-poll: a released UNCONFIRMED 60 s ago → defers, naming the previous id and WHEN it is safe again", () => {
+    const releasedAt = T0 - 60_000;
+    const lock: LockView = { live: false, source: "released", releasedAt, resolution: "unconfirmed", intentId: "pi_a" };
+    expect(decideArm({ prev: { kind: "none" }, lock, now: T0, gapMs: INTER_TRANSFER_GAP_MS })).toEqual({
+      kind: "defer",
+      code: "prev-unconfirmed",
+      prevId: "pi_a",
+      until: releasedAt + UNCONFIRMED_DEFER_MS,
+    });
+  });
+
+  it("cross-poll: a released UNCONFIRMED 400 s ago (past its own ~6.5 min window) → arms with no gap", () => {
+    // 400 s > UNCONFIRMED_DEFER_MS (390 s) AND > the 90 s tap cooldown, so this
+    // also exercises the "age >= bound" fallback, not just the defer window.
+    const lock: LockView = { live: false, source: "released", releasedAt: T0 - 400_000, resolution: "unconfirmed", intentId: "pi_a" };
+    expect(decideArm({ prev: { kind: "none" }, lock, now: T0, gapMs: INTER_TRANSFER_GAP_MS })).toEqual({
+      kind: "arm",
+      gapMs: 0,
+    });
+  });
+
+  it("cross-poll: a released lock that never armed anything (pre-arm abort) → arms immediately, no tax", () => {
+    // "never-armed" means there was never a push to background from — see the
+    // in-batch not-armed row above for the same reasoning.
+    const lock: LockView = { live: false, source: "released", releasedAt: T0 - 1_000, resolution: "never-armed", intentId: "pi_a" };
+    expect(decideArm({ prev: { kind: "none" }, lock, now: T0, gapMs: INTER_TRANSFER_GAP_MS })).toEqual({
+      kind: "arm",
+      gapMs: 0,
+    });
+  });
+
+  it("cross-poll BACK-COMPAT: a released lock with no releasedAt (written by the currently deployed build) → arms with no gap", () => {
+    // The two images in this estate do not roll out atomically — a lock the
+    // OLD build wrote carries neither `releasedAt` nor `resolution`. Treating
+    // that as "nothing to go on" and falling back to today's gap-0 behaviour
+    // is mandatory, not a shortcut: the alternative is misreading an unrelated
+    // field as a stale age and holding the estate on bad data.
+    const lock: LockView = { live: false, source: "released" };
+    expect(decideArm({ prev: { kind: "none" }, lock, now: T0, gapMs: INTER_TRANSFER_GAP_MS })).toEqual({
+      kind: "arm",
+      gapMs: 0,
+    });
+  });
 });
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -119,9 +197,63 @@ describe("parseArmLock", () => {
     expect(parseArmLock(text, T0, expiry + 1)).toEqual({ live: false, source: "expired" });
   });
 
-  it("a released lock is not live even inside the window", () => {
+  it("a released lock is not live even inside the window — and now SURFACES releasedAt/resolution/intentId", () => {
+    // 2026-08-19: these three used to be thrown away here (the exact bug the
+    // cross-poll gate closes). Still `live: false, source: "released"` —
+    // meaning preserved — but the caller can now compute an age from it.
     const text = JSON.stringify(releasedLock(armedLock("pi_a", T0), "success", T0 + 8_000));
-    expect(parseArmLock(text, T0, T0 + 9_000)).toEqual({ live: false, source: "released" });
+    expect(parseArmLock(text, T0, T0 + 9_000)).toEqual({
+      live: false,
+      source: "released",
+      releasedAt: T0 + 8_000,
+      resolution: "success",
+      intentId: "pi_a",
+    });
+  });
+
+  it("a released lock with a GARBAGE updatedAt falls back to the file's mtime — NOT to undefined (money review finding 5, 2026-08-19)", () => {
+    // A release write interrupted mid-flight can leave `updatedAt` truncated
+    // while `state`/`resolution` survive intact — the exact 2026-08-18 arming
+    // pattern this fallback exists to keep closed. `mtimeMs` is a perfectly
+    // good stand-in for "when was this release written": `writeArmLock`
+    // stamps the JSON body and the file's mtime in the same rename(2), so the
+    // gate must not throw the age away just because ONE field failed to
+    // parse — that used to turn OFF the entire cross-poll cooldown, including
+    // the `unconfirmed` defer, and arm at gap 0.
+    const releaseTime = T0 + 8_000;
+    const garbage = JSON.stringify({ ...releasedLock(armedLock("pi_a", T0), "unconfirmed", releaseTime), updatedAt: "not a date" });
+    const view = parseArmLock(garbage, releaseTime, releaseTime + 9_000);
+    expect(view).toMatchObject({ live: false, source: "released", releasedAt: releaseTime, resolution: "unconfirmed" });
+    // And decideArm actually uses it: an unconfirmed release 9s ago must
+    // still defer, exactly as if updatedAt had parsed cleanly.
+    expect(
+      decideArm({ prev: { kind: "none" }, lock: view, now: releaseTime + 9_000, gapMs: INTER_TRANSFER_GAP_MS }),
+    ).toMatchObject({ kind: "defer", code: "prev-unconfirmed" });
+  });
+
+  it("a released lock with a garbage updatedAt AND no mtime at all → releasedAt IS undefined (true back-compat floor), gate falls back to gap 0", () => {
+    // The one case that should still degrade all the way: nothing at all to
+    // derive an age from (a read that lost the stat too, per arm-lock.ts's
+    // readArmLockRaw — text and mtime are read independently and either can
+    // fail alone).
+    const garbage = JSON.stringify({ ...releasedLock(armedLock("pi_a", T0), "unconfirmed", T0 + 8_000), updatedAt: "not a date" });
+    const view = parseArmLock(garbage, null, T0 + 9_000);
+    expect(view).toMatchObject({ live: false, source: "released", releasedAt: undefined });
+    expect(decideArm({ prev: { kind: "none" }, lock: view, now: T0 + 9_000, gapMs: INTER_TRANSFER_GAP_MS })).toEqual({
+      kind: "arm",
+      gapMs: 0,
+    });
+  });
+
+  it("MONEY REVIEW FINDING 9: a releasedAt in the FUTURE (clock skew) clamps age to 0, not a negative — never overshoots gapMs", () => {
+    const lock: LockView = { live: false, source: "released", releasedAt: T0 + 5_000, resolution: "success", intentId: "pi_a" };
+    // now < releasedAt ⇒ a naive `now - releasedAt` is negative, which would
+    // make `gapMs - age` LARGER than gapMs (fail-open in the "hold too long,
+    // then eventually overflow setTimeout and fire instantly" direction).
+    expect(decideArm({ prev: { kind: "none" }, lock, now: T0, gapMs: INTER_TRANSFER_GAP_MS })).toEqual({
+      kind: "arm",
+      gapMs: INTER_TRANSFER_GAP_MS,
+    });
   });
 
   it("a lock for a DIFFERENT intent still blocks — the lock is estate-global, not per-item", () => {
@@ -565,6 +697,40 @@ describe("regression: the 2026-08-12 / 2026-08-13 incidents", () => {
     world.advance(PUSH_LIFETIME_MS);
     expect(simulateBatch([money("pi_3", { kind: "armed", outcome: "success", pushMayBeLive: false, durationMs: 1 })], world).runs).toBe(1);
   });
+
+  it("THE CROSS-POLL HOLE — replays run B verbatim: A releases at 15:40:33.620Z, B's gate reads it at 15:41:04.423Z, prev:none", () => {
+    // This is the headline red→green of the whole fix. 2026-08-18: A's tap
+    // released the lock; B was a fresh, single-item poll, so `prev` had
+    // already reset to {kind:"none"} (process-queue.ts:309) — the ONLY place
+    // a tap-keyed cooldown could still come from was the released lock A had
+    // just written, 30.8 s earlier. Before this change, parseArmLock's
+    // `state === "released"` branch returned bare `{live:false,
+    // source:"released"}` and threw the timestamp away, so decideArm's only
+    // rule for prev:none was "arm gap 0" — B armed immediately, 30.8 s after
+    // the operator's last tap, phone still inside K BIZ, no banner, ~6.5 min
+    // later the bank voided it. That is this whole incident in one number.
+    const releasedAtIso = "2026-08-18T15:40:33.620Z";
+    const gateNowIso = "2026-08-18T15:41:04.423Z";
+    const releasedAt = Date.parse(releasedAtIso);
+    const now = Date.parse(gateNowIso);
+    expect(now - releasedAt).toBe(30_803);
+
+    // TODAY (main): the exact object literal the old parseArmLock produced.
+    const legacyLockView: LockView = { live: false, source: "released" };
+    expect(decideArm({ prev: { kind: "none" }, lock: legacyLockView, now, gapMs: INTER_TRANSFER_GAP_MS })).toEqual({
+      kind: "arm",
+      gapMs: 0,
+    });
+
+    // AFTER this change: the same on-disk bytes A actually wrote, run through
+    // the real parseArmLock, then the real decideArm.
+    const aLock = releasedLock(armedLock("pi_a", releasedAt - 5_000), "success", releasedAt);
+    const fixedLockView = parseArmLock(JSON.stringify(aLock), releasedAt, now);
+    expect(decideArm({ prev: { kind: "none" }, lock: fixedLockView, now, gapMs: INTER_TRANSFER_GAP_MS })).toEqual({
+      kind: "arm",
+      gapMs: 59_197, // 90_000 - 30_803 — the remainder of the 90 s cooldown B never got
+    });
+  });
 });
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -575,9 +741,17 @@ describe("regression: the 2026-08-12 / 2026-08-13 incidents", () => {
 
 describe("process-queue.ts wiring", () => {
   const src = readFileSync(at("../src/process-queue.ts"), "utf8");
+  const armGateSrc = readFileSync(at("../src/lib/arm-gate.ts"), "utf8");
 
-  it("still uses the same 90 s inter-transfer gap this file simulates", () => {
-    expect(src).toContain("const INTER_TRANSFER_GAP_MS = 90_000;");
+  it("still spends the same 90 s tap cooldown this file simulates", () => {
+    // 2026-08-19: the constant moved OUT of process-queue.ts and into
+    // arm-gate.ts as TAP_COOLDOWN_MS (§1.2) — it is now the one true cooldown
+    // length for both the in-batch row and the cross-poll released-lock rows
+    // (decideArm), so process-queue.ts must import it rather than declare its
+    // own copy that could drift from the value arm-gate.ts actually uses.
+    expect(armGateSrc).toContain("export const TAP_COOLDOWN_MS = 90_000;");
+    expect(src).toContain("TAP_COOLDOWN_MS");
+    expect(src).not.toContain("INTER_TRANSFER_GAP_MS");
   });
 
   it("evaluates the gate BEFORE claiming the item as running", () => {
@@ -598,7 +772,13 @@ describe("process-queue.ts wiring", () => {
     // BEFORE their flow runs, and both fail closed on it.
     expect(src.match(/conservativeLock\(req\.id, Date\.now\(\)\)/g)).toHaveLength(2);
     expect(src.match(/refusing to arm\./g)).toHaveLength(2);
-    expect(src).toContain("writeArmLock(armedLock(req.id, Date.now()))");
+    // Re-pointed 2026-08-19 (kbiz-fix-spec.md §1.6/§2.3): the arm refinement
+    // now stamps the CLICK time, not the moment the onArmed callback runs —
+    // onArmed only fires after verifyArmed confirms the bank's "notification
+    // sent" panel, which is deliberately later than the click, so the lock's
+    // window must reflect when the push actually started counting down at
+    // the bank, not when we finished confirming it exists.
+    expect(src).toContain("writeArmLock(armedLock(req.id, armedAt))");
   });
 
   it("gates and locks EVERY push-arming type, add-payroll included", () => {
@@ -627,6 +807,32 @@ describe("process-queue.ts wiring", () => {
     const crashBlock = src.slice(start, src.indexOf("continue;", start));
     expect(crashBlock).not.toContain("writeArmLock");
     expect(crashBlock).toContain("NOT RELEASED");
+  });
+
+  it("MONEY FINDING 1 — readPriorAttempts keeps EVERY sibling regardless of status, no terminal-only filter", () => {
+    // 2026-08-19: this used to keep only terminal attempts (done/failed/
+    // needs-review), which drops exactly the two statuses that most mean
+    // "may have paid" — `running` (the flow is mid-tap right now, e.g. a
+    // killed container never wrote a terminal status) and `approved`
+    // (queued but not yet claimed). That let the SAME bundle's retry
+    // auto-confirm KBIZ's duplicate popup with reason "no-prior-attempt" on
+    // a popup the bank raised BECAUSE the earlier attempt actually moved
+    // the money — a double-pay. Nothing else in this suite can reach
+    // readPriorAttempts (process-queue.ts pulls playwright for real), so
+    // the invariant is pinned here, structurally, exactly like the other
+    // process-queue.ts wiring facts in this describe block. Re-adding
+    // `if (status !== "done" && status !== "failed" && status !==
+    // "needs-review") continue;` must fail this test.
+    const start = src.indexOf("async function readPriorAttempts");
+    expect(start).toBeGreaterThan(-1);
+    const end = src.indexOf("\nasync function runTransferOtherQueueItem", start);
+    expect(end).toBeGreaterThan(start);
+    const fn = src.slice(start, end);
+    expect(fn).not.toMatch(/status\s*!==\s*"done"/);
+    expect(fn).not.toMatch(/status\s*!==\s*"failed"/);
+    expect(fn).not.toMatch(/status\s*!==\s*"needs-review"/);
+    expect(fn).not.toMatch(/if\s*\(\s*status\b/);
+    expect(fn).toContain("no status filter");
   });
 
   it("F4 — the payroll branch spends gapMs too, BEFORE the lock is acquired", () => {

@@ -60,6 +60,12 @@ await withSession(async (_ctx, page) => {
   const pushMayBeLive = !result.success && result.pushMayBeLive === true;
   if (!pushMayBeLive) {
     try {
+      // Hardcoded pair stays binary: transfer-payroll-flow.ts has no
+      // push-expired detection (that lives in approval-wait.ts, which only
+      // transfer-other's wait loop calls) and no duplicate-popup handling —
+      // payroll cannot produce either new outcome, so "success" / one
+      // catch-all failure is still the whole space here (kbiz-fix-spec.md
+      // IMPL-C worksheet item 3; source-grepped by arm-gate.test.ts).
       writeArmLock(releasedLock(acquired, result.success ? "success" : "confirmed-failed", Date.now()));
     } catch (e) {
       console.warn(`⚠ could not release the arm lock: ${(e as Error).message}`);
