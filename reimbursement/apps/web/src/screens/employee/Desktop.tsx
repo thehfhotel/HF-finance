@@ -448,7 +448,7 @@ export function DesktopEmployee({ theme, state, setState, currentUser, onBackToI
     );
 
   return (
-    <DesktopShell theme={theme} sidebar={sidebar}>
+    <DesktopShell theme={theme} sidebar={sidebar} renderPath="desktop-employee">
       <div style={{ height: '100%' }}>{mainContent}</div>
       {(submitError || createError) && (
         <div

@@ -306,7 +306,7 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
   );
 
   return (
-    <DesktopShell theme={theme} sidebar={sidebar}>
+    <DesktopShell theme={theme} sidebar={sidebar} renderPath="desktop-approver">
       {filter === 'overview' ? (
         <div style={{ height: '100%', overflow: 'auto', background: theme.paper }}>
           <ApproverOverview

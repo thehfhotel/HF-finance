@@ -89,6 +89,110 @@ jobs:
           TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/reimbursement_test
         run: bun run test
 
+  # ───────────────────────────────────────────────────────────────────────────
+  # apps/web had ZERO automated tests until this job. A React or Vite major can
+  # typecheck clean, build clean, and still die on first paint — and because
+  # mobile and desktop are two INDEPENDENT render paths (reimbursement/CLAUDE.md:
+  # mobile → renderScreen, desktop → DesktopApprover/DesktopEmployee; three bugs
+  # shipped through that gap with a green typecheck), a gate that loads one
+  # viewport is worth about half of nothing. This job loads the REAL production
+  # bundle in a real headless Chromium at 390×844 and 1440×900 and fails on any
+  # uncaught exception or React-class console error. See
+  # reimbursement/apps/web/test/web-boot-smoke.ts for the scenario table.
+  #
+  # ── THE FLAKE / BLOCKING TRADEOFF (deliberate, please read before moving it) ─
+  #
+  # A browser-driving job is the most flake-prone thing in this repo, and the
+  # rule here is "fail toward deploys still happen". So:
+  #
+  #   * It lives in THIS workflow (PR + push to main) and NOT in
+  #     deploy-reimbursement.yml's `needs:` chain. A flake blocks a MERGE — a
+  #     surface with a human on it who can read the uploaded screenshot and hit
+  #     re-run — and can never wedge a rollout or a rollback. `contract` +
+  #     `build` remain the only deploy gates.
+  #   * It is fast enough to be required: the whole smoke (build + 7 scenarios)
+  #     runs in ~2s locally; the job cost is almost entirely bun install and the
+  #     Chromium fetch, which the cache below removes on the common path.
+  #   * It is HERMETIC. The test aborts every request that is not 127.0.0.1 —
+  #     Google Fonts in index.html and erp.thehfhotel.org in HfBar included — and
+  #     serves a mocked API off the page router. There is no DNS, no CDN and no
+  #     database in the hot path, so the classic sources of browser-test flake
+  #     are absent by construction rather than by retry.
+  #   * There are NO retries and no `continue-on-error`. A retry would let a real
+  #     intermittent render bug pass as noise. If this job ever does flake, the
+  #     flake is the bug — fix it here, don't paper it over.
+  #   * Determinism knobs are pinned in the test, not left to the runner: fixed
+  #     viewports, locale th-TH, Asia/Bangkok, light scheme, reduced motion, and
+  #     playwright pinned EXACT to 1.62.1 — the same version kbiz-bot drives the
+  #     bank with, so the estate has one browser stack.
+  #
+  # There is deliberately no `sleep` anywhere: the test waits on the
+  # `data-render-path` marker, which only exists once App.tsx's bootstrap effect
+  # has settled (the spinner and the error screen both lack it).
+  # ───────────────────────────────────────────────────────────────────────────
+  web-boot-smoke:
+    name: Web boot smoke (both render paths)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76  # v2.0.2
+        with:
+          bun-version: '1.3'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The cache key follows the pinned playwright version, not the lockfile
+      # hash, so an unrelated dependency bump does not throw away a 100 MB
+      # browser download. On a hit, this job never talks to Microsoft's CDN.
+      - name: Read the pinned playwright version
+        id: playwright
+        run: echo "version=$(jq -r '.devDependencies.playwright' apps/web/package.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the Chromium build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      # --with-deps installs the apt libraries Chromium needs (never cached, and
+      # cheap). It is Ubuntu-only, which is why apps/web's `smoke:browser` script
+      # — the local-dev equivalent — omits it.
+      #
+      # working-directory MUST be apps/web: playwright is a devDependency of
+      # apps/web only (there is no reimbursement/node_modules/.bin at all), so
+      # `bunx` run from the job's default `reimbursement` cwd cannot resolve the
+      # pinned 1.62.1 and silently falls back to whatever `playwright` is first
+      # on PATH — verified locally: `bunx playwright --version` from
+      # `reimbursement/` prints a stray 1.58.0, from `reimbursement/apps/web/`
+      # it correctly prints the pinned 1.62.1. Left unpinned, this would install
+      # whatever Chromium revision that stray resolves to while the test still
+      # imports 1.62.1's driver, and the cache key below (which DOES read the
+      # pinned version) would then hold a browser for a version nothing installs.
+      - name: Install Chromium
+        working-directory: reimbursement/apps/web
+        run: bunx playwright install --with-deps chromium
+
+      # Builds apps/web (tsc -b && vite build) and smokes the built bundle, so
+      # what is asserted is the artifact the web image would ship — never a dev
+      # server.
+      - name: Boot smoke (mobile 390×844 + desktop 1440×900)
+        run: bun --filter web smoke
+
+      # Only written for FAILED scenarios: a screenshot plus the serialized DOM,
+      # which is usually enough to name the broken component without a local
+      # repro.
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: web-boot-smoke-failures
+          path: reimbursement/apps/web/smoke-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
   build-images:
     name: Build (api + web) — smoke
     runs-on: ubuntu-latest

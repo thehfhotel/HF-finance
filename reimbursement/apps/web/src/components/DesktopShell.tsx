@@ -6,6 +6,14 @@ interface DesktopShellProps {
   theme: Theme;
   sidebar: ReactNode;
   children: ReactNode;
+  /**
+   * Emitted as `data-render-path` on the shell root. The headless boot smoke
+   * (`test/web-boot-smoke.ts`) uses it to prove WHICH desktop screen mounted —
+   * `DesktopApprover` and `DesktopEmployee` are separate render paths that both
+   * wear this same chrome. See the `data-render-path` note in `App.tsx`.
+   * Omitted on the screens the smoke does not gate (admin employees/settings).
+   */
+  renderPath?: 'desktop-approver' | 'desktop-employee';
 }
 
 /**
@@ -21,9 +29,10 @@ interface DesktopShellProps {
  * so this fixed chrome drops 46px when the HF One band below loads, and
  * sits flush at 0 if it doesn't.
  */
-export function DesktopShell({ theme, sidebar, children }: DesktopShellProps) {
+export function DesktopShell({ theme, sidebar, children, renderPath }: DesktopShellProps) {
   return (
     <div
+      data-render-path={renderPath}
       style={{
         position: 'fixed',
         top: 'var(--hf-band-offset, 0px)',

@@ -13,6 +13,7 @@
     "preview": "bun --filter web preview",
     "typecheck": "bun --filter '*' typecheck",
     "test": "bun --filter api test",
+    "smoke:web": "bun --filter web smoke",
     "db:up": "docker-compose -f docker-compose.dev.yml up -d",
     "db:down": "docker-compose -f docker-compose.dev.yml down",
     "db:migrate": "bun --filter api db:migrate",

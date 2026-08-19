@@ -16,6 +16,8 @@ build/
 coverage/
 playwright-report/
 test-results/
+# apps/web boot-smoke output (screenshot + DOM dump per FAILED scenario)
+smoke-artifacts/
 
 # misc
 .DS_Store

@@ -92,6 +92,26 @@ function cfLoginErrorMessage(error: unknown): string {
   return 'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
 }
 
+/**
+ * ── `data-render-path` ──────────────────────────────────────────────────────
+ *
+ * Mobile and desktop are two INDEPENDENT render paths (see `reimbursement/
+ * CLAUDE.md` — three bugs shipped through the gap between them with a green
+ * typecheck). The headless boot smoke in `test/web-boot-smoke.ts` proves each
+ * path actually mounts, and this attribute is how it tells them apart:
+ *
+ *   `mobile-login` / `desktop-login`  the two pre-auth branches
+ *   `mobile`                          the `renderScreen` shell
+ *   `desktop-approver`                `DesktopApprover` (via `DesktopShell`)
+ *   `desktop-employee`                `DesktopEmployee` (via `DesktopShell`)
+ *
+ * The alternative was asserting on Thai copy or on incidental inline styles,
+ * which would turn a wording change into a red deploy gate. These markers are
+ * inert (a `data-*` attribute React passes straight through) and cost nothing
+ * at runtime — but they are a CONTRACT: renaming or dropping one turns the
+ * smoke gate red, and adding a new top-level render branch without one means
+ * the gate cannot see it.
+ */
 export function App() {
   const [tweaks, setTweaks] = useState<Tweaks>(TWEAK_DEFAULTS);
   const theme = getTheme(tweaks.dark, tweaks.accent);
@@ -375,6 +395,8 @@ export function App() {
     if (viewportPlatform === 'desktop') {
       return (
         <div
+          // `data-render-path` — see the note above `App()`.
+          data-render-path="desktop-login"
           style={{
             position: 'fixed',
             inset: 0,
@@ -406,6 +428,7 @@ export function App() {
 
     return (
       <div
+        data-render-path="mobile-login"
         style={{
           position: 'fixed',
           top: 'var(--hf-band-offset, 0px)',
@@ -774,6 +797,7 @@ export function App() {
       ) : (
         // Production: render full-bleed at the device viewport.
         <div
+          data-render-path="mobile"
           style={{
             position: 'fixed',
             top: 'var(--hf-band-offset, 0px)',
