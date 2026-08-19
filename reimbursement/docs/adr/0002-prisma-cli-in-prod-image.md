@@ -2,8 +2,11 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-19
-- **Deciders:** Claude agent, raised by the dependabot batch review (§4.6) —
-  pending owner (Winut) confirmation; no in-session sign-off was obtained
+- **Deciders:** Winut (owner) — signed off 2026-08-19, on the analysis raised by
+  the dependabot batch review (§4.6). The rejected alternative (moving
+  `migrate deploy` out of the entrypoint into a one-shot deploy-time container)
+  was put to the owner explicitly and declined for now: it changes when and how
+  migrations run on a money-path service, which wants its own change and gate.
 - **Scope:** `Dockerfile.api`, `apps/api/docker-entrypoint.sh`,
   `apps/api/package.json`. No change to either deploy workflow.
 
