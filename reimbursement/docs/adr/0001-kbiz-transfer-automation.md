@@ -52,14 +52,22 @@ bundle. (Chosen over a dedicated `Payment` table: lighter, reuses status
 machinery, and the atomic guard is race-proof. Audit history rides the existing
 `AuditEvent` table.)
 
-### 3. Three-way outcome; ambiguity is never auto-resolved
-The bot classifies every attempt:
+### 3. Four-way outcome; ambiguity is never auto-resolved
+The bot classifies every attempt (grown from three to four in Amendment 7,
+2026-08-19 — see below):
 - **success** — e-slip / reference seen → `PAYING`→`PAID`, slip filed.
 - **confirmed-failed** — KBIZ errored, transfer never armed → `PAYING`→`APPROVED`,
   safe to retry, error shown.
+- **push-expired** — KBIZ's own expiry modal: the ~6 min phone-approval window
+  closed with no tap → `PAYING`→`APPROVED`, safe to retry, error shown. Added
+  2026-08-19: before this it fell through into `unconfirmed`, even though the
+  bank had already proven the transaction moved ฿0 — see Amendment 7.
 - **unconfirmed** — timeout / crash / can't tell (the tap may have landed as the
   bot gave up) → bundle **stays `PAYING`, flagged "needs verification"**, Pay
   button disabled, human alerted. **Never auto-retried, never auto-paid.**
+  Releasing it back to `APPROVED` now requires `force` (Amendment 7 item 5) —
+  the approver must assert they checked K BIZ's ประวัติทำรายการ first; there
+  is no non-forced release path for this row any more.
 
 ### 4. Payee — a KBIZ saved account, selected by nickname
 KBIZ holds vetted **saved accounts with nicknames**. The bot **selects the saved
@@ -174,7 +182,7 @@ Written back by the bot (via existing `patchRequest`):
 ```jsonc
 {
   "status": "done",                        // done | failed | needs-review
-  "outcome": "success",                    // success | confirmed-failed | unconfirmed
+  "outcome": "success",                    // success | confirmed-failed | unconfirmed | push-expired
   "reference": "0123456789",
   "slipFile": "slips/<paymentIntentId>.png"
 }
@@ -360,10 +368,172 @@ conservative window (~10.5 min) elapses. The invariant covers `transfer-other`
 AND `transfer-payroll` alike: `process-queue.ts` **defers** (never skips or
 forces through) any batch item that would arm a second push — its queue-file
 `result.error` is prefixed `HELD: ` and a masked-destination line goes to
-Slack, and the item is retried on a later poll once the lock clears — and a
-human running `transfer-other -- --confirm` under a live lock is refused
-outright with the lock's expiry printed. A batch also stops arming
-back-to-back on an unconfirmed or bank-confirmed-failed predecessor even once
-the lock itself is clear: only a confirmed *success* keeps the gap-then-arm
-path open, because the inter-transfer gap only means anything once the
-previous push actually resolved.
+Slack. **Correction (2026-08-19):** a deferred item is filed **terminal
+`failed`**, not "retried on a later poll once the lock clears" as this
+paragraph originally claimed — `process-queue.ts` never re-queues it;
+reimbursement returns the bundle to `APPROVED` and a **human** has to click
+"จ่ายผ่าน KBIZ" again (`kbiz-bot/README.md` already had this right; this ADR
+did not). A human running `transfer-other -- --confirm` under a live lock is
+refused outright with the lock's expiry printed.
+
+A batch also stops arming back-to-back on an unconfirmed or
+bank-confirmed-failed predecessor even once the lock itself is clear: only a
+confirmed *success* (and, since Amendment 7, a bank-confirmed *push-expired*)
+keeps the gap-then-arm path open, because the inter-transfer gap only means
+anything once the previous push actually resolved. **Correction (2026-08-19):
+this held only WITHIN one batch, not across polls, and this ADR overstated it
+as an estate property.** The mechanism was `prev` — a per-batch, in-memory
+variable (`process-queue.ts`) that resets to "none" on every poll — and the
+durable lock could not carry the same fact across a poll boundary because
+`parseArmLock`'s `state === "released"` branch discarded the released lock's
+`updatedAt`/`resolution` outright. For the one-item-per-poll shape the estate
+actually runs (an approver pays requests one at a time, each landing in its
+own poll), that made the back-to-back guard dead code across the one boundary
+that mattered. What makes the claim true now, estate-wide: `parseArmLock`
+surfaces `releasedAt`/`resolution`/`intentId` on a released lock instead of
+discarding them, and `decideArm` reads them for `prev = none`/`not-armed` —
+see Amendment 7.
+
+## Amendment 7 (2026-08-19) — the back-to-back root cause, and the duplicate popup
+
+Three more ad-hoc-transfer incidents (2026-08-12, 2026-08-13, 2026-08-18 — nine
+transfers total, three independent operator episodes) kept happening even with
+Amendment 6's one-push-at-a-time lock in place, because the lock only ever
+*deferred a second arm*; it never explained why the *first* retry after a
+held item kept failing too, nor closed the cross-poll gap described just
+above. Full diagnosis: `kbiz-back-to-back-diagnosis.md` (read-only estate
+audit, 2026-08-19). Fix spec: `kbiz-fix-spec.md` (same date).
+
+**Root cause: whether the K BIZ app was FOREGROUND on the operator's phone at
+the moment of arming — not elapsed time.** The discriminating variable across
+all nine transfers, plus the operator's own manual back-to-back reproduction,
+is app-foreground state, not the gap since the previous tap:
+- **All three failures** armed 22–54 s after the operator's previous tap,
+  with the operator sitting **inside K BIZ**, waiting for the next push. No
+  banner ever surfaced — not on the lock screen, not inside the app itself.
+  nginx's own access log for the 08-18 run shows the operator's phone Safari
+  went **silent for a 105 s hole that contains the exact arming instant**
+  (`15:41:12`→`15:42:59`, arm at `15:41:23.9`) — consistent with some other
+  app (most plausibly K BIZ, opened to wait) being foreground instead.
+- **All six successes**, plus a **user-verified manual pair under 1 minute
+  apart** (2026-08-19), armed with K BIZ backgrounded or closed. The sub-1-min
+  pair **refutes a bank-side time cooldown outright**: if elapsed time were
+  the mechanism, that pair should have failed exactly like the three
+  incidents did.
+- **The balance ledger and the bank's own screens** prove all three
+  "unconfirmed" runs moved exactly ฿0 — nothing was silently double-spent
+  while this was undiagnosed, but the operator was told the ambiguous English
+  "may or may not have gone through" for a transaction the bank had already
+  provably voided.
+- **Bell-badge evidence**: the notification badge on the operator's phone
+  drained during 3 of 3 failed arming windows and 0 of 5 eligible success
+  windows — consistent with the push arriving but never surfacing as a
+  banner while K BIZ itself was the foreground app.
+
+H1 (a warm/exhausted KBIZ **session** as the cause) is refuted four
+independent ways in the diagnosis (a warm second push still gets the bank's
+full ~6 min window; the window keeps ticking normally on a warm session; a
+warm session produced a clean success; a same-session, 0.387 s-apart batch
+pair still got the full window). **Do not build forced re-login/session-reset
+per transfer** — it fixes nothing here and multiplies the estate's exposure
+to the announced June-2026 QR-login enforcement, turning a "second transfer
+fails" bug into "every transfer fails".
+
+The fix closes the loop with four changes, wired end-to-end 2026-08-19:
+1. **The bank's own expiry modal is now recognised** as a new outcome,
+   `push-expired` (Decision 3 above), instead of silently falling through to
+   `unconfirmed` — see `kbiz-bot/src/lib/approval-wait.ts`.
+2. **Arming is verified, not claimed**: the flow polls for the bank's own
+   "notification sent" panel before firing the TAP-NEEDED ping or refining the
+   arm lock's window — see `kbiz-bot/src/lib/post-next.ts`.
+3. **The tap cooldown (`TAP_COOLDOWN_MS`, unchanged at 90 s) finally runs, and
+   runs cross-poll** — the cross-poll hole this amendment's corrected
+   paragraph above describes is closed by `arm-gate.ts`'s `decideArm` reading
+   the released lock's own `resolution`/`releasedAt`, not just `prev`. Every
+   TAP-NEEDED ping (not only ones inside a >1-item batch — see
+   `kbiz-bot/src/lib/transfer-other-queue.ts`'s `tapNeededMessage`) now warns
+   the operator explicitly: keep K BIZ **closed** until the ping, because a
+   push armed while the app is open in the foreground can raise no banner at
+   all.
+4. **The value of `TAP_COOLDOWN_MS` is unchanged** — the sub-1-min successful
+   pair refutes a bank-side cooldown, so the number's only remaining job is
+   giving the operator time to leave the K BIZ app after a tap, and 90 s
+   (already reviewed, already shipped, never previously executed) sits above
+   the entire observed failure band (max 54 s). The 55–620 s band remains
+   unobserved; `hf-tasks/tasks/wave-5.md:376`'s owner-gated ฿1 supervised pair
+   is the only route to revising it.
+5. **Releasing an ambiguous (PAYING + `paymentError`) payment now requires
+   `force`** (spec-review finding 9, added to this amendment 2026-08-19 fix
+   round): `POST /:id/payment-retry` used to skip its whole queue-proof block
+   whenever `paymentError` was non-null and release straight to APPROVED,
+   audited as `forced: false` — the one bundle state that means "the bank
+   genuinely never said what happened" (PAYING + error is, by construction,
+   the poller's `unconfirmed` verdict; `confirmed-failed` and `push-expired`
+   both resolve forward to APPROVED and never reach this endpoint) was the
+   one this endpoint policed LEAST. The non-forced `'retry'` confirm kind is
+   removed from both approver screens; there is now exactly one
+   release-to-APPROVED dialog, the blunt `force: true` one, and the approver
+   must assert they checked K BIZ's ประวัติทำรายการ before releasing. See
+   Decision 3's `unconfirmed` row above and `apps/api/src/routes/bundles.ts`.
+
+**Known residual risk, left open on purpose (money review finding 3,
+2026-08-19 fix round).** `push-expired`'s safety chain — precedence after
+`SUCCESS_RE`, the `!LIVE_PUSH_RE` corroborant, the `EXPIRY_CONFIRM_MS` grace,
+and the `slip.reference` downgrade to `unconfirmed` — rests on one
+unverified assumption, named explicitly in the diagnosis (§6, undetermined
+item 4): whether KBIZ's expiry modal reflects the BANK's own verdict or a
+CLIENT-SIDE countdown that can render before the bank has actually voided a
+tap accepted in its final second. If the modal is client-side and the bank's
+own slip page never renders in that browser session (no reference to catch
+the downgrade on), a same-second tap could in theory produce a no-force
+retry. This is accepted, not fixed, because: (a) the diagnosis could not
+determine which is true without a live-verified adversarial test against the
+bank in its final second, which is out of scope here; (b) the reference
+downgrade is a real, tested guard, just not a proof against every timing;
+(c) the alternative — holding EVERY `push-expired` at `needs-review` behind
+`force` — would reintroduce the exact friction this amendment exists to
+remove, for a window (the bank's literal last second) with zero observed
+occurrences in the record. `hf-tasks/tasks/wave-5.md:376`'s owner-gated ฿1
+supervised pair is the natural place to resolve this empirically.
+
+**The duplicate-transaction popup (new, unrelated failure mode, same date).**
+On an exact duplicate — same payee, same amount — KBIZ raises a web
+confirmation dialog (`แจ้งเตือน` / "ท่านหรือบริษัทมีการทำรายการนี้ไปแล้ว
+กรุณายืนยันที่จะทำรายการนี้อีกครั้งหรือไม่", ยกเลิก / ยืนยัน) **before** sending
+the phone push, user-verified 2026-08-19 via screenshot. It appears in **0 of
+the 9** production transfers audited for this amendment, but a retry of a
+held item is exactly the shape that triggers it, so the bot has to handle it
+rather than stall silently for the full ~6.5 min window. Policy (fail-closed),
+hardened once more in the same-day fix round after adversarial review found
+two more ways it could auto-confirm on top of a payment that already moved:
+the bot presses ยืนยัน only when (a) a queue/archive scan finds **no prior
+attempt AT ALL on this bundle** — ANY status, not only a terminal one, since
+`running`/`approved` are MORE suspicious than `failed`, not less (money
+review finding 1) — **and** (b) no OTHER bundle has a prior attempt at the
+SAME destination + SAME amount **within the last 14 days** (money review
+finding 2: KBIZ's own duplicate predicate is payee+amount, not bundle, so a
+resubmitted receipt after an `unconfirmed` original — a brand-new bundle id —
+would otherwise defeat the bundle-only guard entirely). KBIZ's own duplicate
+check keys on a transaction that **actually went through**, so a popup plus
+either kind of prior attempt is the bank saying that earlier attempt paid,
+and confirming again would be the double-pay. A refusal aborts **pre-arm**
+(no push exists yet — the popup precedes the push) and is filed `HELD:`,
+same mechanism a gate defer already uses. See `decideDuplicateConfirm` in
+`kbiz-bot/src/lib/transfer-other-queue.ts`.
+
+**The 14-day window (`SAME_MONEY_WINDOW_MS`, money review finding 6, second
+fix round) is bounded, not open-ended.** The (b) check first shipped scanning
+the archive's ENTIRE lifetime with no bound at all — fail-closed (a false
+positive only ever holds a legitimate payment, never lets a double-pay
+through), but it meant a recurring same-payee/same-amount payment (monthly
+rent, a fixed vendor retainer) would be `HELD:` on every single occurrence,
+forever, with no way to clear it except renaming the payee or changing the
+amount. 14 days is a deliberately generous, unevidenced operator-side
+default — there is no live observation of KBIZ's own duplicate-detection
+window (the popup remains 0 of 9 production arms) — chosen to comfortably
+cover the realistic "bundle sticks at `unconfirmed`, gets resolved in K BIZ
+over a day or two, receipt gets re-filed" recovery cycle this guard exists
+to catch, while still expiring well before next month's recurring payment
+falls due. A candidate match with no parseable `createdAt` (or a caller that
+omits `now`) is still treated as inside the window — the bound relieves
+friction, it never opens a gap.
