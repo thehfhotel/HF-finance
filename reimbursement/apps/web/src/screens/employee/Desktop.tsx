@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, JSX } from 'react';
 import type { AppState, BundleWithDetails, InboxItem, Receipt, Theme, User } from '../../lib/types';
 import { fmt, fmt0, fmtN, formatThaiDate } from '../../lib/format';
 import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../../lib/theme';
@@ -33,7 +33,6 @@ function sanitizeAmountInput(raw: string): string {
 
 // Pulled from `@reimbursement/shared` to stay in sync with the rest of the app.
 import { useReceiptCategories } from '../../lib/useReceiptCategories';
-import type { JSX } from "react";
 
 type View = 'drafts' | 'bundle-detail' | 'bundle-list' | 'share-inbox';
 type BundleFilter = 'pending' | 'approved' | 'paid' | 'rejected';

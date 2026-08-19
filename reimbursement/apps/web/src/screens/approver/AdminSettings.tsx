@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties, JSX, ReactNode } from 'react';
 import { ApiError, api } from '../../lib/api';
 import type { KbizSettings, PublishedPayee } from '../../lib/api';
 import { formatThaiRelative } from '../../lib/format';
@@ -23,7 +23,6 @@ import { DesktopShell } from '../../components/DesktopShell';
 import { AppBar } from '../../components/AppBar';
 import { Avatar, Card, GhostButton, PrimaryButton } from '../../components/primitives';
 import { Icon } from '../../components/icons';
-import type { JSX } from "react";
 
 interface AdminSettingsProps {
   theme: Theme;

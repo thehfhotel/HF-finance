@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ChangeEvent, CSSProperties, ReactNode } from 'react';
+import type { ChangeEvent, CSSProperties, JSX, ReactNode } from 'react';
 import type { AppState, BundleStatus, BundleWithDetails, Receipt, Theme, User } from '../../lib/types';
 import type { Route } from '../../lib/router';
 import { fmt, fmt0, fmtN, formatThaiDate } from '../../lib/format';
@@ -22,7 +22,6 @@ import { EmptyState } from '../../components/EmptyState';
 import { Toast, useToast } from '../../components/Toast';
 import { KbizDestinationPicker } from '../../components/KbizDestinationPicker';
 import type { KbizChosenDestination } from '../../components/KbizDestinationPicker';
-import type { JSX } from "react";
 
 const TABLE_GRID_COLUMNS = '1.2fr 1fr 1fr 100px';
 const DETAIL_MAX_WIDTH = 840;

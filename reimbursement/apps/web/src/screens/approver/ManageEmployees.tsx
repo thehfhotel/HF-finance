@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties, JSX, ReactNode } from 'react';
 import { ApiError, api } from '../../lib/api';
 import { formatThaiDate } from '../../lib/format';
 import { FONT_DISPLAY, FONT_MONO, FONT_UI } from '../../lib/theme';
@@ -12,7 +12,6 @@ import { DesktopShell } from '../../components/DesktopShell';
 import { AppBar } from '../../components/AppBar';
 import { Avatar, Card, GhostButton, IconBtn, PrimaryButton } from '../../components/primitives';
 import { Icon } from '../../components/icons';
-import type { JSX } from "react";
 
 const TABLE_GRID_COLUMNS = '40px 1.5fr 1.4fr 1fr 80px';
 
