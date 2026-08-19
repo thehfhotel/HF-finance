@@ -77,7 +77,7 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
   const [chosenDestination, setChosenDestination] = useState<KbizChosenDestination | null>(null);
   const [confirmState, setConfirmState] = useState<{
     open: boolean;
-    kind: 'approve' | 'pay' | 'reject' | 'pay-kbiz' | 'retry' | 'force-retry';
+    kind: 'approve' | 'pay' | 'reject' | 'pay-kbiz' | 'force-retry';
   }>({
     open: false,
     kind: 'approve',
@@ -244,10 +244,13 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
     }
   };
 
-  // `force` comes from the stuck-payment action, where the approver has just
-  // been told to check K BIZ first: it overrules an intent kbiz-bot still owns.
-  // Without it the API releases only what the queue proves never armed.
-  const handlePaymentRetry = async (force = false): Promise<void> => {
+  // 2026-08-19: `force` is no longer optional — there is exactly one release-
+  // to-APPROVED dialog left (the blunt, danger 'force-retry' one), and both
+  // triggers for it (`onPaymentRetry`, `onForcePaymentRetry`) always pass
+  // `true`. See bundles.ts's payment-retry docblock: PAYING + paymentError is
+  // the poller's `unconfirmed` verdict, the one state a live pay button
+  // pointed at money that may already have moved.
+  const handlePaymentRetry = async (force: boolean): Promise<void> => {
     if (!selectedBundle || submitting) return;
     setActionError(null);
     setSubmitting(true);
@@ -366,7 +369,7 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
               }
               onPay={() => setPayOpen(true)}
               onPayViaKbiz={() => setKbizPickerOpen(true)}
-              onPaymentRetry={() => setConfirmState({ open: true, kind: 'retry' })}
+              onPaymentRetry={() => setConfirmState({ open: true, kind: 'force-retry' })}
               onForcePaymentRetry={() => setConfirmState({ open: true, kind: 'force-retry' })}
               onPhoto={(i) => setPhotoIdx(i)}
               submitting={submitting}
@@ -440,9 +443,7 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
                   ? `ยืนยันการจ่าย ฿${fmtN(total)}?`
                   : confirmState.kind === 'pay-kbiz'
                     ? `โอน ฿${fmtN(total)} ผ่าน KBIZ?`
-                    : confirmState.kind === 'force-retry'
-                      ? `ปล่อยกลับไปสถานะอนุมัติ?`
-                      : `ลองโอนใหม่?`
+                    : `ปล่อยกลับไปสถานะอนุมัติ?`
           }
           message={
             confirmState.kind === 'approve'
@@ -496,11 +497,9 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
                       </span>
                     </span>
                   )
-                  : confirmState.kind === 'retry'
-                    ? 'ตรวจสอบในแอป K BIZ แล้วว่ารายการก่อนหน้าไม่สำเร็จ'
-                    : confirmState.kind === 'force-retry'
-                      ? 'ยืนยันว่าเปิดแอป K BIZ ดูแล้วและยังไม่มีการโอนออกจริง — ถ้าโอนไปแล้วให้กด "โอนไปแล้ว — แนบสลิปเอง" แทน ไม่อย่างนั้นอาจโอนซ้ำ'
-                      : `จ่ายให้ ${selectedBundle.submitter.name} — การดำเนินการนี้ไม่สามารถยกเลิกได้`
+                  : confirmState.kind === 'force-retry'
+                    ? 'ยืนยันว่าเปิดแอป K BIZ ดู "ประวัติทำรายการ" แล้ว และยังไม่มีเงินออกจากบัญชีจริง — ถ้าโอนไปแล้วให้กด "ยืนยันว่าโอนแล้ว (แนบสลิป)" แทน ไม่อย่างนั้นอาจโอนซ้ำ'
+                    : `จ่ายให้ ${selectedBundle.submitter.name} — การดำเนินการนี้ไม่สามารถยกเลิกได้`
           }
           confirmLabel={
             confirmState.kind === 'approve'
@@ -509,11 +508,9 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
                 ? 'ปฏิเสธ'
                 : confirmState.kind === 'pay-kbiz'
                   ? 'โอนผ่าน KBIZ'
-                  : confirmState.kind === 'retry'
-                    ? 'ลองใหม่'
-                    : confirmState.kind === 'force-retry'
-                      ? 'ยังไม่ได้โอน'
-                      : 'ยืนยัน'
+                  : confirmState.kind === 'force-retry'
+                    ? 'ยังไม่ได้โอน'
+                    : 'ยืนยัน'
           }
           danger={confirmState.kind === 'reject' || confirmState.kind === 'force-retry'}
           loading={submitting}
@@ -524,8 +521,6 @@ export function DesktopApprover({ theme, state, setState, initialFilter, onNavig
               void handleReject(rejectReason);
             } else if (confirmState.kind === 'pay-kbiz') {
               void handlePayViaKbiz();
-            } else if (confirmState.kind === 'retry') {
-              void handlePaymentRetry();
             } else if (confirmState.kind === 'force-retry') {
               void handlePaymentRetry(true);
             } else {
@@ -1113,7 +1108,7 @@ function DesktopDetail({
             อนุมัติเมื่อ {formatThaiDate(bundle.approvedAt)} โดย {bundle.approver?.name ?? ''} — รอโอนเงิน
             {bundle.paymentError && (
               <div style={{ marginTop: 6, color: theme.danger }}>
-                โอนผ่าน KBIZ ครั้งก่อนไม่สำเร็จ: {bundle.paymentError}
+                การโอนครั้งก่อนไม่สำเร็จ — เงินยังไม่ออกจากบัญชี: {bundle.paymentError}
               </div>
             )}
           </div>
@@ -1163,12 +1158,12 @@ function DesktopDetail({
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: FONT_UI, fontSize: 14, fontWeight: 500, color: theme.ink }}>
-              กำลังโอนผ่าน KBIZ — รอยืนยันบนมือถือ
+              กำลังโอนผ่าน KBIZ — รอกดยืนยันบนมือถือ
             </div>
             <div style={{ fontFamily: FONT_UI, fontSize: 12, color: theme.inkSoft, marginTop: 2 }}>
               {stuck
                 ? 'ค้างนานผิดปกติ — เปิดแอป K BIZ เพื่อดูว่าโอนไปแล้วหรือยัง แล้วเลือกด้านล่าง'
-                : 'หน้าจะอัปเดตให้อัตโนมัติเมื่อโอนสำเร็จ — ลองรีเฟรชอีกครั้งภายหลังหากรอนาน'}
+                : 'ปิดแอป K BIZ ไว้ก่อน แล้วเปิดเมื่อมีการแจ้งเตือนเข้ามา — ถ้าเปิดแอปค้างรออยู่ การแจ้งเตือนอาจไม่ขึ้นเลย ถ้าไม่มีแจ้งเตือน ให้ปิดแอปแล้วเปิดใหม่ แล้วดูที่ "อนุมัติรายการ"'}
             </div>
           </div>
           {/* kbiz-bot can die without ever writing a result, and a result is
@@ -1194,7 +1189,7 @@ function DesktopDetail({
         <ActionBar theme={theme}>
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: FONT_UI, fontSize: 14, fontWeight: 600, color: theme.danger }}>
-              โอนผ่าน KBIZ ไม่สำเร็จ / ไม่ทราบผล
+              ไม่ทราบผลการโอน — ต้องตรวจสอบก่อน:
             </div>
             <div style={{ fontFamily: FONT_UI, fontSize: 13, color: theme.ink, marginTop: 2 }}>
               {bundle.paymentError}
