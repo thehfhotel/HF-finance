@@ -19,10 +19,13 @@ through" — for a transaction the bank had already proven moved ฿0.
 
 **Whether the K BIZ app was foreground on the operator's phone at the moment
 of arming — not elapsed time.** All three failures armed 22-54 s after a tap
-with the operator waiting inside K BIZ; all six successes, plus a
-user-verified manual pair under 1 minute apart, armed with the app
-backgrounded or closed. A bank-side time cooldown is refuted by the sub-1-min
-successful pair. A warm/exhausted browser session (H1) is refuted four
+with the operator waiting inside K BIZ; all six successes armed with the app
+backgrounded or closed. In the operator's manual reproduction (2026-08-19,
+corrected: each of two sessions was one completed transfer plus one identical
+initiation left deliberately uncompleted) the second push armed <1 min after
+the previous tap and SURFACED on the phone with the app backgrounded. A
+bank-side time cooldown is refuted by that sub-1-min surfacing — completion
+was withheld by choice, not by the bank. A warm/exhausted browser session (H1) is refuted four
 independent ways and was explicitly **not** built around (it would multiply
 exposure to the announced June-2026 KBIZ QR-login enforcement).
 
@@ -41,9 +44,13 @@ action "buttons" are href-less `<a class="btn">` with the label in a nested
 nothing. The structure is pinned in
 `kbiz-bot/test/fixtures/kbiz-duplicate-popup.dom.html` (scrubbed) and
 `kbiz-bot/src/probe-duplicate-popup-dom.ts` drives the real
-`clickDialogButton` against it (4/6 RED pre-fix → 6/6 GREEN). The capture
-also confirmed the trigger holds across hours within a day: the ฿1 pair that
-raised it was ~2.5 h apart, same payee, same amount.
+`clickDialogButton` against it (4/6 RED pre-fix → 6/6 GREEN). Trigger
+window, as far as verified: in BOTH manual sessions the popup fired on an
+identical (same payee + same amount) re-initiation **~1 minute after that
+session's completed transfer**. The two sessions were ~2.5 h apart, but each
+popup referenced its own session's completed transfer, so only the
+within-session (~1 min) window is proven; whether the bank's duplicate check
+also spans hours or the whole day is unconfirmed.
 
 ## What changed
 

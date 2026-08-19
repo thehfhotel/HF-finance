@@ -49,8 +49,10 @@ export const CONSERVATIVE_TOTAL_MS = CONSERVATIVE_PRE_ARM_MS + PUSH_LIFETIME_MS;
  * 2026-08-19: the discriminating variable across all 9 ad-hoc transfers plus
  * the operator's own manual back-to-back reproduction is whether the K BIZ
  * app was FOREGROUND on the single approving phone at the moment of arming —
- * NOT elapsed time. A user-verified <1 min pair succeeded with the app
- * closed, which refutes a bank-side time cooldown outright; all three
+ * NOT elapsed time. A user-verified second push, armed <1 min after the
+ * previous tap, SURFACED normally with the app backgrounded (2026-08-19;
+ * deliberately left untapped, so no completed pair — surfacing alone is
+ * what refutes a bank-side time cooldown); all three
  * production failures armed 22-54 s after the operator's previous tap while
  * they were sitting *inside* K BIZ waiting for a push that never surfaced.
  * So this constant's only real job is giving the operator time to back out of
