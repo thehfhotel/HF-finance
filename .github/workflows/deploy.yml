@@ -145,6 +145,19 @@ jobs:
     # gates a PR before merge; a PR must NOT push images or reach deploy.
     # push and workflow_dispatch (manual re-deploy) both still build.
     if: needs.changes.outputs.payroll == 'true' && github.event_name != 'pull_request'
+    # Serializes pushes to the MUTABLE :latest tag. Without this, a burst of
+    # near-simultaneous merges runs multiple build-payroll instances
+    # concurrently; they race to push `payroll:latest`, and the older
+    # commit's push can land after the newer one's — evergreen's compose
+    # pulls :latest, so every later `docker compose up` (this workflow's own
+    # deploy job included) then serves the OLDER image regardless of which
+    # commit's deploy job actually ran last. cancel-in-progress stays false:
+    # canceling mid-push can leave a half-pushed manifest. This mirrors the
+    # existing `deploy-evergreen` group below one job earlier in the
+    # pipeline — same race, just one stage upstream of it.
+    concurrency:
+      group: build-payroll-latest
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -188,6 +201,11 @@ jobs:
     needs: [changes, test]
     # Not on pull_request — see build-payroll's comment.
     if: needs.changes.outputs.kbiz == 'true' && github.event_name != 'pull_request'
+    # Same :latest-tag race as build-payroll, own concurrency group since
+    # the two images are independent and shouldn't queue behind each other.
+    concurrency:
+      group: build-kbiz-bot-latest
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: read

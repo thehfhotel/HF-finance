@@ -248,13 +248,114 @@ jobs:
       - name: Smoke-test SSH
         run: ssh evergreen "echo connected as \$(id -un) on \$(hostname)"
 
+      # Closes the race where two near-simultaneous pushes (dependabot bursts
+      # are the common case) queue two deploy runs against `concurrency:
+      # deploy-evergreen`, and the OLDER commit's run — slower to build, or
+      # just second through the gate — finishes its rollout AFTER the newer
+      # one and silently overwrites it. Both runs report success; nothing
+      # before this checked whether github.sha was still the commit this
+      # pipeline should be deploying by the time rollout actually happened.
+      # Placed immediately after SSH connectivity is confirmed and BEFORE
+      # any remote write (compose sync, .env materialize, GHCR login) — a
+      # superseded run must not touch the deploy host's on-disk state at
+      # all, since a later out-of-band `docker compose up` on evergreen
+      # would otherwise pick that stale state back up.
+      #
+      # workflow_dispatch bypasses the guard on purpose — a manual redeploy
+      # of an older ref (rollback, re-run) is a deliberate override, not a
+      # race artifact.
+      #
+      # main's tip moving is NOT by itself "superseded": this workflow is
+      # path-filtered (reimbursement/** or this workflow file only), so a
+      # push that only touches e.g. kbiz-bot/ or payroll's src/ advances
+      # main's tip without ever scheduling a replacement reimbursement
+      # deploy run. Skip only when a commit between here and the tip
+      # actually touches a path this workflow triggers on.
+      - name: Check HEAD (skip if superseded)
+        id: head-check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "::notice::HEAD guard bypassed — workflow_dispatch redeploy of ${{ github.sha }}"
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Resolving main's tip is best-effort: a transient network/DNS
+          # blip must not permanently block the only deploy pipeline for
+          # this app, so 3 failed attempts (or a non-sha response) fail
+          # OPEN — proceed, with a loud warning — rather than fail closed.
+          tip=""
+          for attempt in 1 2 3; do
+            if tip="$(git ls-remote https://github.com/${{ github.repository }}.git refs/heads/main | cut -f1)" \
+              && [[ "${tip}" =~ ^[0-9a-f]{40}$ ]]; then
+              break
+            fi
+            echo "::warning::ls-remote attempt ${attempt}/3 for main's tip failed or returned '${tip}', retrying"
+            tip=""
+            sleep 5
+          done
+
+          if [ -z "${tip}" ]; then
+            echo "::warning::could not resolve main's tip after 3 attempts — proceeding rather than risk a permanent skip"
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "tip=${tip}" >> "$GITHUB_OUTPUT"
+
+          if [ "${tip}" = "${{ github.sha }}" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # main moved past this commit. Ask whether any of the commits in
+          # between actually touch this workflow's trigger paths before
+          # calling this run superseded.
+          if compare_json="$(curl -fsS --retry 3 --retry-delay 5 \
+            -H "Authorization: token ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/compare/${{ github.sha }}...${tip}")"; then
+            changed="$(echo "${compare_json}" | jq -r '.files[]?.filename // empty')"
+          else
+            echo "::warning::could not diff ${{ github.sha }}...${tip} — proceeding rather than risk a permanent skip"
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if echo "${changed}" | grep -qE '^(reimbursement/|\.github/workflows/deploy-reimbursement\.yml$)'; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::deploy skipped: ${{ github.sha }} superseded by ${tip} (a later commit touches reimbursement/ or this workflow)"
+          else
+            echo "::notice::main moved to ${tip}, but nothing since ${{ github.sha }} touches this pipeline's trigger paths — proceeding"
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Named so the skip is visible at a glance in the run summary, not just
+      # as a buried annotation — the whole point is a superseded run must
+      # never look like a silent no-op next to the runs that did deploy.
+      - name: "Deploy skipped — superseded by newer commit on main"
+        if: success() && steps.head-check.outputs.proceed == 'false'
+        run: |
+          {
+            echo "## Deploy skipped — superseded"
+            echo ""
+            echo "This run built \`${{ github.sha }}\`, but \`main\` had already"
+            echo "moved to \`${{ steps.head-check.outputs.tip }}\` by a commit that"
+            echo "touches this pipeline. Skipping so this run doesn't overwrite the"
+            echo "newer commit's deploy — that run (or the next push) delivers."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Sync compose file
+        if: success() && steps.head-check.outputs.proceed != 'false'
         run: |
           set -euo pipefail
           ssh evergreen "mkdir -p ${DEPLOY_DIR}"
           scp reimbursement/docker-compose.production.yml evergreen:${DEPLOY_DIR}/docker-compose.yml
 
       - name: Materialize .env from secrets
+        if: success() && steps.head-check.outputs.proceed != 'false'
         # Keep .env off this runner's disk — it's piped over SSH and written
         # straight into the deploy host with mode 0600.
         env:
@@ -373,6 +474,7 @@ jobs:
           EOF
 
       - name: Log in to GHCR (on remote host)
+        if: success() && steps.head-check.outputs.proceed != 'false'
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
@@ -380,6 +482,7 @@ jobs:
           ssh evergreen "echo '${GHCR_TOKEN}' | docker login ghcr.io -u '${GHCR_USER}' --password-stdin"
 
       - name: Pull images and roll out
+        if: success() && steps.head-check.outputs.proceed != 'false'
         run: |
           set -euo pipefail
           ssh evergreen <<'REMOTE'
@@ -390,6 +493,7 @@ jobs:
           REMOTE
 
       - name: Health check
+        if: success() && steps.head-check.outputs.proceed != 'false'
         # NB: avoid `exit 0` mid-heredoc — that closes ssh's stdin while the
         # local end is still writing the rest of the script, which yields
         # SIGPIPE and a non-zero ssh exit. Track outcomes in flags and let
@@ -450,9 +554,11 @@ jobs:
       # Housekeeping AFTER the health gate: pruning inside the rollout step put
       # ~5-8s of dead-image cleanup on the critical path before health checks.
       - name: Prune old images (non-blocking)
+        if: success() && steps.head-check.outputs.proceed != 'false'
         run: ssh evergreen "docker image prune -f" || true
 
       - name: Summary
+        if: success() && steps.head-check.outputs.proceed != 'false'
         run: |
           {
             echo "## Reimbursement-v2 deployed"
