@@ -88,9 +88,24 @@ The reimbursement api container runs as uid 1000; host dirs it writes need
 - Root `bun test` runs payroll-form AND kbiz-bot suites (CI runs it without
   kbiz-bot's node_modules — test files must never import the browser stack;
   keep the pure-core/driver split).
+- **This repo is PUBLIC.** Check before you paste anything.
 - Real payee data (bank accounts) lives ONLY in
   `/home/deploy/kbiz-bot/transfer-other.config.json` on evergreen and is never
   committed. Masked (last-4) everywhere else.
+- **The same rule covers EMPLOYEE data, and it applies to SOURCE, not just to
+  published artifacts.** Legal names, salaries, provident-fund balances and
+  termination payouts load from gitignored `data/` via `src/roster-data.ts`
+  (shapes in `data-examples/`). This rule used to be enforced only on what the
+  apps *published* — manifests, Slack, vouchers — which is how 21 employees'
+  salaries sat in `src/sheets.ts` on a public remote for three months, and how
+  five real account numbers reached test fixtures and two commit messages
+  (rewritten out of history 2026-08-20; see
+  `docs/change-requests/CR-2026-08-20-employee-data-out-of-git.md`).
+  So: **no real person's name, account number, or pay figure in source, tests,
+  fixtures, docblocks, or commit messages.** Use obvious fixtures
+  (`ทดสอบ` / `ตัวอย่าง` / `SAMPLE`). A test that needs a real-looking near-miss
+  should invent one — the name-matching tests in `test/names.test.ts` show how
+  to keep the linguistic property without keeping the person.
 
 ## Agent skills
 
