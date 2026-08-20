@@ -1,4 +1,5 @@
 import { ZOOM_HTML } from "./zoom";
+import { loadSavingsBalance } from "../roster-data";
 
 export const WORKSHEET_HTML = `<!doctype html>
 <html lang="th">
@@ -1799,10 +1800,9 @@ async function savingsSinceAnchorMap(sheet) {
   }
   return map;
 }
-const SAVINGS_BALANCE = {
-  "ทดสอบ": 11111.11,
-  // Real values live outside the repo (gitignored data/); see src/roster-data.ts.
-};
+// Real per-employee fund balances; injected server-side from gitignored
+// data/ (src/roster-data.ts) so they are not committed. Empty when absent.
+const SAVINGS_BALANCE = ${JSON.stringify(loadSavingsBalance())};
 function lookupSavings(nickname) {
   const k = String(nickname || "").trim();
   if (!k) return null;

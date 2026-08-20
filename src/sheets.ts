@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { listAccounts, normalizeAccountNumber } from "./store";
+import { loadEmployeeDefaults, type EmployeeDefault } from "./roster-data";
 
 const SHEETS_DIR = process.env.SHEETS_DIR ?? "data/sheets";
 
@@ -59,17 +60,15 @@ export function isPastPeriod(period: string): boolean {
   return new Date() >= new Date(y, mo, 5, 0, 0, 0);
 }
 
-// Defaults pulled from the most recent payroll snapshot
-// (payroll-table เดือน เมษายน-69.xlsx, last refreshed 30 เม.ย. 2569).
-// Applied to rows that have no nickname / position / salary set — keeps
-// existing user edits. Refresh by re-importing the latest monthly sheet
-// and updating values. Includes former employees so historic
-// months still resolve a nickname/position/salary if their bank account
-// rows are ever reloaded.
-const EMPLOYEE_DEFAULTS: Record<string, { nickname: string; position: string; salary: number }> = {
-  "นางสาวทดสอบ ตัวอย่าง": { nickname: "ทดสอบ", position: "Reception", salary: 11111 },
-  // Real values live outside the repo (gitignored data/); see src/roster-data.ts.
-};
+// Defaults for rows that have no nickname / position / salary set — keeps
+// existing user edits. Applied the first time we see a row with all three
+// blank. Includes former employees so historic months still resolve if their
+// bank-account rows are ever reloaded.
+//
+// The values are REAL PERSONAL DATA (legal names, job titles, salaries) and
+// live outside the repo in gitignored `data/` — see src/roster-data.ts.
+// Refresh by re-importing the latest monthly sheet into that file.
+const EMPLOYEE_DEFAULTS: Record<string, EmployeeDefault> = loadEmployeeDefaults();
 
 function normalizeName(name: string): string {
   return String(name || "").trim().replace(/\s+/g, " ");
