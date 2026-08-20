@@ -4,6 +4,15 @@ import { gotoAuthenticated, isUnauthenticatedUrl } from "../lib/session";
 import { captureSlip, ensureSlipsDir, SLIPS_DIR, type SlipCapture } from "../lib/capture-slip";
 import { finalizeTransfer } from "../lib/finalize-transfer";
 import { aliasesForBank, matchFavoriteRows } from "../lib/scrape-favorites";
+// The picker's paging + "exactly one destination" decision, straight from the
+// PURE module rather than through scrape-favorites' `export *`: the deciding is
+// what root `bun test` pins without a browser (favorite-destination.test.ts),
+// and importing it where it lives keeps that split obvious.
+import {
+  decideFavoriteSelection,
+  MAX_PICKER_PAGES,
+  type FavoritePageScan,
+} from "../lib/favorites-core";
 import {
   APPROVAL_TIMEOUT_MS,
   waitForApproval,
@@ -210,8 +219,157 @@ const maskAccount = (s: string) => {
 // Need the rule? `import { sanitizeKbizMemo } from "@reimbursement/shared"`,
 // which pulls nothing.
 
-/** Select a SAVED payee via the picker, triple-verified. Throws on any ambiguity. */
-async function selectFavoritePayee(page: Page, payee: Payee, slug: string): Promise<void> {
+// ── the saved-payee picker, as a driver ────────────────────────────────────
+// THE PICKER PAGINATES AT TEN ROWS PER PAGE — footer "บัญชีที่ 1-10 จาก 14
+// บัญชี" in the operator's devtools capture of 2026-08-19, pinned as
+// test/fixtures/kbiz-payee-picker.dom.html. Reading `div.lists` once therefore
+// reads PAGE ONE, not the list; the ฿1 test target sorts to ~row 11.
+// collectFavorites (the read-only scrape) already walks this paginator, but its
+// driver lives in scrape-favorites.ts and is not exported, so the walk is
+// re-stated here with the same three rules that made it trustworthy there:
+// whole-text-anchored numeric anchors, wait for the rows to actually SWAP, and
+// treat a blanked modal as "did not turn" rather than as an empty page.
+
+/** Every picker row carrying an account anchor — the header `div.lists` has none. */
+const pickerRows = (page: Page) =>
+  page.locator("div.lists").filter({ has: page.locator("a.c-bold.c-green.pointer") });
+
+/**
+ * `innerText` of every row on whichever page the picker is showing.
+ *
+ * Deliberately NOT `:visible`-filtered, exactly like collectFavorites' read: a
+ * duplicate render must be SEEN and then deduped by account
+ * (decideFavoriteSelection), never filtered out by a CSS guess about which copy
+ * is the real one. The index of each text is the row's index in this locator,
+ * which is how the winner gets clicked again.
+ */
+async function readPickerPage(page: Page): Promise<string[]> {
+  const rows = pickerRows(page);
+  const n = await rows.count();
+  const texts: string[] = [];
+  for (let i = 0; i < n; i++) texts.push(await rows.nth(i).innerText().catch(() => ""));
+  return texts;
+}
+
+/** A numeric page anchor, whole-text-anchored so "2" never matches "12". */
+const pickerPageAnchor = (page: Page, n: number) =>
+  page
+    .locator("a.pointer:visible")
+    .filter({ hasText: new RegExp(`^\\s*${n}\\s*$`) })
+    .first();
+
+/** The current page's first row, normalized — proof that a page turn landed. */
+async function pickerSignature(page: Page): Promise<string> {
+  const first = await pickerRows(page).first().innerText().catch(() => "");
+  return first.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Click the numeric anchor for page `n` and wait for the rows to swap.
+ *
+ * Returns false rather than throwing — the caller decides what a stalled
+ * paginator means (it refuses, but only after saying which page it could not
+ * reach). An empty read is NOT a page turn: a click that closed or blanked the
+ * modal would otherwise pass as a swap and walk empty pages.
+ */
+async function goToPickerPage(page: Page, n: number): Promise<boolean> {
+  const anchor = pickerPageAnchor(page, n);
+  if ((await anchor.count()) === 0) return false;
+  const before = await pickerSignature(page);
+  if (!(await anchor.click({ timeout: 15_000 }).then(() => true).catch(() => false))) return false;
+  for (let i = 0; i < 40; i++) {
+    await page.waitForTimeout(250);
+    const after = await pickerSignature(page);
+    if (after && after !== before) {
+      await page.waitForTimeout(400);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Type the nickname into the picker's search box — best-effort, but NOT silent.
+ *
+ * Every step here has always been best-effort (`.catch(() => {})`), which is
+ * how the real defect hid: with the search failing to filter, the flow scanned
+ * page 1 of a 2-page list and reported "found 0" as if the payee were not
+ * saved. Paging is now the fallback, so a failure here is never fatal — it just
+ * has to SAY it happened. Returns null when the search looks like it took, or a
+ * human-readable reason when it did not.
+ *
+ * `rowsBefore` is the row count read BEFORE typing: an unchanged count is the
+ * only evidence available that a filter never ran. (A book that fits on one
+ * page can change nothing legitimately — hence a log line, never a throw.)
+ *
+ * The one thing this does more than report: a filter that left the picker with
+ * NO rows is undone before returning, because an empty list is never something
+ * to decide on — see the comment on that branch.
+ */
+async function searchPickerFor(page: Page, nickname: string, rowsBefore: number): Promise<string | null> {
+  const search = page.locator('input[name="acctSearch"]').first();
+  if (!(await search.isVisible().catch(() => false))) {
+    return 'no visible search box (input[name="acctSearch"])';
+  }
+  if (!(await search.fill(nickname).then(() => true).catch(() => false))) {
+    return 'the search box (input[name="acctSearch"]) would not accept the nickname';
+  }
+
+  const notes: string[] = [];
+  const trigger = page.locator("a#search-acct-to-btn").first();
+  if (await trigger.isVisible().catch(() => false)) {
+    if (!(await trigger.click({ timeout: 5_000 }).then(() => true).catch(() => false))) {
+      notes.push("the a#search-acct-to-btn click did not land");
+    }
+  } else {
+    notes.push("no visible search trigger (a#search-acct-to-btn)");
+  }
+  if (!(await search.press("Enter").then(() => true).catch(() => false))) {
+    notes.push("Enter on the search box was rejected");
+  }
+  await page.waitForTimeout(1_500);
+
+  const rowsAfter = await pickerRows(page).count();
+  if (rowsAfter === rowsBefore) notes.push(`the row count did not change (${rowsBefore} before, ${rowsAfter} after)`);
+
+  // A filter that hid EVERY row hid the row we came for too, so deciding on
+  // what is left would be the same dead end the paging walk exists to remove —
+  // "expected exactly one matching saved account, found 0" — just reached from
+  // the other side. It takes a search that is not "contains the Display Name":
+  // matchFavoriteRows needs the nickname IN the row text, so a contains-search
+  // can never drop a row that would have matched, and any other semantics can.
+  // Undo the filter and let the walk read the whole book instead. Best-effort
+  // like everything else here: if the rows do not come back, the walk reads an
+  // empty picker and REFUSES, which is where this path already ended.
+  if (rowsAfter === 0 && rowsBefore > 0) {
+    notes.push(`the search emptied the list (${rowsBefore} rows before, 0 after) — clearing the filter`);
+    await search.fill("").catch(() => {});
+    if (await trigger.isVisible().catch(() => false)) {
+      await trigger.click({ timeout: 5_000 }).catch(() => {});
+    }
+    await search.press("Enter").catch(() => {});
+    await page.waitForTimeout(1_500);
+    const restored = await pickerRows(page).count();
+    notes.push(
+      restored > 0
+        ? `filter cleared, ${restored} row(s) back`
+        : "clearing the filter did not bring the rows back",
+    );
+  }
+
+  return notes.length ? notes.join("; ") : null;
+}
+
+/**
+ * Select a SAVED payee via the picker, triple-verified. Throws on any ambiguity.
+ *
+ * Exported ONLY so src/probe-payee-picker-pagination.ts can drive the real
+ * thing against the captured picker markup
+ * (test/fixtures/kbiz-payee-picker.dom.html) in a local chromium — the same
+ * reason clickDialogButton is exported. Nothing in the money path calls it
+ * from outside this module.
+ */
+export async function selectFavoritePayee(page: Page, payee: Payee, slug: string): Promise<void> {
   const acctD = payee.accountNo ? digitsOnly(payee.accountNo) : "";
   const last4 = payee.accountLast4 ? digitsOnly(payee.accountLast4) : "";
   const nickname = payee.nickname ?? "";
@@ -236,38 +394,139 @@ async function selectFavoritePayee(page: Page, payee: Payee, slug: string): Prom
   await pick.click();
   await page.waitForTimeout(1_800);
 
-  const search = page.locator('input[name="acctSearch"]').first();
-  if (nickname && (await search.isVisible().catch(() => false))) {
-    await search.fill(nickname).catch(() => {});
-    const sb = page.locator("a#search-acct-to-btn").first();
-    if (await sb.isVisible().catch(() => false)) await sb.click().catch(() => {});
-    await search.press("Enter").catch(() => {});
-    await page.waitForTimeout(1_500);
-  }
-
-  const rows = page.locator("div.lists").filter({ has: page.locator("a.c-bold.c-green.pointer") });
-  const n = await rows.count();
-  const texts: string[] = [];
-  for (let i = 0; i < n; i++) {
-    texts.push(await rows.nth(i).innerText().catch(() => ""));
-  }
-  const matches = matchFavoriteRows(texts, {
+  const criteria = {
     nickname,
     bank: payee.bank,
     accountNo: payee.accountNo,
     accountLast4: last4 || undefined,
-  });
-  console.log(`   scanned ${n} saved rows, ${matches.length} triple-verified`);
-  if (matches.length !== 1) {
-    await page.screenshot({ path: `${SLIPS_DIR}/_picker-${slug}.png`, fullPage: true }).catch(() => {});
+  };
+  const shot = async (kind: string) => {
+    await page.screenshot({ path: `${SLIPS_DIR}/_${kind}-${slug}.png`, fullPage: true }).catch(() => {});
+  };
+
+  // Narrow the list if the search box cooperates — and log it when it doesn't,
+  // because until 2026-08-19 a silently-failed search was indistinguishable in
+  // the logs from "that payee is not saved in KBIZ".
+  const rowsBefore = await pickerRows(page).count();
+  const searchNote = await searchPickerFor(page, nickname, rowsBefore);
+  if (searchNote) {
+    console.log(`   ⚠ picker search did not take: ${searchNote} — paging the whole saved list instead`);
+  }
+
+  // Walk EVERY page the paginator offers, accumulating candidates. The walk is
+  // not short-circuited by a match on the current page: the ONLY way to know a
+  // second saved account also satisfies nickname + bank + last-4 is to look at
+  // the rest of the list, and the old single-page read is precisely how a
+  // page-1 last-4 collision could pass as the unique match (probe case D).
+  const scans: FavoritePageScan[] = [];
+  let current = 1;
+  let pagingNote: string | null = null;
+  for (;;) {
+    const rowTexts = await readPickerPage(page);
+    scans.push({ page: current, rowTexts });
+    console.log(
+      `   scanned ${rowTexts.length} saved rows on picker page ${current}, ` +
+        `${matchFavoriteRows(rowTexts, criteria).length} triple-verified`,
+    );
+    if (scans.length >= MAX_PICKER_PAGES) {
+      pagingNote = `stopped after ${MAX_PICKER_PAGES} picker pages`;
+      break;
+    }
+    const next = current + 1;
+    // No anchor for the next page ⇒ this was the last one.
+    if ((await pickerPageAnchor(page, next).count()) === 0) break;
+    if (!(await goToPickerPage(page, next))) {
+      pagingNote = `picker page ${next} was offered but never rendered`;
+      break;
+    }
+    current = next;
+  }
+
+  // ONE decision, over everything scanned. More matching ROWS than accounts is
+  // normal (every picker row renders twice, and a payee can be saved twice
+  // under two Display Names); more than one distinct ACCOUNT is ambiguity and
+  // refuses, whether the two rows shared a page or not.
+  const decision = decideFavoriteSelection(scans, criteria);
+  const scope =
+    `${decision.rowsScanned} row(s) across ${decision.pagesScanned} picker page(s), ` +
+    `${decision.hits.length} matching row(s)`;
+  console.log(`   ${scope} → ${decision.destinationCount} distinct destination(s)`);
+
+  // A walk that could not FINISH is not a scan of "everything scanned": a
+  // second account matching nickname + bank + last-4 could be sitting on the
+  // page we never reached, and that is the very ambiguity this function exists
+  // to refuse. collectFavorites refuses a truncated read for the same reason.
+  // Nothing has been clicked yet, so this costs a re-run and nothing else.
+  if (pagingNote) {
+    await shot("picker");
     throw new Error(
-      `Favorite "${nickname}" (${shown}, ${payee.bank}): expected exactly one matching ` +
-        `saved account, found ${matches.length}. Refusing to select.`,
+      `Favorite "${nickname}" (${shown}, ${payee.bank}): could not read the whole saved list ` +
+        `(${pagingNote}); scanned ${scope}. Refusing to select.`,
     );
   }
 
-  console.log(`→ Select verified favorite "${nickname}"`);
-  await rows.nth(matches[0]).locator("a.c-bold.c-green.pointer:visible").first().click({ timeout: 15_000 });
+  if (decision.outcome !== "one" || !decision.target) {
+    await shot("picker");
+    throw new Error(
+      `Favorite "${nickname}" (${shown}, ${payee.bank}): expected exactly one matching ` +
+        `saved account, found ${decision.destinationCount}. Refusing to select. ` +
+        `(scanned ${scope}` +
+        (searchNote ? `; picker search did not take: ${searchNote}` : "") +
+        ")",
+    );
+  }
+
+  // The walk usually ends PAST the winning page, so go back to it and re-read
+  // it: the row index that gets clicked is then one we verified on the page we
+  // are actually looking at, not one remembered from before a page turn.
+  if (decision.target.page !== current) {
+    if (!(await goToPickerPage(page, decision.target.page))) {
+      await shot("picker");
+      throw new Error(
+        `Favorite "${nickname}" (${shown}, ${payee.bank}): could not page back to picker ` +
+          `page ${decision.target.page} to select it. Refusing to select.`,
+      );
+    }
+    current = decision.target.page;
+  }
+
+  const landed = decideFavoriteSelection([{ page: current, rowTexts: await readPickerPage(page) }], criteria);
+  if (
+    landed.outcome !== "one" ||
+    !landed.target ||
+    landed.target.destinationKey !== decision.target.destinationKey
+  ) {
+    await shot("picker");
+    throw new Error(
+      `Favorite "${nickname}" (${shown}, ${payee.bank}): re-reading picker page ${current} no ` +
+        `longer shows exactly the one account that matched (${landed.destinationCount} distinct ` +
+        `destination(s) now). Refusing to select.`,
+    );
+  }
+
+  // Click a RENDERED row for that one account. A duplicate render can put the
+  // first matching row inside a hidden copy whose account link cannot be
+  // clicked; every remaining hit addresses the SAME account (same
+  // destinationKey), so trying the next one changes nothing about where the
+  // money goes.
+  const rows = pickerRows(page);
+  const sameAccount = landed.hits.filter((h) => h.destinationKey === landed.target!.destinationKey);
+  let clicked = false;
+  for (const hit of sameAccount) {
+    const link = rows.nth(hit.rowIndex).locator("a.c-bold.c-green.pointer:visible").first();
+    if ((await link.count()) === 0) continue;
+    console.log(`→ Select verified favorite "${nickname}" (picker page ${current}, row ${hit.rowIndex + 1})`);
+    await link.click({ timeout: 15_000 });
+    clicked = true;
+    break;
+  }
+  if (!clicked) {
+    await shot("picker");
+    throw new Error(
+      `Favorite "${nickname}" (${shown}, ${payee.bank}): the matching saved row on picker page ` +
+        `${current} has no clickable account link. Refusing to select.`,
+    );
+  }
   await page.waitForTimeout(2_000);
 
   const filled = await page.locator('input[name="accountTo"]').first().inputValue().catch(() => "");
@@ -279,7 +538,7 @@ async function selectFavoritePayee(page: Page, payee: Payee, slug: string): Prom
   // digits we already assumed.
   const toOk = acctD ? filledD === acctD : filledD.length >= 8 && filledD.endsWith(last4);
   if (!toOk) {
-    await page.screenshot({ path: `${SLIPS_DIR}/_toMismatch-${slug}.png`, fullPage: true }).catch(() => {});
+    await shot("toMismatch"); // same `_toMismatch-<slug>.png` path as before, one idiom
     throw new Error(`After selecting "${nickname}", To account is ${maskAccount(filled)}, expected ${shown}.`);
   }
   console.log(`   ✓ To account = ${filled}`);

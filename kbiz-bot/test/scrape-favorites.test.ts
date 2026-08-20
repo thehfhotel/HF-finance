@@ -245,6 +245,11 @@ describe("bank aliases", () => {
 
 describe("Thai UI (pinned from the 2026-08-12 live probe)", () => {
   it("parses a real Thai picker row, merged mobile label included", () => {
+    // The row SHAPE (cell order, the merged mobile label, the Thai labels) and
+    // the name are the live probe's; the ACCOUNT NUMBER is a placeholder ending
+    // in the same 4 digits — a full number never lives in this repo
+    // (kbiz-bot/CLAUDE.md: only transfer-other.config.json on evergreen has
+    // them), and the last 4 are what the masking expectations below check.
     const row = parseFavoriteRowCells([
       "ชื่อย่อบัญชี/ชื่อบัญชี", "Guide HF",
       "ชื่อย่อบัญชี", "Guide HF",

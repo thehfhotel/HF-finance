@@ -53,9 +53,17 @@ import { KBIZ_FAVORITES_FILE, type KbizFavorite } from "@reimbursement/shared";
  */
 export const FAVORITES_FILE = KBIZ_FAVORITES_FILE;
 
-// The picker paginates in the modal and the book is small in practice; 40
-// bounds the walk if the paginator ever misbehaves, matching scrape-registered.
-const MAX_PAGES = 40;
+/**
+ * The picker paginates in the modal and the book is small in practice; 40
+ * bounds the walk if the paginator ever misbehaves, matching scrape-registered.
+ *
+ * Exported since 2026-08-19 because the SELECTION path walks the very same
+ * paginator (see decideFavoriteSelection below) and must be bounded by the
+ * same number — two different ceilings for one modal would be a lie waiting
+ * to happen.
+ */
+export const MAX_PICKER_PAGES = 40;
+const MAX_PAGES = MAX_PICKER_PAGES;
 
 /**
  * One synced saved account — reimbursement's `KbizFavorite`
@@ -289,7 +297,7 @@ export interface FavoriteRowCriteria {
   accountLast4?: string;
 }
 
-// An account renders as "100-0-00739-4" / "100-0-02827-339"; a token of 8+
+// An account renders as "100-0-00739-4" / "020-4-00000-339"; a token of 8+
 // digits is the only thing in a picker row that can be an account number.
 const ACCOUNT_TOKEN_RE = /\d[\d-]{6,}\d/g;
 
@@ -311,8 +319,12 @@ export function rowHasAccountEndingWith(text: string, last4: string): boolean {
  * mis-keyed verifier can then never misroute money, it can only fail to find
  * its row.
  *
- * Rows arrive as innerText, so the hidden half of each double-rendered row is
- * empty and drops out on its own.
+ * Rows arrive as innerText, so the hidden CELLS of a double-rendered row drop
+ * out on their own. A whole hidden ROW does NOT: per the HTML spec innerText
+ * falls back to textContent for an element that is not being rendered, so a
+ * hidden copy of a row reads as a full match. Deduping that is
+ * decideFavoriteSelection's job, not this function's — this one only reports
+ * which rows matched, and reports every one of them.
  */
 export function matchFavoriteRows(rowTexts: string[], criteria: FavoriteRowCriteria): number[] {
   const bankRe = bankPattern(criteria.bank);
@@ -329,4 +341,144 @@ export function matchFavoriteRows(rowTexts: string[], criteria: FavoriteRowCrite
   });
 
   return out;
+}
+
+// ── deciding WHICH row to click, across the WHOLE paginated picker ──────────
+/**
+ * THE PICKER PAGINATES AT TEN ROWS PER PAGE. Pinned by the operator's devtools
+ * capture of 2026-08-19 (test/fixtures/kbiz-payee-picker.dom.html): the footer
+ * reads "บัญชีที่ 1-10 จาก 14 บัญชี" — 14 saved accounts over 2 pages, with a
+ * `pagination-template > ul.paginations > li > a.pointer` paginator.
+ *
+ * So "read div.lists once and match" only ever sees PAGE ONE. The saved
+ * account a ฿1 test transfer wants sorts to roughly row 11 of 13 — page 2 —
+ * and every step of the picker's search box is best-effort
+ * (`.catch(() => {})`), so a search that silently fails to filter left the
+ * target STRUCTURALLY UNREACHABLE and the flow refusing with "expected exactly
+ * one matching saved account, found 0".
+ *
+ * This is the pure half of the fix: the driver (transfer-other-flow.ts) walks
+ * the paginator the way collectFavorites already does and hands over one scan
+ * per page; the decision is taken ONCE, over everything scanned.
+ *
+ * The rule does not soften: EXACTLY ONE destination across every scanned page,
+ * or refuse. Ambiguity spanning two pages refuses exactly like ambiguity on
+ * one — which is strictly SAFER than the old single-page read, since that read
+ * could see one of two colliding rows, call it unique and click it.
+ */
+
+/** The rows of ONE picker page, as innerText, in DOM order. */
+export interface FavoritePageScan {
+  /** 1-based picker page these rows were read from. */
+  page: number;
+  /** `innerText` of every row on that page (empty strings included: index = row index). */
+  rowTexts: string[];
+}
+
+/** One triple-verified row, located well enough to be clicked again. */
+export interface FavoriteRowHit {
+  /** Picker page it was found on. */
+  page: number;
+  /** Its index within that page's rows. */
+  rowIndex: number;
+  /**
+   * Identity of the ACCOUNT this row addresses: every 8+-digit account token
+   * in the row, deduped and sorted.
+   *
+   * FULL DIGITS — internal only. This never goes into a log line, an Error
+   * message, a screenshot name or the queue file: masking is
+   * transfer-other-flow.ts's `maskAccount`, and `destinationCount` below is
+   * what messages are allowed to say about it.
+   */
+  destinationKey: string;
+}
+
+export interface FavoriteSelectionDecision {
+  /** "one" ⇒ target is set and safe to click. Anything else ⇒ the caller refuses. */
+  outcome: "one" | "none" | "ambiguous";
+  /** The row to click. Present ONLY for outcome "one". */
+  target?: FavoriteRowHit;
+  /** Every matching row, all pages — more than one of these can be ONE account. */
+  hits: FavoriteRowHit[];
+  /** How many DISTINCT destination accounts matched. This is the number that decides. */
+  destinationCount: number;
+  rowsScanned: number;
+  pagesScanned: number;
+}
+
+/**
+ * The account this row addresses, as a dedupe identity.
+ *
+ * WHY A KEY AND NOT A ROW COUNT: kbiz-bot/CLAUDE.md — "every row rendered
+ * twice (dedupe)". A picker row exists in the DOM more than once (the desktop
+ * `hidden-ip-pro` / iPad `visible-ip-pro` variants, plus Magnific Popup's
+ * hidden source template of the whole block), and a page that fails to turn
+ * re-reads the rows it just read. Counting ROWS would turn one real account
+ * into two "matches" and manufacture an ambiguity refusal that blocks a
+ * perfectly unambiguous transfer. Counting ACCOUNTS cannot.
+ *
+ * The digits are the whole key on purpose: two saved rows differing only in
+ * Display Name send money to the same place, so they are ONE destination —
+ * while two accounts colliding on their last 4 digits (the very thing a masked
+ * favorite verifies against) stay TWO, and refuse.
+ *
+ * Returns "" for a row carrying no recognizable account token; the caller
+ * turns that into a per-row unique key, so an unidentifiable row can never
+ * collapse into another one.
+ */
+export function accountKeyForRow(text: string): string {
+  const seen = new Set<string>();
+  for (const token of text.match(ACCOUNT_TOKEN_RE) ?? []) {
+    const d = digitsOnly(token);
+    if (d.length >= 8) seen.add(d);
+  }
+  return [...seen].sort().join(",");
+}
+
+/**
+ * Decide over every page scanned: exactly one destination, or refuse.
+ *
+ * Pure — the driver does the walking (playwright) and this does the deciding,
+ * the same split collectFavorites/FavoritesDriver already uses, so root
+ * `bun test` can pin the money rule with no browser in sight.
+ */
+export function decideFavoriteSelection(
+  scans: FavoritePageScan[],
+  criteria: FavoriteRowCriteria,
+): FavoriteSelectionDecision {
+  const hits: FavoriteRowHit[] = [];
+  let rowsScanned = 0;
+
+  for (const scan of scans) {
+    rowsScanned += scan.rowTexts.length;
+    for (const rowIndex of matchFavoriteRows(scan.rowTexts, criteria)) {
+      const key = accountKeyForRow(scan.rowTexts[rowIndex] ?? "");
+      hits.push({
+        page: scan.page,
+        rowIndex,
+        // No readable account token ⇒ a key nothing else can equal, so this
+        // row is never deduped INTO another account's group. It can only add
+        // ambiguity (refuse), never resolve it.
+        destinationKey: key || `unidentified:p${scan.page}:r${rowIndex}`,
+      });
+    }
+  }
+
+  // First hit of each distinct account wins the click — earliest page, then
+  // earliest row, because `scans` and `matchFavoriteRows` are both in order.
+  const byDestination = new Map<string, FavoriteRowHit>();
+  for (const hit of hits) if (!byDestination.has(hit.destinationKey)) byDestination.set(hit.destinationKey, hit);
+
+  const destinationCount = byDestination.size;
+  const outcome: FavoriteSelectionDecision["outcome"] =
+    destinationCount === 1 ? "one" : destinationCount === 0 ? "none" : "ambiguous";
+
+  return {
+    outcome,
+    target: outcome === "one" ? [...byDestination.values()][0] : undefined,
+    hits,
+    destinationCount,
+    rowsScanned,
+    pagesScanned: scans.length,
+  };
 }

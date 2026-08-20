@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<!--
+  KBIZ saved-payee picker (#popup-search) on fundtranfer-other — REAL DOM
+  structure, from the operator's devtools capture of 2026-08-19 (the same
+  session that captured the exact-duplicate popup). SCRUBBED: every account
+  number, account name and Display Name below is an INVENTED placeholder. No
+  real payee data lives in this repo (kbiz-bot/CLAUDE.md: full numbers exist
+  only in /home/deploy/kbiz-bot/transfer-other.config.json on evergreen).
+
+  WHY THIS FIXTURE EXISTS: selectFavoritePayee used to read `div.lists` ONCE
+  and match. The capture proves the picker PAGINATES — so page 1 is not the
+  list, and a saved account past row 10 was structurally unreachable.
+
+  FACTS FROM THE CAPTURE THAT THIS FILE PINS (each one is load-bearing):
+   1. PAGE SIZE IS TEN. The footer reads "บัญชีที่ 1-10 จาก 14 บัญชี" —
+      14 saved accounts, 2 pages. The account a ฿1 test transfer targets
+      sorts to ~row 11, i.e. PAGE 2.
+   2. Rows are `div.lists` inside `.non-table > .bottom` (NOT a <table>), and
+      the header row is a `div.lists` too — inside `.top`, and WITHOUT an
+      account anchor, which is why the row locator filters on
+      `a.c-bold.c-green.pointer`.
+   3. The account number is an `<a class="c-bold c-green pointer">` inside the
+      row's last `.list` cell. CLICKING IT SELECTS THE PAYEE (a read-only
+      scrape must never click it; the transfer path clicks exactly one).
+   4. Every row renders its cells TWICE: the desktop `.hidden-ip-pro` cells and
+      the iPad `.list.vertical.visible-ip-pro` cell, one of which is
+      display:none at any viewport. At 1600px (the width the flow forces) the
+      desktop half is the rendered one.
+   5. Pagination is `pagination-template > ul.paginations > li > a.pointer`,
+      with the CURRENT page as `li.active > span` (no anchor — so a numeric
+      anchor exists only for pages you are not on) plus `li > a.prev` /
+      `a.next` anchors carrying no text.
+   6. The search box is `input[name=acctSearch]`; its trigger is
+      `a#search-acct-to-btn`. Both are best-effort in the flow, which is how a
+      silent search failure became invisible.
+
+  INTERACTIVE, on purpose: the inline script below re-renders rows on a page
+  click, on a search, and fills `input[name=accountTo]` when a row's account
+  anchor is clicked — the minimum behaviour needed to drive the REAL
+  selectFavoritePayee against this markup in src/probe-payee-picker-pagination.ts
+  (playwright, run via `bun run probe-payee-picker`, NOT collected by root
+  `bun test`). The pure decision half is pinned without a browser in
+  test/favorite-destination.test.ts.
+
+  SCENARIOS (query string; the probe drives all of them):
+    ?rows=base       14 accounts, target at #11 → page 2                (default)
+    ?rows=collision  the target on page 2 AND a DIFFERENT account whose
+                     last 4 digits collide, on page 1 — genuine ambiguity
+                     that must refuse. ADVERSARIAL: constructed, not captured.
+    ?rows=dupe       the target account saved twice (two Display Names, one
+                     account) on page 2, plus a `.mfp-hide` copy of the row
+                     block stacked FIRST in the DOM — the "every row renders
+                     twice" hazard from kbiz-bot/CLAUDE.md. One real account
+                     must stay ONE destination, and the row that gets clicked
+                     must be a rendered one. ADVERSARIAL: the second saved row
+                     is realistic (KBIZ lets you save an account twice under
+                     two Display Names); the hidden copy is modelled on fact 3
+                     of the duplicate-popup capture, not observed here.
+    ?rows=absent     the target is not in the book at all → must refuse.
+    &search=broken   the trigger anchor is removed and Enter does nothing, so
+                     the row set never changes — the SILENT search failure
+                     that made page 2 unreachable. Default is a working search.
+    &search=acctonly the search WORKS but matches account numbers only, so the
+                     Display Name filters the list down to NOTHING — including
+                     the target. The flow must clear its own filter and page the
+                     book instead of refusing "found 0". ADVERSARIAL: the real
+                     capture's search does not filter at all (that is
+                     &search=broken); this models the other way a best-effort
+                     search can hide the row.
+    &pager=stalled   the numeric page anchors are rendered but inert: page 2 is
+                     advertised and never arrives. A partial scan is not the
+                     list, so the flow must refuse.
+-->
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>fixture — KBIZ saved-payee picker</title>
+<style>
+  /* KBIZ's own viewport split, reduced to the two classes that matter. The
+     flow forces 1600px, so .hidden-ip-pro is the rendered half there. */
+  .hidden-ip-pro { display: block; }
+  .visible-ip-pro { display: none; }
+  @media (max-width: 1024px) {
+    .hidden-ip-pro { display: none; }
+    .visible-ip-pro { display: block; }
+  }
+  .mfp-hide { display: none !important; }
+  #popup-search[hidden] { display: none; }
+  .lists { border-bottom: 1px solid #eee; padding: 4px 0; }
+  /* Both icon anchors carry no text — KBIZ sizes them with its icon font. Give
+     them a box, or playwright reads a zero-area element as hidden and the flow
+     never gets as far as the picker. */
+  .input-search-acc, #search-acct-to-btn { display: inline-block; width: 24px; height: 24px; background: #eee; }
+</style>
+</head>
+<body class="business-type">
+
+<!-- ── the transfer form (only the bits the favorite path touches) ────────── -->
+<form class="form">
+  <div class="field">
+    <label>เลขที่บัญชี</label>
+    <input type="text" name="accountTo" value="">
+    <!-- the address-book icon that opens the picker -->
+    <a class="input-search-acc pointer" id="open-picker"><i class="ic ic-search"></i></a>
+  </div>
+</form>
+
+<!-- ── the picker, structurally as captured ──────────────────────────────── -->
+<div id="popup-search" class="white-popup-block" hidden>
+  <div class="content content-search">
+    <div class="search search-table-header">
+      <form class="form search-form" onsubmit="return false"><fieldset class="fieldset"><div class="fields"><div class="field">
+        <div class="input f-left">
+          <a id="search-acct-to-btn" class="input-search pointer"><i class="ic ic-search"></i></a>
+          <input type="text" name="acctSearch" value="" placeholder="ระบุชื่อย่อบัญชี / ชื่อบัญชี / เลขที่บัญชี">
+        </div>
+      </div></div></fieldset></form>
+    </div>
+    <div class="non-table non-table-4-col non-table-rounded">
+      <div class="top"><div class="lists">
+        <div class="list hidden-ip-pro"><p>ชื่อย่อบัญชี</p></div>
+        <div class="list hidden-ip-pro"><p>ชื่อบัญชี</p></div>
+        <div class="list hidden-ip-pro"><p>ธนาคาร</p></div>
+        <div class="list hidden-ip-pro"><p>เลขบัญชี</p></div>
+      </div></div>
+      <div class="bottom" id="rows"><!-- one div.lists per row; 10 per page --></div>
+    </div>
+    <div class="non-table-paginations sc-paginations sc-bg-white">
+      <p class="detail" id="detail"></p>
+      <pagination-template id="server1"><ul class="paginations" id="pager"></ul></pagination-template>
+    </div>
+    <a class="popup-modal-dismiss-02 mobile-compat pointer"><i class="ic ic-close"></i></a>
+  </div>
+</div>
+
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var scenario = q.get("rows") || "base";
+  var searchMode = q.get("search") || "on";
+  var pagerMode = q.get("pager") || "on";
+  var PAGE_SIZE = 10;
+
+  // ── the book. INVENTED placeholders, Kasikorn-dominant like the real one ──
+  var TARGET = { nick: "ทดสอบ โอนหนึ่งบาท", name: "MR. TEST PAYEE", bank: "ธนาคารกสิกรไทย", acct: "111-1-11111-7" };
+  var BOOK = [
+    { nick: "ร้านวัสดุ ก่อสร้าง",   name: "MR. SAMPLE ONE",       bank: "ธนาคารกสิกรไทย",       acct: "100-1-00001-1" },
+    { nick: "พี่วิว",                name: "MS. SAMPLE TWO",       bank: "ธนาคารไทยพาณิชย์",     acct: "100-2-00002-2" },
+    { nick: "แม่บ้าน เอ",            name: "MS. SAMPLE THREE",     bank: "ธนาคารกสิกรไทย",       acct: "100-3-00003-3" },
+    { nick: "ช่างไฟ บี",             name: "MR. SAMPLE FOUR",      bank: "ธนาคารกสิกรไทย",       acct: "100-4-00004-4" },
+    { nick: "Guide HF",              name: "MS. SAMPLE FIVE",      bank: "ธนาคารกรุงศรีอยุธยา",  acct: "100-5-00005-5" },
+    { nick: "ร้าน 47",               name: "MR. SAMPLE SIX",       bank: "ธนาคารกสิกรไทย",       acct: "100-6-00006-6" },
+    { nick: "ซัพพลายเออร์ ผ้า",      name: "MS. SAMPLE SEVEN",     bank: "ธนาคารกรุงเทพ",        acct: "100-7-00007-7" },
+    { nick: "ร้านซ่อมแอร์",          name: "MR. SAMPLE EIGHT",     bank: "ธนาคารกสิกรไทย",       acct: "100-8-00008-8" },
+    { nick: "คนสวน",                 name: "MR. SAMPLE NINE",      bank: "ธนาคารกสิกรไทย",       acct: "100-9-00009-9" },
+    { nick: "ครัวกลาง",              name: "MS. SAMPLE TEN",       bank: "ธนาคารกสิกรไทย",       acct: "101-0-00010-0" },
+    TARGET,                                                                          /* #11 → page 2 */
+    { nick: "แม่บ้าน ซี",            name: "MS. SAMPLE TWELVE",    bank: "ธนาคารกสิกรไทย",       acct: "101-2-00012-2" },
+    { nick: "ร้านเครื่องเขียน",      name: "MR. SAMPLE THIRTEEN",  bank: "ธนาคารทหารไทยธนชาต",   acct: "101-3-00013-3" },
+    { nick: "ค่าขนส่ง เจ",           name: "MS. SAMPLE FOURTEEN",  bank: "ธนาคารกสิกรไทย",       acct: "101-4-00014-4" }
+  ];
+
+  var rows = BOOK.slice();
+  if (scenario === "collision") {
+    // A DIFFERENT account whose last 4 are the target's (…1117),
+    // same bank, and a Display Name the target's nickname is a prefix of — so
+    // nickname + bank + last-4 matches BOTH. Sits on page 1; the target is on
+    // page 2. Scanning page 1 alone sees exactly one match and it is the WRONG
+    // ACCOUNT: this scenario is why "first match wins" can misroute money.
+    rows[4] = { nick: TARGET.nick + " (สำรอง)", name: "MR. TEST PAYEE TWO", bank: TARGET.bank, acct: "222-2-22111-7" };
+  } else if (scenario === "dupe") {
+    // The SAME account saved a second time under a longer Display Name, right
+    // after the target — both on page 2. One account, two rows.
+    rows.splice(11, 0, { nick: TARGET.nick + " สำรอง", name: TARGET.name, bank: TARGET.bank, acct: TARGET.acct });
+  } else if (scenario === "absent") {
+    rows.splice(10, 1); // the target is simply not saved
+  }
+
+  var filtered = rows.slice();
+  var current = 1;
+
+  function cell(cls, label, value) {
+    return '<div class="list ' + cls + '"><p>' + label + '</p><p>' + value + '</p></div>';
+  }
+
+  function rowHtml(r, i) {
+    return '<div class="lists" data-idx="' + i + '">' +
+      // the iPad variant: Display Name and Account Name in one vertical cell
+      '<div class="list vertical visible-ip-pro"><p>ชื่อย่อบัญชี/ชื่อบัญชี</p><p>' + r.nick + '</p><p>' + r.name + '</p></div>' +
+      cell("hidden-ip-pro", "ชื่อย่อบัญชี", r.nick) +
+      cell("hidden-ip-pro", "ชื่อบัญชี", r.name) +
+      cell("hidden-ip-pro", "ธนาคาร", r.bank) +
+      '<div class="list"><p>เลขบัญชี</p><p><a class="c-bold c-green pointer" data-acct="' + r.acct + '">' + r.acct + '</a></p></div>' +
+      '</div>';
+  }
+
+  function render() {
+    var total = filtered.length;
+    var pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (current > pages) current = pages;
+    var from = (current - 1) * PAGE_SIZE;
+    var slice = filtered.slice(from, from + PAGE_SIZE);
+
+    var html = slice.map(function (r, i) { return rowHtml(r, from + i); }).join("");
+    if (scenario === "dupe") {
+      // ADVERSARIAL: a hidden copy of the whole row block, stacked FIRST. Its
+      // rows are not rendered, so innerText falls back to textContent and they
+      // read as full matches — one account must still count once, and the row
+      // that gets CLICKED must be a rendered one.
+      html = '<div class="mfp-hide" id="hidden-template">' + html + "</div>" + html;
+    }
+    document.getElementById("rows").innerHTML = html;
+
+    document.getElementById("detail").textContent =
+      " บัญชีที่ " + (total === 0 ? 0 : from + 1) + "-" + Math.min(from + PAGE_SIZE, total) + " จาก " + total + " บัญชี";
+
+    var pager = '<li class="' + (current === 1 ? "disabled" : "") + '"><a class="prev pointer"></a></li>';
+    for (var p = 1; p <= pages; p++) {
+      pager += p === current
+        ? '<li class="active"><span>' + p + "</span></li>"
+        : '<li><a class="pointer" data-page="' + p + '">' + p + "</a></li>";
+    }
+    pager += '<li class="' + (current === pages ? "disabled" : "") + '"><a class="next pointer"></a></li>';
+    document.getElementById("pager").innerHTML = pager;
+  }
+
+  // What the search matches on. ?search=acctonly narrows it to the account
+  // number, i.e. a search that does NOT see the Display Name — so searching by
+  // nickname returns an empty list rather than the row.
+  function haystack(r) {
+    return searchMode === "acctonly" ? r.acct : r.nick + " " + r.name + " " + r.acct;
+  }
+
+  function applySearch() {
+    var term = (document.querySelector('input[name="acctSearch"]').value || "").trim();
+    filtered = term
+      ? rows.filter(function (r) { return haystack(r).indexOf(term) >= 0; })
+      : rows.slice();
+    current = 1;
+    render();
+  }
+
+  document.getElementById("open-picker").addEventListener("click", function () {
+    document.getElementById("popup-search").removeAttribute("hidden");
+    render();
+  });
+
+  if (searchMode === "broken") {
+    // THE REAL BUG'S PRECONDITION: no trigger to click, and Enter is inert, so
+    // every best-effort search step in the flow "succeeds" and nothing filters.
+    var btn = document.getElementById("search-acct-to-btn");
+    if (btn) btn.parentNode.removeChild(btn);
+  } else {
+    document.getElementById("search-acct-to-btn").addEventListener("click", applySearch);
+    document.querySelector('input[name="acctSearch"]').addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); applySearch(); }
+    });
+  }
+
+  document.addEventListener("click", function (e) {
+    var pageLink = e.target.closest ? e.target.closest("a.pointer[data-page]") : null;
+    // ?pager=stalled keeps the anchors but makes them inert: the paginator
+    // ADVERTISES page 2 and never renders it. A partial scan is not the list,
+    // so the flow must refuse rather than decide on what it managed to read.
+    if (pageLink && pagerMode === "stalled") return;
+    if (pageLink) { current = parseInt(pageLink.getAttribute("data-page"), 10); render(); return; }
+    var acct = e.target.closest ? e.target.closest("a.c-bold.c-green.pointer") : null;
+    if (acct) {
+      // KBIZ fills the To field from the row and closes the picker.
+      window.__selected = acct.getAttribute("data-acct");
+      window.__selectedFromHiddenTemplate = !!(acct.closest && acct.closest("#hidden-template"));
+      document.querySelector('input[name="accountTo"]').value = window.__selected;
+      document.getElementById("popup-search").setAttribute("hidden", "hidden");
+    }
+  });
+})();
+</script>
+</body></html>

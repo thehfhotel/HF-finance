@@ -203,8 +203,9 @@ export function serializeBundle(bundle: PrismaBundle): SharedBundle {
  * requiring a mapping here hid the picker from exactly the submitters it was
  * built for, and the only way to reach it was to invent a bogus mapping purely
  * to unlock a button. WHERE the money goes is decided at pay time instead: the
- * picker offers what actually exists, and POST /pay-via-kbiz still refuses a
- * body-less call from a submitter with no mapping (409).
+ * picker offers what actually exists, and POST /pay-via-kbiz refuses a call
+ * that states no destination at all (400 `DESTINATION_REQUIRED_400`, Thai) —
+ * since 2026-08-19 that is every body-less call, mapping or no mapping.
  */
 function computeKbizPayable(
   bundle: PrismaBundle,

@@ -108,6 +108,16 @@ const MAX_PAGE_SIZE = 200;
  * that can double-pay needed no override and audited itself as `forced:
  * false`.
  */
+/**
+ * "จ่ายผ่าน KBIZ" with no destination in the body.
+ *
+ * Exported so the test suite pins the exact sentence rather than a paraphrase:
+ * this string is the whole user-visible half of making the destination
+ * mandatory, and an approver who reads it has to know what to do next.
+ */
+export const DESTINATION_REQUIRED_400 =
+  'ต้องเลือกบัญชีปลายทางก่อนกดจ่าย — เลือกบัญชีที่จะโอนเงินเข้าทุกครั้งที่สั่งจ่าย';
+
 const RETRY_AMBIGUOUS_409 =
   'ผลการโอนครั้งก่อนยังไม่ทราบผล — เปิดแอป K BIZ ดู "ประวัติทำรายการ" ก่อน แล้วยืนยันอีกครั้ง (ถ้าโอนไปแล้ว การกดจ่ายใหม่จะกลายเป็นโอนซ้ำ)';
 
@@ -682,13 +692,17 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
    *     bundle — a file written before the guard would be executed even if the
    *     guard then lost.
    *
-   * Where the money goes is the approver's choice at pay time (`destination`),
-   * and no body at all still means what it always did: the admin-mapped payee
-   * handle, which the bot resolves against a saved, vetted KBIZ account. This
-   * app persists no bank data (ADR 0001, decision 4) — a `custom` destination's
-   * account number is typed once, travels in the queue file the bot consumes,
-   * is redacted out of that file when it is archived, and is masked to its last
-   * four everywhere else.
+   * Where the money goes is the approver's choice at pay time, and it is
+   * MANDATORY (2026-08-19): a request with no `destination` is refused with a
+   * 400 rather than falling back to the submitter's admin-mapped payee handle.
+   * The mapping survives as a DEFAULT — `GET /api/admin/kbiz-settings` still
+   * publishes it and the picker still pre-selects it — but it is never applied
+   * on the approver's behalf, because "pay this person's usual account" and
+   * "pay THIS account, now" are different assertions and only the second one
+   * moves money. This app persists no bank data (ADR 0001, decision 4) — a
+   * `custom` destination's account number is typed once, travels in the queue
+   * file the bot consumes, is redacted out of that file when it is archived,
+   * and is masked to its last four everywhere else.
    */
   .post(
     '/:id/pay-via-kbiz',
@@ -715,31 +729,65 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
       // Resolved here, with every other refusal, so a rejected destination can
       // never leave a bundle claimed into PAYING.
       //
-      // Nothing the client sends is taken at face value: a handle has to be the
-      // submitter's own mapping or one the bot has actually published, a
-      // favorite is copied wholesale off the synced row (the request only picks
-      // WHICH row), and a custom account — the single shape that carries a real
-      // account number — is checked against KBIZ's own bank list and digit
-      // rules before it can be typed into a bank form.
+      // Nothing the client sends is taken at face value: a handle has to be one
+      // the bot has actually published (falling back to the submitter's mapping
+      // only when the bot has published nothing at all), a favorite is copied
+      // wholesale off the synced row (the request only picks WHICH row), and a
+      // custom account — the single shape that carries a real account number —
+      // is checked against KBIZ's own bank list and digit rules before it can
+      // be typed into a bank form.
+      //
+      // And there must BE one: no destination is a refusal, not a default.
       const payees = await getKbizPayees();
       const mappedHandle = payees[bundle.userId] ?? null;
       const requested = body?.destination ?? null;
       let destination: KbizDestination;
 
       if (requested === null) {
-        // No body: the pre-picker behaviour, unchanged.
-        if (!mappedHandle) {
-          return status(409, {
-            message: `ยังไม่ได้ตั้งค่าบัญชีปลายทางของ ${bundle.user.name} — ตั้งค่าที่หน้าผู้ดูแลระบบก่อน`,
-          });
-        }
-        destination = { kind: 'handle', handle: mappedHandle };
-      } else if (requested.kind === 'handle') {
+        // No destination, no payment. The implicit "pay the mapped handle"
+        // path is gone on purpose: it let a click pay an account the approver
+        // never looked at, and the account a request should pay is a per-
+        // approval decision, not a stored preference. 400 rather than 409 or
+        // 503 — the server is configured and the bundle is payable; it is the
+        // REQUEST that is incomplete.
+        //
+        // Refused here in the handler, in Thai, rather than by making the body
+        // schema require `destination`: a schema miss answers 422 with an
+        // untranslated validation error, which is exactly what the body
+        // docblock below keeps this endpoint away from.
+        return status(400, {
+          message: DESTINATION_REQUIRED_400,
+        });
+      }
+
+      if (requested.kind === 'handle') {
         const handle = requested.handle?.trim() ?? '';
+
+        // The bot's published manifest is the authority whenever we have one.
+        // A handle absent from it is not in the payee book, so a TYPO'd admin
+        // mapping is refused HERE — while the bundle is still APPROVED —
+        // instead of being discovered after the claim, with the bundle already
+        // in PAYING and needing a human to unstick it. The mapping used to be
+        // accepted on its own — an equality check ORed in FRONT of the manifest
+        // lookup — which made the manifest unreachable for exactly the handle
+        // most likely to be wrong.
+        //
+        // The mapping stays a source of truth only when the manifest is
+        // UNAVAILABLE, and that direction is deliberate. `readPayeeHandlesManifest`
+        // returns null for every problem — never published, queue not mounted
+        // on this host, file caught mid-write, garbled JSON — so treating null
+        // as "refuse" would turn one unreadable cache file into a total
+        // payment outage. The mapping is not unchecked either: the admin PUT
+        // validates it against this same manifest when saving. And the thing
+        // this guard protects against cannot slip past unnoticed anyway — a
+        // handle the payee book does not have is refused by the BOT, before any
+        // money moves, and nothing pays without the phone tap regardless. So
+        // the failure mode of failing open is a bundle that reports an error;
+        // the failure mode of failing closed is nobody getting reimbursed.
+        const manifest = await readPayeeHandlesManifest();
         const known =
           handle.length > 0 &&
-          (handle === mappedHandle ||
-            ((await readPayeeHandlesManifest())?.handles.includes(handle) ?? false));
+          (manifest ? manifest.handles.includes(handle) : handle === mappedHandle);
         if (!known) {
           return status(409, {
             message: 'ไม่พบบัญชีปลายทางนี้ในสมุดบัญชีของบอท',
@@ -937,19 +985,33 @@ export const bundleRoutes = new Elysia({ prefix: '/bundles' })
        * the manual narrowing in the handler keeps every refusal a Thai sentence,
        * and the handler re-derives every field from the payee mapping, the
        * synced favorites or KBIZ's own bank list regardless.
+       *
+       * `destination` is MANDATORY in behaviour and still optional in this
+       * schema, for that same reason: the handler answers a missing one with a
+       * Thai 400 (`DESTINATION_REQUIRED_400`), where `t.Object` would answer an
+       * English 422. Optional here means "validated in the handler", never
+       * "defaultable".
        */
       body: t.Optional(
         t.Object({
+          // `t.Null()` is in the union so that an explicit `destination: null`
+          // reaches the handler and earns the Thai 400 too, instead of the
+          // English 422 a bare `t.Optional` would answer with. Every way of
+          // saying "no destination" — no body, `{}`, `null` — has to refuse in
+          // the same sentence.
           destination: t.Optional(
-            t.Object({
-              kind: t.Union([t.Literal('handle'), t.Literal('favorite'), t.Literal('custom')]),
-              handle: t.Optional(t.String()),
-              nickname: t.Optional(t.String()),
-              bank: t.Optional(t.String()),
-              accountLast4: t.Optional(t.String()),
-              accountNo: t.Optional(t.String()),
-              accountName: t.Optional(t.String()),
-            }),
+            t.Union([
+              t.Null(),
+              t.Object({
+                kind: t.Union([t.Literal('handle'), t.Literal('favorite'), t.Literal('custom')]),
+                handle: t.Optional(t.String()),
+                nickname: t.Optional(t.String()),
+                bank: t.Optional(t.String()),
+                accountLast4: t.Optional(t.String()),
+                accountNo: t.Optional(t.String()),
+                accountName: t.Optional(t.String()),
+              }),
+            ]),
           ),
         }),
       ),

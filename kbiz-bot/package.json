@@ -13,6 +13,7 @@
     "process-queue": "node --import tsx --env-file=.env src/process-queue.ts",
     "install-browser": "bunx playwright install chromium",
     "probe-duplicate-popup": "bun run src/probe-duplicate-popup-dom.ts",
+    "probe-payee-picker": "KBIZ_SLIPS_DIR=${TMPDIR:-/tmp}/kbiz-probe-slips bun run src/probe-payee-picker-pagination.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test"
   },

@@ -554,22 +554,20 @@ export const api = {
         body: form,
       }),
     /** Admin-only. Atomically flips `approved` → `paying` and queues the KBIZ
-     *  intent server-side. `destination` is the approver's pay-time choice
-     *  from the destination picker; omitted keeps the pre-picker behaviour
-     *  (the admin-mapped payee handle). 409 = another action already moved
-     *  the bundle, or the destination doesn't resolve to a real account;
-     *  503 = automation not configured on this server. */
-    payViaKbiz: (id: string, destination?: KbizDestination): Promise<BundleWithDetails> =>
-      request<BundleWithDetails>(
-        `/api/bundles/${encodeURIComponent(id)}/pay-via-kbiz`,
-        destination
-          ? {
-              method: 'POST',
-              body: JSON.stringify({ destination }),
-              headers: { 'Content-Type': 'application/json' },
-            }
-          : { method: 'POST' },
-      ),
+     *  intent server-side. `destination` is the approver's pay-time choice from
+     *  the destination picker and is REQUIRED (2026-08-19): the server answers
+     *  a Thai 400 to a call that states none, instead of falling back to the
+     *  submitter's admin-mapped payee handle. The mapping is still the DEFAULT
+     *  the picker pre-selects — it is just never applied on the approver's
+     *  behalf, so this signature has no way to omit the choice. 409 = another
+     *  action already moved the bundle, or the destination doesn't resolve to a
+     *  real account; 503 = automation not configured on this server. */
+    payViaKbiz: (id: string, destination: KbizDestination): Promise<BundleWithDetails> =>
+      request<BundleWithDetails>(`/api/bundles/${encodeURIComponent(id)}/pay-via-kbiz`, {
+        method: 'POST',
+        body: JSON.stringify({ destination }),
+        headers: { 'Content-Type': 'application/json' },
+      }),
     /** Releases a `paying` bundle back to `approved` so Pay via KBIZ can be
      *  fired again with a fresh intent. Free when the bundle came back
      *  needs-verification, or when the queue proves nothing was ever armed;

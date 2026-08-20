@@ -19,6 +19,11 @@ import { Card, GhostButton, PrimaryButton } from './primitives';
 
 type Mode = 'handle' | 'favorite' | 'custom';
 
+/** What the approver actually PICKED — as opposed to which tab happens to be
+ *  open. `{ kind: 'custom' }` is set by typing in the บัญชีอื่น form: nothing
+ *  there is pre-filled, so the typing itself is the affirmative act. */
+type Selection = { kind: 'handle' } | { kind: 'favorite'; index: number } | { kind: 'custom' };
+
 const MODE_LABEL: Record<Mode, string> = {
   handle: 'บัญชีที่ผูกไว้',
   favorite: 'เลือกจากบัญชีที่บันทึกไว้',
@@ -62,7 +67,14 @@ export function KbizDestinationPicker({ theme, bundle, onClose, onConfirm, onGot
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [mode, setMode] = useState<Mode | null>(null);
-  const [favoriteKey, setFavoriteKey] = useState<string | null>(null);
+  /** The affirmative pick, made in THIS session. Deliberately its own state
+   *  and never derived from `mode`: `mode` is initialized on load so the
+   *  requestor's mapped account comes up pre-highlighted as the recommended
+   *  default, and a pre-highlight is NOT a decision (the owner's rule: the
+   *  approver selects the account every time they approve). Both call sites
+   *  render this component conditionally, so closing it unmounts it and
+   *  re-opening starts back at `null` — the click is required again. */
+  const [selection, setSelection] = useState<Selection | null>(null);
   const [customBank, setCustomBank] = useState('');
   const [customAccountNo, setCustomAccountNo] = useState('');
   const [customAccountName, setCustomAccountName] = useState('');
@@ -117,18 +129,40 @@ export function KbizDestinationPicker({ theme, bundle, onClose, onConfirm, onGot
   const digitCount = countKbizAccountDigits(customAccountNo);
   const customValid = customBank.trim() !== '' && isValidKbizAccountNo(customAccountNo);
 
+  const handleSelected = selection?.kind === 'handle';
+
+  // A pick counts only while its own tab is the one on screen — otherwise a
+  // favorite chosen a moment earlier could be paid while the approver stares
+  // at the empty บัญชีอื่น form. There is deliberately no `mode`-only branch:
+  // being ON the บัญชีที่ผูกไว้ tab is never enough, the row must be clicked.
   const valid =
-    mode === 'handle' ? hasHandle : mode === 'favorite' ? favoriteKey !== null : mode === 'custom' ? customValid : false;
+    selection === null
+      ? false
+      : selection.kind === 'handle'
+        ? mode === 'handle' && hasHandle
+        : selection.kind === 'favorite'
+          ? mode === 'favorite' && favoriteList[selection.index] !== undefined
+          : mode === 'custom' && customValid;
+
+  // Why ยืนยัน is still dark. Stays silent on the empty-favorites state, which
+  // already explains itself with its own CTA.
+  const disabledHint: string | null = valid
+    ? null
+    : mode === 'custom'
+      ? 'กรอกธนาคารและเลขที่บัญชีให้ครบก่อน จึงจะยืนยันได้'
+      : mode === 'favorite' && favoriteList.length === 0
+        ? null
+        : 'แตะเลือกบัญชีปลายทางก่อน จึงจะยืนยันได้';
 
   const handleConfirm = (): void => {
-    if (!valid) return;
-    if (mode === 'handle') {
+    if (!valid || selection === null) return;
+    if (selection.kind === 'handle') {
       onConfirm({
         destination: { kind: 'handle', handle: mappedHandle },
         summary: payeeOptionLabel(mappedHandle, availablePayees),
       });
-    } else if (mode === 'favorite') {
-      const fav = favoriteKey !== null ? favoriteList[Number(favoriteKey)] : undefined;
+    } else if (selection.kind === 'favorite') {
+      const fav = favoriteList[selection.index];
       if (!fav) return;
       onConfirm({
         destination: {
@@ -140,7 +174,7 @@ export function KbizDestinationPicker({ theme, bundle, onClose, onConfirm, onGot
         },
         summary: formatKbizFavoriteLabel(fav),
       });
-    } else if (mode === 'custom') {
+    } else {
       const accountName = customAccountName.trim();
       onConfirm({
         destination: {
@@ -226,18 +260,65 @@ export function KbizDestinationPicker({ theme, bundle, onClose, onConfirm, onGot
             </div>
           ) : (
             <>
-              <ModeTabs theme={theme} modes={availableModes} value={mode} onChange={setMode} />
+              <ModeTabs
+                theme={theme}
+                modes={availableModes}
+                value={mode}
+                onChange={(next) => {
+                  setMode(next);
+                  // Coming BACK to a บัญชีอื่น form the approver already filled
+                  // in restores their own pick — typing IS the affirmative act
+                  // for this tab, and leaving it to look at the saved list does
+                  // not undo it. Without this, ยืนยัน stayed dark next to a
+                  // complete form whose hint said to finish filling it in, and
+                  // the only way out was to retype a field. Every other tab
+                  // still needs its row clicked: nothing is pre-filled there,
+                  // so there is nothing the approver has already asserted.
+                  if (next === 'custom' && customValid) setSelection({ kind: 'custom' });
+                }}
+              />
 
               <div style={{ marginTop: 16, marginBottom: 8 }}>
+                {/* The requestor's mapped account: first, pre-highlighted as
+                    the default (its tab opens selected, and it carries the
+                    ค่าเริ่มต้น marker) — but a real option with the same
+                    RadioDot + click affordance as everything else, because the
+                    approver has to choose it, not merely arrive at it. */}
                 {mode === 'handle' && (
-                  <Card theme={theme} padding={16}>
-                    <div style={{ fontFamily: FONT_UI, fontSize: 11, color: theme.inkSoft, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 6 }}>
-                      บัญชีที่ผูกไว้กับ {bundle.submitter.name}
+                  <Card
+                    theme={theme}
+                    padding={16}
+                    onClick={() => setSelection({ kind: 'handle' })}
+                    style={handleSelected ? { background: theme.surface2 } : undefined}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                      <div style={{ display: 'flex', paddingTop: 2 }}>
+                        <RadioDot theme={theme} selected={handleSelected} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+                          <span style={{ fontFamily: FONT_UI, fontSize: 11, color: theme.inkSoft, letterSpacing: 1.2, textTransform: 'uppercase' }}>
+                            บัญชีที่ผูกไว้กับ {bundle.submitter.name}
+                          </span>
+                          <span
+                            style={{
+                              fontFamily: FONT_UI,
+                              fontSize: 10,
+                              color: theme.inkSoft,
+                              padding: '2px 8px',
+                              borderRadius: 100,
+                              border: `0.5px solid ${theme.hairlineStrong}`,
+                            }}
+                          >
+                            ค่าเริ่มต้น
+                          </span>
+                        </div>
+                        <div style={{ fontFamily: FONT_UI, fontSize: 15, fontWeight: 600, color: theme.ink, lineHeight: 1.4 }}>
+                          {payeeOptionLabel(mappedHandle, availablePayees)}
+                        </div>
+                        <div style={{ fontFamily: FONT_MONO, fontSize: 11, color: theme.inkSofter, marginTop: 6 }}>#{mappedHandle}</div>
+                      </div>
                     </div>
-                    <div style={{ fontFamily: FONT_UI, fontSize: 15, fontWeight: 600, color: theme.ink, lineHeight: 1.4 }}>
-                      {payeeOptionLabel(mappedHandle, availablePayees)}
-                    </div>
-                    <div style={{ fontFamily: FONT_MONO, fontSize: 11, color: theme.inkSofter, marginTop: 6 }}>#{mappedHandle}</div>
                   </Card>
                 )}
 
@@ -253,11 +334,11 @@ export function KbizDestinationPicker({ theme, bundle, onClose, onConfirm, onGot
                     <Card theme={theme} padding={0}>
                       {favoriteList.map((fav, i) => {
                         const key = String(i);
-                        const selected = favoriteKey === key;
+                        const selected = selection?.kind === 'favorite' && selection.index === i;
                         return (
                           <div
                             key={key}
-                            onClick={() => setFavoriteKey(key)}
+                            onClick={() => setSelection({ kind: 'favorite', index: i })}
                             style={{
                               padding: '12px 16px',
                               display: 'flex',
@@ -284,7 +365,10 @@ export function KbizDestinationPicker({ theme, bundle, onClose, onConfirm, onGot
                     <FieldLabel theme={theme}>ธนาคาร</FieldLabel>
                     <select
                       value={customBank}
-                      onChange={(e) => setCustomBank(e.target.value)}
+                      onChange={(e) => {
+                        setCustomBank(e.target.value);
+                        setSelection({ kind: 'custom' });
+                      }}
                       style={selectStyle(theme)}
                     >
                       <option value="" disabled>
@@ -300,7 +384,10 @@ export function KbizDestinationPicker({ theme, bundle, onClose, onConfirm, onGot
                     <FieldLabel theme={theme} style={{ marginTop: 16 }}>เลขที่บัญชี</FieldLabel>
                     <input
                       value={customAccountNo}
-                      onChange={(e) => setCustomAccountNo(sanitizeKbizAccountNoInput(e.target.value))}
+                      onChange={(e) => {
+                        setCustomAccountNo(sanitizeKbizAccountNoInput(e.target.value));
+                        setSelection({ kind: 'custom' });
+                      }}
                       placeholder="123-4-56789-0"
                       inputMode="numeric"
                       style={inputStyle(theme)}
@@ -322,7 +409,10 @@ export function KbizDestinationPicker({ theme, bundle, onClose, onConfirm, onGot
                     <FieldLabel theme={theme} style={{ marginTop: 16 }}>ชื่อบัญชี (ถ้าทราบ)</FieldLabel>
                     <input
                       value={customAccountName}
-                      onChange={(e) => setCustomAccountName(e.target.value)}
+                      onChange={(e) => {
+                        setCustomAccountName(e.target.value);
+                        setSelection({ kind: 'custom' });
+                      }}
                       placeholder="ชื่อ-นามสกุลเจ้าของบัญชี"
                       maxLength={80}
                       style={inputStyle(theme)}
@@ -334,14 +424,29 @@ export function KbizDestinationPicker({ theme, bundle, onClose, onConfirm, onGot
           )}
         </div>
 
-        <div style={{ padding: '16px 28px 28px', flexShrink: 0, display: 'flex', gap: 10 }}>
-          <GhostButton theme={theme} onClick={onClose}>
-            ยกเลิก
-          </GhostButton>
-          <div style={{ flex: 1 }}>
-            <PrimaryButton theme={theme} disabled={loading || !!loadError || !valid} onClick={handleConfirm}>
-              ยืนยัน
-            </PrimaryButton>
+        <div style={{ padding: '16px 28px 28px', flexShrink: 0 }}>
+          {!loading && loadError === null && disabledHint !== null && (
+            <div
+              style={{
+                fontFamily: FONT_UI,
+                fontSize: 11,
+                color: theme.inkSoft,
+                textAlign: 'center',
+                marginBottom: 10,
+              }}
+            >
+              {disabledHint}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 10 }}>
+            <GhostButton theme={theme} onClick={onClose}>
+              ยกเลิก
+            </GhostButton>
+            <div style={{ flex: 1 }}>
+              <PrimaryButton theme={theme} disabled={loading || !!loadError || !valid} onClick={handleConfirm}>
+                ยืนยัน
+              </PrimaryButton>
+            </div>
           </div>
         </div>
       </div>
