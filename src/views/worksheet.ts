@@ -1749,10 +1749,11 @@ const SLIP_DEDUCTIONS = [
 ];
 
 // Lifetime cumulative provident-fund balance per employee, keyed by
-// nickname. Several spellings of one nickname legitimately map to the same
-// value, because the source spreadsheet is hand-typed. The real values are
-// NOT committed — they load from gitignored data/ via src/roster-data.ts.
-// Refresh by re-importing the spreadsheet into that file and updating
+// nickname. Several spellings of one nickname legitimately map to the
+// same value, because the source spreadsheet is hand-typed and spells
+// some nicknames inconsistently. The real values are NOT committed —
+// they load from gitignored data/ via src/roster-data.ts. Refresh by
+// re-importing the spreadsheet into that file and updating
 // SAVINGS_AS_OF below.
 //
 // Two employees who resigned during the covered cycles were paid their

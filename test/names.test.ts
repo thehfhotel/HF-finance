@@ -49,7 +49,9 @@ describe("namesAgree", () => {
   });
 
   it("rejects a genuinely different given name", () => {
-    // The live roster's sharpest case: มานีวรรณ vs มานะวรรณ, same surname.
+    // The sharpest real case this guards: two given names differing by one
+    // syllable with an identical surname. Fixture names only — the live
+    // roster is not committed (see src/roster-data.ts).
     expect(namesAgree("น.ส. มานีวรรณ สังข์ทอง", "นางสาวมานะวรรณ สังข์ทอง")).toBe(false);
   });
 
